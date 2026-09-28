@@ -1,0 +1,20 @@
+# Gradle / Loom
+.gradle/
+build/
+out/
+run/
+logs/
+*.log
+
+# IDE
+.idea/
+*.iml
+.vscode/
+.classpath
+.project
+.settings/
+bin/
+
+# OS
+.DS_Store
+Thumbs.db

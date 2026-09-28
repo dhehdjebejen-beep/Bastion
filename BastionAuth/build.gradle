@@ -1,0 +1,103 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    // Argon2id (BouncyCastle lightweight API) — bundled into the mod jar
+    implementation "org.bouncycastle:bcprov-jdk18on:${project.bcprov_version}"
+    include "org.bouncycastle:bcprov-jdk18on:${project.bcprov_version}"
+
+    // SQLite storage — bundled into the mod jar
+    implementation "org.xerial:sqlite-jdbc:${project.sqlite_version}"
+    include "org.xerial:sqlite-jdbc:${project.sqlite_version}"
+    // QR codes on vanilla maps for the 2FA setup (Apache 2.0).
+    implementation "com.google.zxing:core:${project.zxing_version}"
+    include "com.google.zxing:core:${project.zxing_version}"
+
+    testImplementation platform("org.junit:junit-bom:5.10.2")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testRuntimeOnly "org.junit.platform:junit-platform-console"
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": inputs.properties.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = 21
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+test {
+    useJUnitPlatform()
+    // Gradle's forked test worker cannot handle non-ASCII project paths on
+    // Windows (mangled classpath handoff). Skip it there; runtests.bat runs
+    // the same tests through the JUnit ConsoleLauncher instead.
+    onlyIf {
+        boolean asciiPath = project.projectDir.absolutePath.chars().allMatch { it < 128 }
+        if (!asciiPath) {
+            logger.lifecycle("Skipping Gradle test worker on non-ASCII path; use runtests.bat instead.")
+        }
+        return asciiPath
+    }
+    // fabric-loom-remap rewires the test classpath in afterEvaluate, dropping
+    // the plain class/resource dirs. Rebuild the classpath at execution time.
+    doFirst {
+        classpath = files(
+                sourceSets.test.output.classesDirs,
+                sourceSets.test.output.resourcesDir,
+                sourceSets.main.output.classesDirs,
+                sourceSets.main.output.resourcesDir,
+                configurations.testRuntimeClasspath)
+        logger.lifecycle("test classpath head: " + classpath.files.take(6))
+    }
+    testLogging {
+        events "passed", "failed", "skipped"
+        exceptionFormat "full"
+    }
+}
+
+jar {
+    from("LICENSE")
+}
+
+// Gradle's forked test worker mangles non-ASCII project paths on Windows, so
+// tests can also be run directly via the JUnit ConsoleLauncher: this task
+// dumps the ready-made classpath for that (see runtests.bat).
+tasks.register("dumpTestClasspath") {
+    dependsOn tasks.named("testClasses")
+    doLast {
+        def cp = files(
+                sourceSets.test.output.classesDirs,
+                sourceSets.test.output.resourcesDir,
+                sourceSets.main.output.classesDirs,
+                sourceSets.main.output.resourcesDir,
+                configurations.testRuntimeClasspath)
+        file("build/test-classpath.txt").setText(cp.asPath, "UTF-8")
+    }
+}

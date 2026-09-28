@@ -1,0 +1,15 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.bastionac.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ServerCommonNetworkHandlerMixin",
+    "ServerPlayNetworkHandlerMixin",
+    "BlockItemPlacementOutcomeMixin",
+    "GameModeChangeMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

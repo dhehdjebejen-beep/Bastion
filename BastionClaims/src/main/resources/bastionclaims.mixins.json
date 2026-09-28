@@ -1,0 +1,19 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.bastionclaims.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "BucketItemMixin",
+    "EntityDamageMixin",
+    "ExplosionImplMixin",
+    "FireBlockMixin",
+    "FlowableFluidMixin",
+    "HopperBlockEntityMixin",
+    "PistonHandlerMixin",
+    "SaplingGrowthMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "bastionac",
+  "version": "${version}",
+  "name": "BastionAC",
+  "description": "Server-side anti-cheat engine: buffered violation levels with decay, lag-compensated combat checks, real collision-based movement analysis, teleport/knockback awareness, staff alerts. Built for near-zero false positives.",
+  "authors": [
+    "dhehdjebejen-beep"
+  ],
+  "contact": {
+    "sources": "https://github.com/dhehdjebejen-beep/Bastion",
+    "issues": "https://github.com/dhehdjebejen-beep/Bastion/issues",
+    "homepage": "https://github.com/dhehdjebejen-beep/Bastion"
+  },
+  "license": "PolyForm-Strict-1.0.0",
+  "environment": "server",
+  "entrypoints": {
+    "server": [
+      "dev.bastionac.BastionAC"
+    ]
+  },
+  "mixins": [
+    "bastionac.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "minecraft": "~1.21.11",
+    "java": ">=21",
+    "fabric-api": "*"
+  },
+  "suggests": {
+    "bastionauth": "*"
+  }
+}

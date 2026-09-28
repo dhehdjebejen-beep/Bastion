@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "bastionclaims",
+  "version": "${version}",
+  "name": "BastionClaims",
+  "description": "Self-hosted land-claim protection for Fabric servers: wooden-axe cuboid selection, per-tier claim limits scaled by play-time, block/interaction/explosion protection, trusted members and per-claim flags. Editable JSON config with hot-reload.",
+  "authors": [
+    "dhehdjebejen-beep"
+  ],
+  "contact": {
+    "sources": "https://github.com/dhehdjebejen-beep/Bastion",
+    "issues": "https://github.com/dhehdjebejen-beep/Bastion/issues",
+    "homepage": "https://github.com/dhehdjebejen-beep/Bastion"
+  },
+  "license": "PolyForm-Strict-1.0.0",
+  "environment": "*",
+  "entrypoints": {
+    "server": [
+      "dev.bastionclaims.BastionClaims"
+    ]
+  },
+  "mixins": [
+    "bastionclaims.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.16.0",
+    "fabric-api": "*",
+    "minecraft": "~1.21.11",
+    "java": ">=21"
+  }
+}

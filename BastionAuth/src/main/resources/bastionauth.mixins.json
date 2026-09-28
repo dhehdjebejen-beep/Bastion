@@ -1,0 +1,23 @@
+{
+  "required": true,
+  "minVersion": "0.8",
+  "package": "dev.bastionauth.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "BrandCaptureMixin",
+    "ClientConnectionFirewallMixin",
+    "CommandManagerMixin",
+    "HandshakeCaptureMixin",
+    "ItemEntityMixin",
+    "LoginHelloCaptureMixin",
+    "OutboundChatGateMixin",
+    "PermissionFreezeMixin",
+    "PlayerChatGateMixin",
+    "PlayerManagerMixin",
+    "ServerCommonNetworkHandlerAccessor",
+    "ServerPlayNetworkHandlerMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

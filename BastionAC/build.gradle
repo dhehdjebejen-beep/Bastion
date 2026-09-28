@@ -1,0 +1,77 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version "${loom_version}"
+}
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+    archivesName = project.archives_base_name
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+
+    testImplementation platform("org.junit:junit-bom:5.10.2")
+    testImplementation "org.junit.jupiter:junit-jupiter"
+    testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+    testRuntimeOnly "org.junit.platform:junit-platform-console"
+}
+
+test {
+    useJUnitPlatform()
+    // Gradle's forked test worker cannot handle non-ASCII project paths on
+    // Windows; runtests.bat runs the same tests via the JUnit ConsoleLauncher.
+    onlyIf {
+        boolean asciiPath = project.projectDir.absolutePath.chars().allMatch { it < 128 }
+        if (!asciiPath) {
+            logger.lifecycle("Skipping Gradle test worker on non-ASCII path; use runtests.bat instead.")
+        }
+        return asciiPath
+    }
+    doFirst {
+        classpath = files(
+                sourceSets.test.output.classesDirs,
+                sourceSets.test.output.resourcesDir,
+                sourceSets.main.output.classesDirs,
+                sourceSets.main.output.resourcesDir,
+                configurations.testRuntimeClasspath)
+    }
+}
+
+tasks.register("dumpTestClasspath") {
+    dependsOn tasks.named("testClasses")
+    doLast {
+        def cp = files(
+                sourceSets.test.output.classesDirs,
+                sourceSets.test.output.resourcesDir,
+                sourceSets.main.output.classesDirs,
+                sourceSets.main.output.resourcesDir,
+                configurations.testRuntimeClasspath)
+        file("build/test-classpath.txt").setText(cp.asPath, "UTF-8")
+    }
+}
+
+processResources {
+    inputs.property "version", project.version
+    filesMatching("fabric.mod.json") {
+        expand "version": inputs.properties.version
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.encoding = "UTF-8"
+    it.options.release = 21
+}
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
