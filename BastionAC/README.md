@@ -50,18 +50,27 @@ client's own source and defaults.
    damage although vanilla had to charge it") catches all of them. Where it helps,
    both run side by side.
 
-## Checks (38)
+## Checks (40)
 
 | Area | Checks |
 |---|---|
-| Movement | Speed · Fly · HighJump · BigMove · Timer · Blink · NoSlow · NoWeb · GroundSpoof · AntiHunger · NoFall (by packet *and* by outcome) · Spider · FastLadder · Jesus · Step · PacketOrder |
-| Combat | Reach (lag-compensated against the victim's hitbox history) · Angle · Aim (exact hitbox-centre lock, flick-and-return) · Walls · MultiTarget · UseAttack · NoSwing · Criticals · Velocity · CPS · AutoTotem |
+| Movement | Speed · Fly · HighJump · BigMove · Timer (balance on arrival time) · Blink · NoSlow · NoWeb · GroundSpoof · AntiHunger · NoFall (by packet *and* by outcome) · FastFall (vanilla gravity curve) · Spider · FastLadder · Jesus · Step · PacketOrder |
+| Combat | Reach (lag-compensated against the victim's hitbox history) · Angle · Aim (exact hitbox-centre lock, flick-and-return) · Walls · MultiTarget · UseAttack · NoSwing · Criticals · Velocity · CPS · AutoTotem · EntityPredict (an attack on an entity the client was never sent — CrystalAura id prediction) |
 | World | FastBreak · FastPlace · Nuker · PacketMine · Scaffold · AirPlace · AutoPlace (computed face-centre clicks) · XRay (statistical, observe-only) |
 | Rhythm | AutoClick · AutoAction — machine-even timing at human-plausible rates |
 | Client & transport | Vehicle (BoatFly) · InvMove · BrandSpoof · GCD (aim grid) · BadRotation |
 | Protocol guard | Packet flood · book/NBT bombs · creative-slot smuggling |
+| Analysis (Argus) | Not checks but a session-level investigation: vanilla physics replay, tick rate and held-back movement, faked ping, aim and clicking, X-ray reveal test against the world — see «New in 3.0» |
 
-38 is the number of check types. HighJump, NoWeb, AntiHunger and FastLadder are signatures inside Fly, NoSlow, GroundSpoof and Spider. The protocol guard is a separate filter.
+40 is the number of check types. HighJump, NoWeb, AntiHunger and FastLadder are signatures inside Fly, NoSlow, GroundSpoof and Spider. The protocol guard is a separate filter, and Argus is a separate analysis layer.
+
+## Client versions
+
+The mod runs on a **Minecraft 1.21.11** server. Players on other versions
+(**1.21.1 – 26.3**) are admitted by ViaVersion and ViaBackwards on the server, and
+the anti-cheat knows each player's real protocol: a client older than 1.21.2 has no
+tick ends and no `PlayerInput` of its own (Via makes them up), so the checks and
+features that depend on them use the move-packet clock or stand down for it.
 
 Some of these rest on facts rather than statistics:
 - **PacketOrder** — since 1.21.2 the client closes every tick with

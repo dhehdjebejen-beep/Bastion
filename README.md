@@ -4,6 +4,7 @@
 
 <p align="center">
   <img alt="Minecraft 1.21.11" src="https://img.shields.io/badge/Minecraft-1.21.11-62B47A">
+  <img alt="Clients 1.21.1–26.3 via ViaVersion" src="https://img.shields.io/badge/clients-1.21.1%E2%80%9326.3%20via%20ViaVersion-62B47A">
   <img alt="Fabric" src="https://img.shields.io/badge/loader-Fabric-DBD0B4">
   <img alt="Java 21" src="https://img.shields.io/badge/Java-21-E76F00">
   <img alt="Server-side only" src="https://img.shields.io/badge/client-no%20mod%20needed-3B82F6">
@@ -20,10 +21,14 @@ server — players join with an unmodified client and install nothing.
 
 ## Status
 
-- **Built for Minecraft 1.21.11 on Fabric only.** No other game version or mod
-  loader has been built or tested.
+- **Built for a Minecraft 1.21.11 server on Fabric only.** No other server version
+  or mod loader has been built or tested.
+- **Clients 1.21.1 – 26.3 can play** when ViaVersion and ViaBackwards run on the
+  server: Via translates their packets, and the mods work with them unchanged.
+  BastionAC knows each player's real client version and adapts the checks that
+  depend on it (clients older than 1.21.2 send no tick ends and no keys of their own).
 - **Running in production** on the MaxCora server: `MaxCore.mcje.in:36651`
-  (Java Edition 1.21.11, any launcher). You are welcome to join and try to break it.
+  (Java Edition 1.21.1 – 26.3, any launcher). You are welcome to join and try to break it.
 - **The published code can lag behind the live build.** For security reasons,
   updates reach this repository on a schedule and with a delay, so the server may run
   a newer and stronger build than the one published here.

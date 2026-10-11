@@ -166,26 +166,44 @@ Wurst, и параллельно играл «человеком». Юнит-т�
 
 ---
 
-## Что проверяется — 32 проверки
+## Что проверяется — 40 проверок
 
-**Движение.** Speed (конверт импульса от атрибута скорости: зелья, лёд, вода,
-прыжковый разгон учтены) · Fly · BigMove (ClickTP, телепорт-читы) · Timer
-(частота пакетов) · Blink · NoSlow · GroundSpoof · **NoFall** · Spider ·
-**PacketOrder**.
+**Движение.**
+- Speed — конверт импульса от атрибута скорости: зелья, лёд, вода и прыжковый разгон учтены.
+- Fly, вместе с HighJump.
+- BigMove — ClickTP, телепорт-читы.
+- **Timer** — с 3.0 это баланс по времени прихода пакетов с запасом на лаг.
+- Blink.
+- NoSlow, вместе с NoWeb.
+- GroundSpoof, вместе с AntiHunger.
+- NoFall.
+- **FastFall**.
+- Spider, вместе с FastLadder.
+- **Jesus**, **Step**.
+- PacketOrder.
 
-**Бой.** Reach (с лаг-компенсацией) · Angle · Walls (двойной рейкаст) ·
-MultiTarget · UseAttack · NoSwing · Criticals · Velocity (Anti-KB) · CPS.
+**Бой.**
+- Reach — с лаг-компенсацией.
+- Angle.
+- **Aim**.
+- Walls — двойной рейкаст.
+- MultiTarget, UseAttack, NoSwing, Criticals.
+- Velocity (Anti-KB).
+- CPS.
+- **AutoTotem**.
+- **EntityPredict** — удар по сущности, которую клиенту не показывали.
 
-**Мир.** FastBreak · FastPlace · Nuker · PacketMine · Scaffold · **AirPlace** ·
-XRay (только наблюдение).
+**Мир.** FastBreak · FastPlace · Nuker · PacketMine · Scaffold · AirPlace ·
+**AutoPlace** · XRay (статистика, только наблюдение).
 
 **Ритм.** AutoClick · AutoAction — ловят то, что не ловит частота: кликер на
 «человеческих» 9 CPS выдаёт себя не скоростью, а неестественной ровностью.
 
-**Клиент и транспорт.** **Vehicle** (BoatFly, VehicleSpeed) · **InvMove** ·
-**BrandSpoof** · GCD (сетка чувствительности мыши).
+**Клиент и транспорт.** Vehicle (BoatFly, VehicleSpeed) · InvMove · BrandSpoof ·
+GCD (сетка чувствительности мыши) · **BadRotation**.
 
-Жирным отмечено то, что появилось в 2.2x.
+Жирным отмечено то, что появилось после 2.2x. Поверх проверок с 3.0 работает Аргус:
+это не проверка, а расследование по телеметрии всей сессии (см. «Что нового в 3.0.0»).
 
 ---
 
