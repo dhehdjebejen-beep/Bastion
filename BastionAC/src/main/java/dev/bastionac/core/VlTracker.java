@@ -15,6 +15,14 @@ import java.util.Map;
 public final class VlTracker {
     private final Map<CheckType, Double> vls = new EnumMap<>(CheckType.class);
     private final Map<CheckType, Long> lastAlertMillis = new EnumMap<>(CheckType.class);
+    /**
+     * The context dump's own clock. It used to share {@link #lastAlertMillis}:
+     * the dump claimed the first alert of every episode, and the staff alert,
+     * the history record and the auto-tempban count right after it found the
+     * clock already started — so a single flag over the alert line was never
+     * reported at all (2.30.1).
+     */
+    private final Map<CheckType, Long> lastDumpMillis = new EnumMap<>(CheckType.class);
 
     /** Adds weight to the check's VL. @return the new VL. */
     public double add(CheckType type, double weight) {
@@ -52,6 +60,14 @@ public final class VlTracker {
         Long last = lastAlertMillis.get(type);
         if (last != null && nowMillis - last < cooldownMillis) return false;
         lastAlertMillis.put(type, nowMillis);
+        return true;
+    }
+
+    /** As {@link #tryAlert}, on the dump's own clock. */
+    public boolean tryDump(CheckType type, long nowMillis, long cooldownMillis) {
+        Long last = lastDumpMillis.get(type);
+        if (last != null && nowMillis - last < cooldownMillis) return false;
+        lastDumpMillis.put(type, nowMillis);
         return true;
     }
 

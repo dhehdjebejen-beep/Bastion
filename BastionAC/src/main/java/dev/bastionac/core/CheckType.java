@@ -63,7 +63,11 @@ public enum CheckType {
     /** Totem back in the off hand faster than a hand can open the inventory. */
     AUTOTOTEM,
     /** Head pitch beyond ±90°, which a vanilla client clamps and can never send (Derp/Tired). */
-    BADROTATION;
+    BADROTATION,
+    /** Descending faster than vanilla free-fall gravity allows for the fall's duration (FastFall). */
+    FASTFALL,
+    /** An attack on an entity the client was never sent — a predicted id (CrystalAura "predict"). */
+    ENTITYPREDICT;
 
     public final String key = name().toLowerCase(Locale.ROOT);
 }

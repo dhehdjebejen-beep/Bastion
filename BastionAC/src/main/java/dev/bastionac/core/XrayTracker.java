@@ -126,7 +126,14 @@ public final class XrayTracker {
      * "skip the worthless, take the valuable" that defines X-ray.
      */
     public static boolean isStoneLike(BlockState state) {
-        return state != null && state.isIn(BlockTags.STONE_ORE_REPLACEABLES);
+        // Deepslate and tuff too (3.0). Diamonds live below y=0, where the
+        // ground is deepslate — the old stone-only count saw a deep miner dig
+        // almost nothing, so every ore he found pushed the ratio verdicts
+        // towards "tracer". That is half of what made an honest deep miner look
+        // like one.
+        return state != null && (state.isIn(BlockTags.STONE_ORE_REPLACEABLES)
+                || state.isIn(BlockTags.DEEPSLATE_ORE_REPLACEABLES)
+                || state.isIn(BlockTags.BASE_STONE_OVERWORLD));
     }
 
     // ------------------------------------------------------------------ verdicts (pure)
@@ -184,7 +191,8 @@ public final class XrayTracker {
         if (!hasAdjacentAir) {
             d.xrayHidden++;
             d.xrayHiddenOreFamily = fam;
-            feed(player, d, KIND_HIDDEN, weightOf(fam));
+            feed(player, d, KIND_HIDDEN, weightOf(fam),
+                    " @" + pos.getX() + " " + pos.getY() + " " + pos.getZ());
         }
         if (isPureOreSession(d.xrayValuable, d.xrayStoneLike, d.xrayHidden)
                 && d.xrayValuable == PURE_ORE_MIN) {
@@ -235,11 +243,18 @@ public final class XrayTracker {
     }
 
     private static void feed(ServerPlayerEntity player, PlayerData d, String kind, int probes) {
+        feed(player, d, kind, probes, "");
+    }
+
+    private static void feed(ServerPlayerEntity player, PlayerData d, String kind, int probes, String where) {
         for (int i = 0; i < probes; i++) {
             AttackChainDetector.probe(new ChainPlayerAdapter(player), "xray",
-                    kind + " (руд " + d.xrayValuable + ", камень " + d.xrayStoneLike
+                    kind + where + " (руд " + d.xrayValuable + ", камень " + d.xrayStoneLike
                             + ", скрытых " + d.xrayHidden + ")");
         }
+        // A suspicious mining moment: the analyzer looks at the whole session.
+        dev.bastionac.argus.Argus.signal(player, dev.bastionac.argus.Signal.Kind.XRAY_PROBE,
+                kind + where + " — руд " + d.xrayValuable + ", камня " + d.xrayStoneLike + ", скрытых " + d.xrayHidden);
     }
 
     private static int weightOf(OreFamily fam) {
@@ -249,12 +264,47 @@ public final class XrayTracker {
         return fam == OreFamily.DIAMOND ? 1 : 1;
     }
 
-    /** Adjacent-air probe around a position, server-authoritative. */
+    /**
+     * Whether the ore could be seen from any side: any neighbour that does not
+     * fully hide it — air, a liquid, glass, leaves, lichen, moss carpet,
+     * dripstone, a slab, a torch… (3.0).
+     *
+     * <p>Until 2.30 only air counted. An ore beside water, lava or a sheet of
+     * glow lichen was "hidden", so everyone who mined along an underwater
+     * ravine or a lush cave fed the X-ray probe: one player, who swam
+     * a lot, collected fourteen of those. What X-ray actually gives a
+     * player is sight through opaque full blocks; anything else the player
+     * can look through himself.
+     */
     public static boolean hasAdjacentAir(net.minecraft.world.WorldAccess world, BlockPos pos) {
+        return exposedFaces(world, pos) != 0;
+    }
+
+    /** Bit {@code d.getIndex()} set for every face whose neighbour does not fully hide the block. */
+    public static int exposedFaces(net.minecraft.world.BlockView world, BlockPos pos) {
+        int mask = 0;
+        BlockPos.Mutable m = new BlockPos.Mutable();
         for (Direction dir : Direction.values()) {
-            if (world.getBlockState(pos.offset(dir)).isAir()) return true;
+            m.set(pos.getX() + dir.getOffsetX(), pos.getY() + dir.getOffsetY(), pos.getZ() + dir.getOffsetZ());
+            if (isOpen(world.getBlockState(m))) mask |= 1 << dir.getIndex();
         }
-        return false;
+        return mask;
+    }
+
+    /** A block one can see through: anything but an opaque full cube, and any liquid. */
+    public static boolean isOpen(BlockState s) {
+        return s.isAir() || !s.getFluidState().isEmpty() || !s.isOpaqueFullCube();
+    }
+
+    /** One nibble of the ore context the telemetry stores around a broken ore. */
+    public static int contextOf(BlockState s) {
+        if (!s.getFluidState().isEmpty()) return dev.bastionac.telemetry.TelemetryFormat.CTX_LIQUID;
+        if (isOpen(s)) return dev.bastionac.telemetry.TelemetryFormat.CTX_OPEN;
+        OreFamily f = classify(s);
+        if (f == OreFamily.DIAMOND) return dev.bastionac.telemetry.TelemetryFormat.CTX_DIAMOND;
+        if (f != OreFamily.OTHER) return dev.bastionac.telemetry.TelemetryFormat.CTX_ORE;
+        if (isStoneLike(s)) return dev.bastionac.telemetry.TelemetryFormat.CTX_STONE;
+        return dev.bastionac.telemetry.TelemetryFormat.CTX_SOLID;
     }
 
     /** Called on join: fresh session counters per connection. */

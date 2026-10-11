@@ -123,6 +123,22 @@ final class ACPlayerMenu {
                     "&6⛓ Связи аккаунта &8(" + mine.size() + ")", lore), () -> ACLinkMenu.open(admin, 0));
         }
 
+        // Argus: this player's cases and a button to start one now.
+        {
+            java.util.List<dev.bastionac.argus.CaseFile> cases = dev.bastionac.argus.Argus.casesOf(uuid);
+            List<String> lore = new ArrayList<>();
+            if (cases.isEmpty()) lore.add("&7Расследований не было");
+            int shown = 0;
+            for (int i = cases.size() - 1; i >= 0 && shown < 4; i--, shown++) {
+                dev.bastionac.argus.CaseFile c = cases.get(i);
+                lore.add("&7#" + c.id + " " + c.verdict.colour + c.verdict.label
+                        + (c.label != dev.bastionac.argus.CaseFile.Label.NONE ? " &8(" + c.label.label + ")" : ""));
+            }
+            lore.add("&8➜ дела и «начать расследование»");
+            gui.button(20, GuiItems.item(Items.ENDER_EYE, "&5👁 Аргус &8(" + cases.size() + ")", lore),
+                    () -> ArgusMenu.openPlayer(admin, uuid, name));
+        }
+
         // Actions.
         gui.button(29, GuiItems.item(Items.ENDER_PEARL, "&bТелепорт к игроку", "&8➜ клик"), () -> {
             admin.teleport((net.minecraft.server.world.ServerWorld) target.getEntityWorld(),

@@ -173,6 +173,14 @@ public final class AuthCommands {
         return 1;
     }
 
+    private static int strict(ServerCommandSource source, Boolean on)
+            throws com.mojang.brigadier.exceptions.CommandSyntaxException {
+        AuthManager m = BastionAuth.manager();
+        if (m == null) return 0;
+        m.setOpStrict(source.getPlayerOrThrow(), on);
+        return 1;
+    }
+
     private static LiteralArgumentBuilder<ServerCommandSource> adminTree() {
         java.util.function.Predicate<ServerCommandSource> op = src -> CommandManager.ADMINS_CHECK.allows(src.getPermissions());
         return literal("auth")
@@ -189,6 +197,13 @@ public final class AuthCommands {
                     m.showHistory(ctx.getSource().getPlayerOrThrow());
                     return 1;
                 }))
+                // An operator's own login policy: password every time, or IP session.
+                .then(literal("strict").requires(op).executes(ctx -> strict(ctx.getSource(), null))
+                        .then(literal("on").executes(ctx -> strict(ctx.getSource(), true)))
+                        .then(literal("off").executes(ctx -> strict(ctx.getSource(), false))))
+                .then(literal("строгий").requires(op).executes(ctx -> strict(ctx.getSource(), null))
+                        .then(literal("вкл").executes(ctx -> strict(ctx.getSource(), true)))
+                        .then(literal("выкл").executes(ctx -> strict(ctx.getSource(), false))))
                 .then(literal("lock").executes(ctx -> {
                     AuthManager m = BastionAuth.manager();
                     if (m == null) return 0;

@@ -52,7 +52,7 @@ public final class PacketGuard {
     private static final long GAMEMODE_GRACE_TICKS = 100;
     /** Flood window (ms) and the packet count within it that means an attack. */
     private static final long FLOOD_WINDOW_MS = 2_000;
-    private static final int FLOOD_PACKETS = 400;
+    private static final int FLOOD_PACKETS = 500;
 
     /** Arrival times of play packets, per player, for the flood window. */
     private static final Map<UUID, Deque<Long>> ARRIVALS = new ConcurrentHashMap<>();

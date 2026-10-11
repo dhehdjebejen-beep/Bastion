@@ -147,6 +147,39 @@ public final class Database implements AutoCloseable {
             migrateColumn("account_links", "verdict_by", "TEXT");
             migrateColumn("account_links", "verdict_at", "INTEGER NOT NULL DEFAULT 0");
             migrateColumn("account_links", "verdict_note", "TEXT");
+            // 1.9: an operator's own choice to always type the password.
+            st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS op_prefs (
+                      uuid TEXT PRIMARY KEY,
+                      strict_login INTEGER NOT NULL DEFAULT 0,
+                      set_at INTEGER NOT NULL DEFAULT 0
+                    )""");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 1.9: operator strict login (opt-in)
+    // ------------------------------------------------------------------
+
+    public synchronized java.util.Set<String> strictOpUuids() {
+        java.util.Set<String> out = new java.util.HashSet<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT uuid FROM op_prefs WHERE strict_login = 1");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) out.add(rs.getString(1));
+        } catch (SQLException e) {
+            dev.bastionauth.BastionAuth.LOGGER.error("op_prefs read failed", e);
+        }
+        return out;
+    }
+
+    public synchronized void setStrictOp(String uuid, boolean on, long at) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "INSERT INTO op_prefs(uuid, strict_login, set_at) VALUES(?,?,?) "
+                        + "ON CONFLICT(uuid) DO UPDATE SET strict_login = excluded.strict_login, set_at = excluded.set_at")) {
+            ps.setString(1, uuid);
+            ps.setInt(2, on ? 1 : 0);
+            ps.setLong(3, at);
+            ps.executeUpdate();
         }
     }
 

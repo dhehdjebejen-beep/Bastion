@@ -36,9 +36,22 @@ public final class CombatChecks {
         long tick = BastionAC.serverTick();
         long now = System.currentTimeMillis();
 
+        // A mace smash resets the attacker's fall (vanilla bills nothing for it):
+        // the NoFall accounting must start the fall over from here too.
+        if (player.getMainHandStack().isOf(net.minecraft.item.Items.MACE) && player.fallDistance > 1.5) {
+            d.fallPeakY = player.getY();
+        }
         if (player.isCreative() || player.isSpectator()) return Action.NONE;
-        if (d.isFullyExempt(tick) || BastionAC.isServerLagging(tick)) return Action.NONE;
+        if (d.isFullyExempt(tick)) return Action.NONE;
         if (BastionAC.isAuthFrozen(player)) return Action.CANCEL;
+        // A slow server tick pauses the checks that read timing or fresh entity
+        // positions (reach, CPS, aim). Criticals reads neither: the fake hop is
+        // an order of packets inside one client tick. Pausing it too meant any
+        // tick over 80 ms — routine on the 2-core host, and something a player
+        // can provoke — switched forced crits off for two seconds; on the test
+        // server the hit itself was such a tick, so only the first of four
+        // forced crits was ever judged.
+        if (BastionAC.isServerLagging(tick)) return criticals(player, d, target);
 
         Action action = Action.NONE;
 
@@ -257,57 +270,7 @@ public final class CombatChecks {
             d.useAttackStreak = 0;
         }
 
-        // ---------------- CRITICALS ----------------
-        // Ask the question vanilla asks. PlayerEntity.isCriticalHit in 1.21.11 is
-        // fallDistance > 0 && !onGround && !climbing && !inWater && !blind &&
-        // !hasVehicle && target is living && !sprinting — every term of it fed by
-        // the client's own position packets. A forced-crit module sends a micro-hop
-        // (onGround=false, a few centimetres of "fall") before each swing, so the
-        // server computes a crit for a fall that never happened.
-        //
-        // The contradiction is with the server's own collision scan: the client
-        // claims to be airborne and falling, while scanEnv still finds solid
-        // support under the player and airTicks has not started counting. A real
-        // jump leaves support on the first tick and lands ten-odd ticks later; a
-        // real step off a ledge has no support at all. Neither can produce a crit
-        // with the player still resting on the block they never left.
-        //
-        // The previous form asked for a same-tick micro-jump with an onGround
-        // true->false flip AND player.isOnGround() — but the server's on-ground
-        // flag IS the last move packet's flag (onPlayerMove -> setMovement), so
-        // that pair could never both hold and the check never fired once.
-        boolean wouldCrit = target instanceof net.minecraft.entity.LivingEntity
-                && player.fallDistance > 0.0
-                && !player.isOnGround()
-                && !player.isClimbing()
-                && !player.isTouchingWater()
-                && !player.hasVehicle()
-                && !player.isSprinting()
-                && !player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.BLINDNESS);
-        // Height matters as much as support: walking off a one-block ledge and
-        // swinging on the first air tick is a legitimate crit, and it also lands
-        // on support (the ledge is still under the probe box) with airTicks at
-        // zero. The two cases separate cleanly by height — a step-off is already
-        // BELOW the ground it left, a faked hop is at or above it.
-        boolean noDescent = player.getY() >= d.climbBaseY - 0.03;
-        if (wouldCrit && d.lastSupport && d.airTicks <= 1 && noDescent
-                && player.fallDistance < 0.6) {
-            d.critBuffer += 1;
-            if (d.critBuffer >= 2) {
-                d.critBuffer = 0;
-                if (BastionAC.flag(player, d, CheckType.CRITICALS,
-                        String.format("крит без падения (падение %.3f, на опоре, воздух %d т)",
-                                player.fallDistance, d.airTicks))) {
-                    action = Action.max(action, Action.CANCEL);
-                }
-            }
-        } else {
-            // Gentle decay. Vanilla refuses a crit while sprinting, so in real PvP
-            // most swings cannot qualify at all and a half-point drain per swing
-            // ate the evidence faster than the forced crits could add it — which is
-            // why this took fifteen-plus hits to reach a verdict.
-            d.critBuffer = Math.max(0, d.critBuffer - 0.15);
-        }
+        action = Action.max(action, criticals(player, d, target));
 
         // ---------------- NOSWING ----------------
         // Rate comparison, not recency. The old form asked "was there a swing in
@@ -482,4 +445,73 @@ public final class CombatChecks {
     }
 
     private CombatChecks() {}
+
+    /** Forced crits; see the comment inside. Also runs while the server lags. */
+    private static Action criticals(ServerPlayerEntity player, PlayerData d, Entity target) {
+        // ---------------- CRITICALS ----------------
+        // Ask the question vanilla asks. PlayerEntity.isCriticalHit in 1.21.11 is
+        // fallDistance > 0 && !onGround && !climbing && !inWater && !blind &&
+        // !hasVehicle && target is living && !sprinting — every term of it fed by
+        // the client's own position packets. A forced-crit module sends a micro-hop
+        // (onGround=false, a few centimetres of "fall") before each swing, so the
+        // server computes a crit for a fall that never happened.
+        //
+        // The contradiction is with the server's own collision scan: the client
+        // claims to be airborne and falling, while scanEnv still finds solid
+        // support under the player and airTicks has not started counting. A real
+        // jump leaves support on the first tick and lands ten-odd ticks later; a
+        // real step off a ledge has no support at all. Neither can produce a crit
+        // with the player still resting on the block they never left.
+        //
+        // The previous form asked for a same-tick micro-jump with an onGround
+        // true->false flip AND player.isOnGround() — but the server's on-ground
+        // flag IS the last move packet's flag (onPlayerMove -> setMovement), so
+        // that pair could never both hold and the check never fired once.
+        //
+        // 2.27: "support + airTicks <= 1 + not below the take-off height" was too
+        // loose and convicted honest fighters in three ways seen on prod:
+        //   - lava: vanilla halves fallDistance there but never zeroes it, and a
+        //     liquid counted as "support" with airTicks 0, so every hit while
+        //     bobbing in lava read as a forced crit;
+        //   - landing on a higher block (or anywhere the wide support probe
+        //     already reaches the floor below): a real jump-crit a few tenths
+        //     above a block top looked "supported, no descent";
+        //   - duels: both fighters hop and land on uneven ground constantly.
+        // What a forced crit actually needs is a fall that never happened, and
+        // that leaves one exact trace: the client closed its previous tick
+        // standing on a floor, and now — still inside the next tick, before any
+        // real movement — claims to be airborne and falling while its feet are
+        // back exactly on that same top face. Every known implementation (Meteor
+        // Packet/Bypass, Wurst, LiquidBounce, BastionTester) ends its fake hop
+        // there. A vanilla client cannot: moving down onto a face is a collision,
+        // and a collision sets onGround.
+        boolean wouldCrit = target instanceof net.minecraft.entity.LivingEntity
+                && player.fallDistance > 0.0
+                && !player.isOnGround()
+                && !player.isClimbing()
+                && !player.isTouchingWater()
+                && !player.isInLava()
+                && !player.hasVehicle()
+                && !player.isSprinting()
+                && !player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.BLINDNESS);
+        boolean fakeHop = d.groundedAtTickEnd && d.lastOnFloorFace;
+        if (wouldCrit && fakeHop && player.fallDistance < 0.6) {
+            d.critBuffer += 1;
+            if (d.critBuffer >= 2) {
+                d.critBuffer = 0;
+                if (BastionAC.flag(player, d, CheckType.CRITICALS,
+                        String.format("крит без падения (падение %.3f, ноги на блоке, тик начат на земле)",
+                                player.fallDistance))) {
+                    return Action.CANCEL;
+                }
+            }
+        } else {
+            // Gentle decay. Vanilla refuses a crit while sprinting, so in real PvP
+            // most swings cannot qualify at all and a half-point drain per swing
+            // ate the evidence faster than the forced crits could add it — which is
+            // why this took fifteen-plus hits to reach a verdict.
+            d.critBuffer = Math.max(0, d.critBuffer - 0.15);
+        }
+        return Action.NONE;
+    }
 }

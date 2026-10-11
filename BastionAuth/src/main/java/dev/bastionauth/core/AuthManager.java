@@ -82,6 +82,8 @@ public final class AuthManager {
 
     private final ConcurrentHashMap<UUID, PlayerAuthState> states = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Session> sessions = new ConcurrentHashMap<>();
+    /** Operators who chose to type the password every time (op_prefs.strict_login). */
+    private final java.util.Set<UUID> strictOps = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, String> nameCache = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, PendingIp> pendingIps = new ConcurrentHashMap<>();
     /** Players whose plugin-channel list is due to be captured (uuid -> server tick). */
@@ -113,6 +115,12 @@ public final class AuthManager {
         // stay logged in across a restart (still IP-bound and TTL-limited).
         long nowMs = System.currentTimeMillis();
         db.pruneSessions(nowMs);
+        for (String id : db.strictOpUuids()) {
+            try {
+                strictOps.add(UUID.fromString(id));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
         for (Database.SessionRow row : db.loadSessions()) {
             try {
                 sessions.put(UUID.fromString(row.uuid()), new Session(row.ipHmac(), row.expiresAt()));
@@ -223,8 +231,33 @@ public final class AuthManager {
      * drift by scheduling a single snap-back teleport on the server thread.
      */
     public void onMovePacket(ServerPlayerEntity player) {
+        onMovePacket(player, null);
+    }
+
+    /**
+     * As above, comparing what the client says it did. The server never applies
+     * a frozen player's movement, so its own position never drifts — measuring
+     * that against the anchor (all the old check did) could not see a client
+     * that had walked away. A client reporting itself off the anchor is pulled
+     * back; otherwise it is the walk the owner saw being snapped back after the
+     * password, which BastionAC read as a 22-block jump.
+     */
+    public void onMovePacket(ServerPlayerEntity player, net.minecraft.network.packet.c2s.play.PlayerMoveC2SPacket packet) {
         PlayerAuthState st = states.get(player.getUuid());
         if (st == null || st.authenticated) return;
+        if (packet != null && packet.changesPosition()) {
+            double cx = packet.getX(st.x) - st.x, cy = packet.getY(st.y) - st.y, cz = packet.getZ(st.z) - st.z;
+            if (cx * cx + cy * cy + cz * cz > 0.0225) {
+                if (!st.snapPending.compareAndSet(false, true)) return;
+                server.execute(() -> {
+                    st.snapPending.set(false);
+                    if (st.authenticated || states.get(st.uuid) != st) return;
+                    ServerPlayerEntity p = server.getPlayerManager().getPlayer(st.uuid);
+                    if (p != null) p.networkHandler.requestTeleport(st.x, st.y, st.z, st.yaw, st.pitch);
+                });
+                return;
+            }
+        }
         if (!st.snapPending.compareAndSet(false, true)) return;
         server.execute(() -> {
             st.snapPending.set(false);
@@ -340,7 +373,7 @@ public final class AuthManager {
 
         AuthConfig cfg = this.cfg;
         st.agreementDone = hasAcceptedAgreement(player);
-        boolean opNoResume = cfg.session.disableForOps && isOperator(player);
+        boolean opNoResume = isOperator(player) && opStrict(uuid);
         // An IP session is weaker than a password and far weaker than a
         // second factor: behind a carrier NAT the address is shared with
         // strangers. So an account that asked for 2FA never resumes by IP
@@ -354,8 +387,14 @@ public final class AuthManager {
                 if (session.expiresAt() > now && constantTimeEquals(session.ipHmac(), secrets.ipHmac(ip))) {
                     sessions.remove(uuid);
                     st.authenticated = true;
+                    // Every connection starts in limbo with its state masked;
+                    // a resumed session goes straight back.
+                    Limbo.leave(player);
+                    SpectatorGate.leave(player);
+                    StateMask.reveal(player);
                     ChatGate.say(player, text("session.restored"), false);
                     ChatGate.release(player, this::heldHeader);
+                    if (isOperator(player)) showOpStrict(player, uuid);
                     submitAudit("SESSION_RESUME", uuid, name, Secrets.maskIp(ip), null);
                     BastionAuth.LOGGER.info("{} resumed session from {}", name, Secrets.maskIp(ip));
                     return;
@@ -483,6 +522,13 @@ public final class AuthManager {
     /** Freeze visuals + prompts. Also used by /logout and admin unregister. */
     private void beginAuthPhase(ServerPlayerEntity player, PlayerAuthState st, boolean registered) {
         AuthConfig cfg = this.cfg;
+        // Up into limbo (a join is already there; /logout and a respawn are
+        // not), and the freeze holds the player there. See Limbo.
+        Limbo.enter(player);
+        // …as a spectator, once the agreement is on file. See SpectatorGate.
+        SpectatorGate.enter(player);
+        double[] sky = Limbo.sky(st.uuid);
+        if (sky != null) st.anchor(sky[0], sky[1], sky[2], (float) sky[3], (float) sky[4]);
         // Nothing about the account is shown before the password — including
         // what it is carrying. Pressing E used to display the real inventory to
         // anybody who typed the name. See InventoryMask.
@@ -514,6 +560,8 @@ public final class AuthManager {
                 st.invisApplied = true;
             }
         }
+        // The plain picture of the account, and the pin. See StateMask.
+        if (cfg.protection.hideAccountState) StateMask.apply(player);
         player.networkHandler.sendPacket(new TitleFadeS2CPacket(10, 160, 10));
         ChatGate.packet(player, new TitleS2CPacket(text("join.title")));
         ChatGate.packet(player, new SubtitleS2CPacket(
@@ -568,6 +616,8 @@ public final class AuthManager {
     public void onRespawn(ServerPlayerEntity player) {
         PlayerAuthState st = states.get(player.getUuid());
         if (st == null || st.authenticated) return;
+        // Died on the login screen: where they respawned is the real position now.
+        Limbo.forget(player.getUuid());
         st.anchor(player.getX(), player.getY(), player.getZ(), player.getYaw(), player.getPitch());
         st.invisApplied = false;
         beginAuthPhase(player, st, nameCache.containsKey(st.name.toLowerCase(Locale.ROOT)));
@@ -579,6 +629,7 @@ public final class AuthManager {
 
     public void tick() {
         tickCounter++;
+        Limbo.tick(server);
         if (tickCounter % 20 == 0) ChatGate.releaseStragglers(server, this::heldHeader);
         if (!channelCaptureDue.isEmpty()) {
             for (java.util.Map.Entry<UUID, Long> e : channelCaptureDue.entrySet()) {
@@ -593,7 +644,14 @@ public final class AuthManager {
         for (PlayerAuthState masked : states.values()) {
             if (masked.authenticated || masked.maskDueTick == 0 || tickCounter < masked.maskDueTick) continue;
             ServerPlayerEntity mp = server.getPlayerManager().getPlayer(masked.uuid);
-            if (mp != null) InventoryMask.apply(mp);
+            if (mp != null) {
+                InventoryMask.apply(mp);
+                // On a fresh connection the join event can run before the
+                // client has created its player, which then ignores the plain
+                // picture (and walks at full speed). Repeated on the same short
+                // schedule, it lands.
+                if (cfg.protection.hideAccountState) StateMask.apply(mp);
+            }
             masked.maskStep++;
             masked.maskDueTick = switch (masked.maskStep) {
                 case 1 -> tickCounter + 8;      // after vanilla's own sync
@@ -859,6 +917,7 @@ public final class AuthManager {
                 ServerPlayerEntity p = server.getPlayerManager().getPlayer(st.uuid);
                 if (p == null || states.get(st.uuid) != st) return;
                 if (noteDevice) ChatGate.say(p, text(twoFactor.isEnabled(st.uuid) ? "device.new" : "device.newNo2fa"), false);
+                if (isOperator(p)) showOpStrict(p, st.uuid);
                 if (cfg.twoFactor.remindOpsWithout2fa && isOperator(p) && !twoFactor.isEnabled(st.uuid)) {
                     ChatGate.say(p, text("twofa.opReminder"), false);
                 }
@@ -1379,6 +1438,9 @@ public final class AuthManager {
             // The volumes were only ever in the view; with the agreement on
             // file they leave it, and the hotbar goes blank until login.
             InventoryMask.apply(player);
+            // Nothing left to read: the rest of the wait is as a spectator.
+            SpectatorGate.enter(player);
+            if (cfg.protection.hideAccountState) StateMask.apply(player);
         }
         return true;
     }
@@ -1595,6 +1657,11 @@ public final class AuthManager {
             st.invisApplied = false;
         }
         p.networkHandler.sendPacket(new ClearTitleS2CPacket(true));
+        // Down from limbo to where the account really is (BastionAC is told to
+        // expect the jump), and the real state back on screen.
+        Limbo.leave(p);
+        SpectatorGate.leave(p);
+        StateMask.reveal(p);
         // The inventory was blanked on the client while they were frozen; the
         // account is now proven, so the real one goes back on screen.
         InventoryMask.reveal(p);
@@ -1671,6 +1738,10 @@ public final class AuthManager {
 
     public Codeword codeword() {
         return codeword;
+    }
+
+    public AuthConfig config() {
+        return cfg;
     }
 
     public boolean isAuthenticated(UUID uuid) {
@@ -2023,6 +2094,60 @@ public final class AuthManager {
                     + (row.detail() == null ? "" : row.detail()));
         }
         return out;
+    }
+
+    /** Whether this operator never resumes by IP: their own choice, or the old server-wide rule. */
+    private boolean opStrict(UUID uuid) {
+        return cfg.session.opStrictOptional ? strictOps.contains(uuid) : cfg.session.disableForOps;
+    }
+
+    /** The reminder every operator gets at login: what the choice is now, and the button to flip it. */
+    private void showOpStrict(ServerPlayerEntity player, UUID uuid) {
+        if (!cfg.session.opStrictOptional) {
+            if (cfg.session.disableForOps) ChatGate.say(player, text("opstrict.forced"), false);
+            return;
+        }
+        boolean on = strictOps.contains(uuid);
+        Text line = text(on ? "opstrict.on" : "opstrict.off", cfg.session.ttlMinutes);
+        Text button = text(on ? "opstrict.buttonOff" : "opstrict.buttonOn").copy().styled(s -> s
+                .withClickEvent(new net.minecraft.text.ClickEvent.RunCommand(on ? "/auth strict off" : "/auth strict on"))
+                .withHoverEvent(new net.minecraft.text.HoverEvent.ShowText(text(on ? "opstrict.hoverOff" : "opstrict.hoverOn"))));
+        ChatGate.say(player, line.copy().append(Text.literal(" ")).append(button), false);
+    }
+
+    /** {@code /auth strict [on|off]}: an operator's own login policy. */
+    public void setOpStrict(ServerPlayerEntity player, Boolean on) {
+        PlayerAuthState st = authenticatedState(player);
+        if (st == null) return;
+        if (!isOperator(player)) {
+            send(player, "opstrict.notOp");
+            return;
+        }
+        if (on == null || !cfg.session.opStrictOptional) {
+            showOpStrict(player, st.uuid);
+            return;
+        }
+        // Lowering the bar is one of the things the codeword guards.
+        if (!on && codeword.protects(st.uuid)) {
+            send(player, "codeword.required");
+            return;
+        }
+        try {
+            db.setStrictOp(st.uuid.toString(), on, System.currentTimeMillis());
+        } catch (SQLException e) {
+            BastionAuth.LOGGER.error("op strict login update failed for {}", st.name, e);
+            send(player, "busy");
+            return;
+        }
+        if (on) {
+            strictOps.add(st.uuid);
+            sessions.remove(st.uuid);
+            executor.execute(() -> db.deleteSession(st.uuid.toString()));
+        } else {
+            strictOps.remove(st.uuid);
+        }
+        submitAudit(on ? "OP_STRICT_ON" : "OP_STRICT_OFF", st.uuid, st.name, Secrets.maskIp(st.ip), null);
+        send(player, on ? "opstrict.setOn" : "opstrict.setOff");
     }
 
     private boolean isOperator(ServerPlayerEntity player) {

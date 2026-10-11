@@ -8,6 +8,7 @@ import net.minecraft.text.Text;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 import java.net.SocketAddress;
@@ -30,5 +31,34 @@ public abstract class PlayerManagerMixin {
         GameProfile profile = new GameProfile(configEntry.id(), configEntry.name());
         Text denied = m.checkCanJoin(address, profile);
         if (denied != null) cir.setReturnValue(denied);
+    }
+
+    /** Before any packet with a position: the player waits in limbo. See {@link dev.bastionauth.core.Limbo}. */
+    @Inject(method = "onPlayerConnect", at = @At("HEAD"))
+    private void bastionauth$limbo(net.minecraft.network.ClientConnection connection,
+                                   net.minecraft.server.network.ServerPlayerEntity player,
+                                   net.minecraft.server.network.ConnectedClientData clientData, CallbackInfo ci) {
+        dev.bastionauth.core.Limbo.atConnect(player);
+        dev.bastionauth.core.SpectatorGate.atConnect(player);
+    }
+
+    /** Leaving without the password: the real position is put back before the final save. */
+    @Inject(method = "remove", at = @At("HEAD"))
+    private void bastionauth$limboRemove(net.minecraft.server.network.ServerPlayerEntity player, CallbackInfo ci) {
+        dev.bastionauth.core.Limbo.onRemove(player);
+        dev.bastionauth.core.SpectatorGate.onRemove(player);
+    }
+
+    /** Every save of a player in limbo writes the real position and game mode, never the sky or spectator. */
+    @Inject(method = "savePlayerData", at = @At("HEAD"))
+    private void bastionauth$saveReal(net.minecraft.server.network.ServerPlayerEntity player, CallbackInfo ci) {
+        dev.bastionauth.core.Limbo.beforeSave(player);
+        dev.bastionauth.core.SpectatorGate.beforeSave(player);
+    }
+
+    @Inject(method = "savePlayerData", at = @At("RETURN"))
+    private void bastionauth$saveRealDone(net.minecraft.server.network.ServerPlayerEntity player, CallbackInfo ci) {
+        dev.bastionauth.core.Limbo.afterSave(player);
+        dev.bastionauth.core.SpectatorGate.afterSave(player);
     }
 }

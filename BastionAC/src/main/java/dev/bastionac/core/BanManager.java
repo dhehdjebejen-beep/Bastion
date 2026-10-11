@@ -216,6 +216,53 @@ public final class BanManager {
     }
 
     /**
+     * "Бан Аргуса": a temp-ban issued on an Argus verdict (AUTO mode) or by
+     * staff from the case. Same escalation ladder as every other ban; its own
+     * kind in the history, its own words on the screen.
+     */
+    public static void argusBan(UUID uuid, String name, String caseId, String reason, String by) {
+        MinecraftServer srv = server;
+        if (srv == null) return;
+        ACConfig.Punishment cfg = BastionAC.config().punishment;
+        ServerPlayerEntity onlineNow = srv.getPlayerManager().getPlayer(uuid);
+        if (onlineNow != null && isExemptOperator(onlineNow)) {
+            BastionAC.LOGGER.warn("[ARGUSBAN] {} is staff — case #{} not acted on", name, caseId);
+            return;
+        }
+        long now = System.currentTimeMillis();
+        long historyMs = cfg.banHistoryHours * 3_600_000L;
+        Deque<Long> history = BAN_HISTORY.computeIfAbsent(uuid, u -> new ArrayDeque<>());
+        int priorBans;
+        synchronized (history) {
+            while (!history.isEmpty() && now - history.peekFirst() > historyMs) history.pollFirst();
+            priorBans = history.size();
+            history.addLast(now);
+        }
+        save();
+        int hours = banHours(priorBans, cfg.banStepsHours);
+        long until = now + hours * 3_600_000L;
+        noteBanNetwork(uuid, name, onlineNow, "argus");
+        srv.execute(() -> {
+            PlayerConfigEntry entry = new PlayerConfigEntry(uuid, name);
+            srv.getPlayerManager().getUserBanList().add(new BannedPlayerEntry(
+                    entry, new Date(now), "Аргус", new Date(until), "Аргус, дело #" + caseId));
+            ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
+            if (online != null && online.networkHandler != null) {
+                online.networkHandler.disconnect(TextFmt.literal(
+                        "&c&lВы заблокированы.\n&7Причина: решение аналитической системы защиты (дело #" + caseId + ").\n"
+                                + "&7Срок: &f" + formatDuration(hours) + "\n&7Обжалование: официальный канал MaxCore."));
+            }
+            if (cfg.broadcastBan) {
+                srv.getPlayerManager().broadcast(TextFmt.literal(
+                        "&8[&5Аргус&8] &e" + name + " &7заблокирован по итогам расследования на &f" + formatDuration(hours)), false);
+            }
+        });
+        HistoryManager.recordPunishment(HistoryManager.Kind.ARGUS_BAN, uuid, name, "argus", hours,
+                "дело #" + caseId + " (" + by + "): " + reason);
+        BastionAC.LOGGER.warn("[ARGUSBAN] {} banned {}h on case #{} by {} ({})", name, hours, caseId, by, reason);
+    }
+
+    /**
      * Kick + staff alert for protocol abuse that is disruptive but not
      * dangerous (BookBot, chat floods): the connection is dropped, the
      * incident is recorded, nobody is banned.

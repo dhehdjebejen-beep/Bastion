@@ -71,7 +71,7 @@ public final class ClaimService {
             int maxClaims = cfg().maxClaimsFor(hours);
             if (ClaimManager.countOf(p.getUuid()) >= maxClaims) {
                 return failRaw(cfg().message("create.limitClaims", maxClaims, hours)
-                        + "\n" + cfg().message("limit.progress"));
+                        + "\n" + cfg().message("limit.progress", cfg().progressText(hours)));
             }
             long maxBlocks = cfg().maxBlocksFor(hours);
             if (cost > maxBlocks) return fail("create.limitBlocks", cost, maxBlocks);

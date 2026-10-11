@@ -24,6 +24,11 @@ public abstract class OutboundChatGateMixin {
     private void bastionauth$chatGate(Packet<?> packet, ChannelFutureListener callbacks, CallbackInfo ci) {
         if (!((Object) this instanceof ServerPlayNetworkHandler play)) return;
         ServerPlayerEntity player = play.player;
-        if (player != null && ChatGate.intercept(player, packet)) ci.cancel();
+        if (player == null) return;
+        if (dev.bastionauth.core.StateMask.drops(player, packet)) {
+            ci.cancel();
+            return;
+        }
+        if (ChatGate.intercept(player, packet)) ci.cancel();
     }
 }

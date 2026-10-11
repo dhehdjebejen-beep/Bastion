@@ -4,8 +4,40 @@
 
 A server-side anti-cheat engine for Fabric (Minecraft 1.21.11). It needs no client
 mod. It started as a targeted answer to **Meteor** and its forks and grew into a
-general engine; version 2.24 adds a full pass over **Wurst 7**, built from that
+general engine; version 2.24 added a full pass over **Wurst 7**, built from that
 client's own source and defaults.
+
+## New in 3.0 — telemetry and Argus
+
+- **Session telemetry.** Every session is recorded to its own compact binary file
+  (`logs/bastionac/sessions/`): movement packets with their arrival time, the keys
+  held (1.21.2+ `PlayerInput`), client tick ends, teleports and their confirms,
+  server put-backs, knockback, a 1 Hz server-side state sample, ping, every block
+  broken with how exposed it was, the 5×5×5 around every valuable ore, attacks with
+  their aim geometry. About half a megabyte per player-hour, written on its own
+  low-priority thread, held under a size cap (3 GB by default) and a retention
+  (30 days). `tools/btl_dump.py` turns a file into text.
+- **Argus**, an analytical investigation beside the checks. It does not react to a
+  single flag: an alert, an EDR chain, an X-ray probe, a loop of server put-backs,
+  an admin's request or its own scan of a finished session opens a *case*. The case
+  is read on the Argus thread: a vanilla physics replay (air control, ground
+  friction, gravity, jumps and pushes against the keys actually held), timing and
+  protocol shape (tick rate, held-back movement, faked ping), aim and clicking,
+  and for X-ray how much ore the tunnels revealed against what a blind tunnel
+  through the same rock would reveal (read from a sample of the world). Every
+  feature is compared with this server's own honest players (median/MAD) and the
+  player's own history; the result is a calibrated score and a plain-language
+  report, within the hour.
+- **Modes**: shadow (cases only), assist (staff get the verdict and a button,
+  default), auto (a confident verdict with independent evidence bans by itself).
+  The owner's "cheater / not a cheater" labels retrain the weights.
+- **False positives fixed**: PacketOrder in server put-back loops (teleport
+  handshake now matched by vanilla's teleport id), Timer and Blink under network or
+  server stalls (now a balance on packet *arrival* time with a lag credit), X-ray
+  exposure (liquids and see-through blocks count as open; deepslate counts as
+  stone).
+- **New check `entitypredict`**: an attack on an entity the client was never sent
+  (CrystalAura id prediction).
 
 ## Two principles
 

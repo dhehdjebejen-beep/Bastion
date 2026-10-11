@@ -30,6 +30,8 @@ public final class ACConfig {
     public General general = new General();
     public Messages messages = new Messages();
     public Punishment punishment = new Punishment();
+    public TelemetryCfg telemetry = new TelemetryCfg();
+    public ArgusCfg argus = new ArgusCfg();
     public Map<String, CheckCfg> checks = new LinkedHashMap<>();
 
     public static final class General {
@@ -43,11 +45,18 @@ public final class ACConfig {
         public int setbackMinIntervalTicks = 10;
         /**
          * Snap the player back on the FIRST confirmed movement violation
-         * instead of waiting for VL to reach mitigateVl. This is the fast,
-         * v1-style reaction; the teleport handshake still pauses checks until
-         * the client confirms, so it does not cause cascading re-triggers.
+         * instead of waiting for VL to reach mitigateVl. Off since v12 (the
+         * owner's call): a warning is not a verdict, the setback comes when a
+         * check reaches its own mitigation threshold.
          */
-        public boolean instantMovementSetback = true;
+        public boolean instantMovementSetback = false;
+        /**
+         * Ticks the player stands frozen after a movement setback (6 = 0.3 s),
+         * counted from when the teleport can have reached them. A cheat client
+         * cannot fight the teleport, and the player sees one clean snap back
+         * instead of a rubber band. 0 disables.
+         */
+        public int setbackFreezeTicks = 6;
         /** Multiplier on the Speed check ceiling. Raise it if legit fast
          *  movement (aggressive bunny-hopping) is being flagged; lower it to
          *  tighten. 1.0 is the tuned default; the floor is clamped to 0.9 so a
@@ -61,6 +70,19 @@ public final class ACConfig {
          * while still catching any timer above 1.25x. Lower it to tighten.
          */
         public int timerMinIntervalMs = 40;
+        /**
+         * Timer by balance (3.0): how far ahead of real time a client may run
+         * before it is flagged. Every client tick is worth 50 ms; a pause is
+         * a credit and the burst after it pays the credit back.
+         */
+        public int timerMaxAheadMs = 400;
+        /**
+         * Timer by balance: the most credit a pause can buy. A network stall
+         * of up to this long followed by its burst is never a flag; a longer
+         * one is simply capped. Three seconds covers every stall in the logs
+         * (the longest honest one was 1,9 s).
+         */
+        public int timerLagBankMs = 3000;
         /**
          * Hard ceiling on attacks per second. Anything above it is refused
          * outright (the hit never lands) and feeds VL at a rate proportional to
@@ -150,7 +172,64 @@ public final class ACConfig {
     }
 
     /** Current schema revision — see {@link General#configVersion}. */
-    public static final int CONFIG_VERSION = 10;
+    public static final int CONFIG_VERSION = 13;
+
+    /** Telemetry v2: the per-session recording the analyzer and the owner read. */
+    public static final class TelemetryCfg {
+        public boolean enabled = true;
+        /** Session files older than this are deleted. */
+        public int retentionDays = 30;
+        /** The whole sessions folder is held under this many megabytes (oldest first). */
+        public int maxTotalMb = 3072;
+        /** One session never grows past this (a runaway client); movement stops being recorded. */
+        public int maxSessionMb = 200;
+        /** Our own ping every this many ticks (compared with keep-alives: ping spoof). 0 = off. */
+        public int pingIntervalTicks = 40;
+        /** Positions of whatever the player recently hit, every tick (aim analysis). */
+        public boolean recordTargets = true;
+        /** 5×5×5 blocks around every valuable ore broken (X-ray analysis). */
+        public boolean recordOreContext = true;
+    }
+
+    /**
+     * Argus — the analytical investigation that runs beside the checks. It
+     * does not react to a single flag: an EDR chain, an alert or a suspicious
+     * moment opens a case, the analyzer reads the player's telemetry in its
+     * own thread and returns a verdict within the hour.
+     */
+    public static final class ArgusCfg {
+        public boolean enabled = true;
+        /**
+         * SHADOW — cases and reports only, staff are not told.
+         * ASSIST — staff get the verdict with a button to act (default).
+         * AUTO   — a confident verdict bans by itself ("бан Аргуса").
+         */
+        public String mode = "ASSIST";
+        /** Minutes to keep collecting after the first signal before the first analysis. */
+        public int collectMinutes = 10;
+        /** The final verdict comes at the latest this many minutes after the first signal. */
+        public int deadlineMinutes = 60;
+        /** A case with fresh signals is analysed again at most this often. */
+        public int reanalyzeMinutes = 15;
+        /** How much telemetry before the signal the analysis reads. */
+        public int windowMinutes = 60;
+        /** Score from which a case is "suspicious" (staff should look). */
+        public double suspectScore = 0.60;
+        /** Score from which a case is "guilty". */
+        public double guiltyScore = 0.95;
+        /** AUTO mode bans only from this score and only with independent evidence. */
+        public double autoBanScore = 0.97;
+        /** AUTO mode also needs this many honest sessions in the baselines first. */
+        public int minBaselineSessions = 20;
+        /** Every finished session is read once to learn what normal looks like (and to catch what nobody flagged). */
+        public boolean analyzeEverySession = true;
+        /** The analyzer pauses while the server's average tick is above this (ms). */
+        public double pauseAboveMspt = 45.0;
+        /** Closed cases are kept this many days. */
+        public int caseRetentionDays = 60;
+        /** Region the X-ray analysis may read around the tunnels, in blocks per tick. */
+        public int worldSampleBlocksPerTick = 6000;
+    }
 
     /**
      * Revision at which the retune below applies. Later bumps only top up the
@@ -219,7 +298,12 @@ public final class ACConfig {
             // autoplace also fires on Litematica's easy place, jesus has not
             // been watched on real terrain yet. Step and badrotation are not
             // here: a vanilla client cannot send either, at all.
-            "aim", "autoplace", "jesus", "autototem");
+            "aim", "autoplace", "jesus", "autototem",
+            // v11 arrival: FastFall alerts/mitigates but is not proven on real
+            // terrain here yet, so it stays out of the auto-ban for now.
+            "fastfall",
+            // v13 arrival: attacks on never-sent entity ids.
+            "entitypredict");
 
     /** Observe-only heuristics: v7 forces them back to mitigate/kick = -1, as the README promises. */
     static final java.util.List<String> OBSERVE_ONLY = java.util.List.of(
@@ -299,7 +383,10 @@ public final class ACConfig {
         m.put("spider",       new CheckCfg(3.0, 3, 4, 8, 0.5));
         // decay must stay under the check's max flag rate (~1 per window, and the
         // window restarts on every flag) or VL can never reach alertVl at all.
-        m.put("timer",        new CheckCfg(1.0, 6, 9, 20, 0.3));
+        // 3.0: Timer by balance. One flag = the client got 400 ms ahead of real
+        // time after its lag credit ran out; the slow decay lets a x1.1 timer
+        // (a flag every ~4 s) still climb.
+        m.put("timer",        new CheckCfg(1.0, 4, 6, 16, 0.1));
         m.put("bigmove",      new CheckCfg(5.0, 5, 5, 20, 0.5));
         m.put("groundspoof",  new CheckCfg(1.0, 5, -1, -1, 0.5));
         // NoFall is outcome-based since v9: it compares the descent the server
@@ -399,6 +486,17 @@ public final class ACConfig {
         m.put("autototem",     new CheckCfg(3.0, 3, -1, -1, 0.02));
         // BadRotation: pitch past 90° — a vanilla client clamps it itself.
         m.put("badrotation",   new CheckCfg(5.0, 5, -1, 15, 0.2));
+        // --- v11: FastFall ---
+        // Descent faster than the vanilla gravity curve for the fall's length.
+        // A clean physics bound (a legit fall never beats the curve), but new
+        // here, so it alerts and sets back while staying out of the auto-ban
+        // until it has been watched on this server's real terrain.
+        m.put("fastfall",      new CheckCfg(2.0, 4, 6, 12, 0.5));
+        // --- v13: an attack on an entity id the client was never sent ---
+        // A vanilla client only knows ids from spawn packets; a predicted id
+        // is CrystalAura. One flag already alerts and the hit is refused;
+        // it stays out of the auto-ban until it has been watched here.
+        m.put("entitypredict", new CheckCfg(3.0, 3, 3, 12, 0.2));
         return m;
     }
 
@@ -458,6 +556,8 @@ public final class ACConfig {
 
     void fillDefaults() {
         if (general == null) general = new General();
+        if (telemetry == null) telemetry = new TelemetryCfg();
+        if (argus == null) argus = new ArgusCfg();
         if (messages == null) messages = new Messages();
         if (punishment == null) punishment = new Punishment();
         if (punishment.banStepsHours == null || punishment.banStepsHours.isEmpty()) {
@@ -501,6 +601,31 @@ public final class ACConfig {
             for (String key : BAN_EXCLUDED_DEFAULT) {
                 if (!punishment.banExcludedChecks.contains(key)) {
                     punishment.banExcludedChecks.add(key);
+                }
+            }
+            if (general.configVersion < 13) {
+                if (!punishment.banExcludedChecks.contains("entitypredict")) punishment.banExcludedChecks.add("entitypredict");
+                // v13: Timer is a balance now. Its flags are rarer and each one
+                // is real, so the decay must not out-run a slow (x1.1) timer.
+                CheckCfg t = checks.get("timer");
+                if (t != null) {
+                    t.decayPerSecond = 0.1;
+                    t.alertVl = 4;
+                    t.mitigateVl = 6;
+                    t.kickVl = 16;
+                }
+            }
+            if (general.configVersion < 12) {
+                // v12: setback at the mitigation threshold, not on every flag.
+                general.instantMovementSetback = false;
+                if (general.setbackFreezeTicks <= 0) general.setbackFreezeTicks = 6;
+            }
+            if (general.configVersion < 11) {
+                // v11 adds FastFall. The top loop already seeds the default
+                // exclusion list; this is explicit for a config whose admin
+                // edited banExcludedChecks by hand.
+                if (!punishment.banExcludedChecks.contains("fastfall")) {
+                    punishment.banExcludedChecks.add("fastfall");
                 }
             }
             if (general.configVersion < 10) {
@@ -564,6 +689,29 @@ public final class ACConfig {
         // would start flagging plain sprinting.
         general.speedToleranceMultiplier = clampD(general.speedToleranceMultiplier, 0.9, 5.0);
         if (general.timerMinIntervalMs <= 0) general.timerMinIntervalMs = 40;
+        if (general.timerMaxAheadMs <= 0) general.timerMaxAheadMs = 400;
+        general.timerMaxAheadMs = clampInt(general.timerMaxAheadMs, 100, 5000);
+        if (general.timerLagBankMs <= 0) general.timerLagBankMs = 3000;
+        general.timerLagBankMs = clampInt(general.timerLagBankMs, 500, 20_000);
+        telemetry.retentionDays = clampInt(telemetry.retentionDays <= 0 ? 30 : telemetry.retentionDays, 1, 365);
+        telemetry.maxTotalMb = clampInt(telemetry.maxTotalMb <= 0 ? 3072 : telemetry.maxTotalMb, 64, 1_000_000);
+        telemetry.maxSessionMb = clampInt(telemetry.maxSessionMb <= 0 ? 200 : telemetry.maxSessionMb, 10, 4096);
+        telemetry.pingIntervalTicks = clampInt(telemetry.pingIntervalTicks, 0, 1200);
+        if (argus.mode == null || !java.util.List.of("SHADOW", "ASSIST", "AUTO").contains(argus.mode.toUpperCase(Locale.ROOT))) {
+            argus.mode = "ASSIST";
+        }
+        argus.mode = argus.mode.toUpperCase(Locale.ROOT);
+        argus.collectMinutes = clampInt(argus.collectMinutes <= 0 ? 10 : argus.collectMinutes, 1, 240);
+        argus.deadlineMinutes = clampInt(argus.deadlineMinutes <= 0 ? 60 : argus.deadlineMinutes, argus.collectMinutes, 24 * 60);
+        argus.reanalyzeMinutes = clampInt(argus.reanalyzeMinutes <= 0 ? 15 : argus.reanalyzeMinutes, 1, 240);
+        argus.windowMinutes = clampInt(argus.windowMinutes <= 0 ? 60 : argus.windowMinutes, 5, 24 * 60);
+        argus.suspectScore = clampD(argus.suspectScore <= 0 ? 0.6 : argus.suspectScore, 0.2, 0.99);
+        argus.guiltyScore = clampD(argus.guiltyScore <= 0 ? 0.95 : argus.guiltyScore, argus.suspectScore, 0.999);
+        argus.autoBanScore = clampD(argus.autoBanScore <= 0 ? 0.97 : argus.autoBanScore, argus.guiltyScore, 0.9999);
+        argus.minBaselineSessions = clampInt(argus.minBaselineSessions, 0, 10_000);
+        argus.pauseAboveMspt = clampD(argus.pauseAboveMspt <= 0 ? 45 : argus.pauseAboveMspt, 10, 1000);
+        argus.caseRetentionDays = clampInt(argus.caseRetentionDays <= 0 ? 60 : argus.caseRetentionDays, 1, 3650);
+        argus.worldSampleBlocksPerTick = clampInt(argus.worldSampleBlocksPerTick <= 0 ? 6000 : argus.worldSampleBlocksPerTick, 200, 100_000);
         // Never above vanilla's 50ms, or every legit player flags forever.
         general.timerMinIntervalMs = clampInt(general.timerMinIntervalMs, 10, 49);
         // 0 means the key was absent from an older config — restore the default.

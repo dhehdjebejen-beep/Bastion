@@ -44,7 +44,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
     private void bastionauth$onPlayerMove(PlayerMoveC2SPacket packet, CallbackInfo ci) {
         if (bastionauth$blocked()) {
             AuthManager m = BastionAuth.manager();
-            if (m != null) m.onMovePacket(this.player);
+            if (m != null) m.onMovePacket(this.player, packet);
             ci.cancel();
         }
     }

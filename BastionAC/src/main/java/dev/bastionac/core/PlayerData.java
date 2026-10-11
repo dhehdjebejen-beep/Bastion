@@ -60,6 +60,20 @@ public final class PlayerData {
     public long pendingFallTick = -1;
     /** Height of the descent that landing ended. */
     public double pendingFallDescent;
+    /**
+     * Raw fall damage vanilla (or we) actually dealt since this fall began —
+     * mid-air "landings" a fake onGround packet triggers included. Compared
+     * at the landing against what the whole drop should have cost.
+     */
+    public double fallDamageRaw;
+    /** Movement setback freeze: no movement until this tick (see FreezeManager). */
+    public long setbackFreezeUntil = -1;
+    /** Where a frozen player is held. */
+    public double freezeX, freezeY, freezeZ;
+    /** Last tick a frozen player was put back (rate limit). */
+    public long lastFreezeResyncTick = -1_000_000L;
+    /** Last explosion knockback (wind charges included) this player was sent. */
+    public long lastExplosionTick = -1_000_000L;
     public double noFallBuffer;
 
     // ---------------- vehicle movement (BoatFly / VehicleSpeed) ----------------
@@ -83,6 +97,8 @@ public final class PlayerData {
 
     // ---------------- packet order (one move per client tick) ----------------
     public int movesThisClientTick;
+    /** Teleport confirms inside this client tick: each one legitimately brings one extra move. */
+    public int teleportConfirmsThisClientTick;
     public double packetOrderBuffer;
     /** True once the client has proven it sends ClientTickEnd at all (1.21.2+ vanilla does). */
     public boolean sendsTickEnd;
@@ -124,6 +140,9 @@ public final class PlayerData {
     public double jesusBuffer;
     public int ladderFastStreak;
     public int webFastStreak;
+    public int berryFastStreak;
+    /** The previous position packet was inside a sweet berry bush too. */
+    public boolean lastInBerryBush;
     /** Position packets in a row claiming air while standing still on a floor (AntiHunger). */
     public int falseAirStreak;
     /** The take-off height a HighJump was already reported for, so one jump flags once. */
@@ -144,6 +163,64 @@ public final class PlayerData {
     /** Tick at which the brand/channel consistency check should run (once, a few seconds after join). */
     public long brandCheckTick = -1;
     public boolean brandChecked;
+
+    // ------------------------------------------------------------------
+    // 3.0: exact teleport handshake, timer by balance, telemetry context
+    // ------------------------------------------------------------------
+    /** Timer by balance, fed from the netty thread at packet arrival (see TimerBalance). */
+    public final TimerBalance timer = new TimerBalance();
+    /** When each packet came off the wire (see ArrivalClock). */
+    public final ArrivalClock arrivals = new ArrivalClock();
+    /** Arrival time of the packet the server thread is handling right now. */
+    public long currentArrivalMs;
+    /** The client's own last rotation, unwrapped as it sends it (the context dump). */
+    public float rawYaw, rawPitch;
+    /** Key bits of the last PlayerInput (TelemetryFormat.IN_*), -1 before the first. */
+    public int inputBits = -1;
+
+    /**
+     * Teleport ids vanilla sent that the client has not confirmed yet, oldest
+     * first. A confirm is only worth an extra move packet (the Full move a
+     * vanilla client sends right behind it) when it answers one of these —
+     * a made-up confirm buys nothing.
+     */
+    private final int[] outstandingTeleports = new int[16];
+    private int outstandingCount;
+
+    public synchronized void noteTeleportSent(int id) {
+        if (outstandingCount == outstandingTeleports.length) {
+            System.arraycopy(outstandingTeleports, 1, outstandingTeleports, 0, outstandingCount - 1);
+            outstandingCount--;
+        }
+        outstandingTeleports[outstandingCount++] = id;
+    }
+
+    /** True when {@code id} answers a teleport we saw go out (and drops it and any older one). */
+    public synchronized boolean consumeTeleportConfirm(int id) {
+        for (int i = 0; i < outstandingCount; i++) {
+            if (outstandingTeleports[i] == id) {
+                int keep = outstandingCount - i - 1;
+                System.arraycopy(outstandingTeleports, i + 1, outstandingTeleports, 0, keep);
+                outstandingCount = keep;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public synchronized int outstandingTeleports() {
+        return outstandingCount;
+    }
+
+    // Correction loop (CorrectionTracker): vanilla keeps refusing the client's moves.
+    public long corrLastMs;
+    public int corrStreak;
+    public double corrX, corrY, corrZ;
+    public boolean corrResynced;
+    public long corrResyncAtMs;
+    public int corrAfterResync;
+    public long corrReportedMs;
+    public int corrCollideStreak;
 
     // Server-initiated teleport handshake: while pending, vanilla ignores the
     // client's movement, so checks pause without giving cheats a window.
@@ -187,6 +264,9 @@ public final class PlayerData {
 
     public void beginTeleport(double x, double y, double z, long tick) {
         teleportPending = true;
+        // The tick clock does not care about teleports; the move clock (old
+        // clients) gets the confirm's extra packet credited separately.
+        if (tickEndKind != 1) timer.requestReset();
         tpX = x;
         tpY = y;
         tpZ = z;
@@ -214,6 +294,13 @@ public final class PlayerData {
         groundBuffer = 0;
         spiderBuffer = 0;
         climbBaseY = y;
+        highJumpBase = Double.NaN;
+        lastOnFloorFace = false;
+        lastGroundedOnFace = false;
+        groundedAtTickEnd = false;
+        noSlowLastHDist = -1;
+        fallTicks = 0;
+        fastFallBuffer = 0;
         resetSpeedSamples();
         lastSupport = true;
         // Seed a valid setback anchor at the reset point (join / respawn /
@@ -294,6 +381,12 @@ public final class PlayerData {
     public double flyBuffer;
     public double groundBuffer;
     public double spiderBuffer;
+    /** Consecutive ticks the player has been falling (descending, airborne);
+     *  0 while resting/rising. FastFall compares descent speed against the
+     *  vanilla gravity curve for this many ticks. */
+    public int fallTicks;
+    /** Confirmed-violation buffer for FastFall so one jittery packet never convicts. */
+    public double fastFallBuffer;
     /** Y at the last moment the player had legal support (ground/climbable/liquid);
      *  Spider compares current height against it — a jump can only gain ~1.25 blocks. */
     public double climbBaseY;
@@ -476,36 +569,34 @@ public final class PlayerData {
      */
     public boolean kbPending;
     public double kbAnchorX, kbAnchorZ;
-    /** Unit direction of the impulse — used to look for a wall in its path. */
+    /** Unit direction of the impulse — the travel is measured along it, and walls are looked for on it. */
     public double kbDirX, kbDirZ;
-    public double kbExpectedMin;
-    public long kbDeadlineTick;
+    /** Horizontal speed and vertical part of the knockback the client was sent. */
+    public double kbSpeed, kbVy;
     /** Consecutive suppressed transactions — one lag spike must not convict. */
     public int kbFailStreak;
     /**
      * Set while the window is open if anything made the impulse physically
-     * un-travelable: a wall the player was thrown into, water/lava, a cobweb,
-     * a climbable. The transaction is then dropped instead of counted as a
-     * failure — being cornered against a block is ordinary PvP, not Velocity.
+     * un-travelable: water/lava, a cobweb, a climbable, soul sand or honey.
+     * The transaction is then dropped instead of counted as a failure.
      */
     public boolean kbBlocked;
-
-    public void beginKbVerify(double x, double z, double dirX, double dirZ,
-                              double expectedMin, long deadlineTick) {
-        kbPending = true;
-        kbBlocked = false;
-        kbAnchorX = x;
-        kbAnchorZ = z;
-        kbDirX = dirX;
-        kbDirZ = dirZ;
-        kbExpectedMin = expectedMin;
-        kbDeadlineTick = deadlineTick;
-    }
+    // Transaction state (see KnockbackVerifier).
+    public boolean kbNeedPing, kbAwaitPong, kbActive, kbGroundPrev;
+    public double kbNextSpeed, kbNextDirX, kbNextDirZ, kbNextVy;
+    public int kbPingId, kbMovesSincePing, kbCount, kbUnanswered;
+    public long kbPingMs;
+    public double kbU, kbMinDisp, kbLastX, kbLastY, kbLastZ;
+    public boolean kbLift;
+    public double kbSimH, kbSimVy, kbStartY;
 
     public void clearKbVerify() {
         kbPending = false;
+        kbAwaitPong = false;
+        kbActive = false;
         kbBlocked = false;
-        kbExpectedMin = 0;
+        kbCount = 0;
+        kbMinDisp = 0;
     }
 
     // ------------------------------------------------------------------
@@ -515,6 +606,20 @@ public final class PlayerData {
     public double lastDy1;
     /** Confirmed-violation buffer so one lag-batched jump never convicts. */
     public double critBuffer;
+    /** The last accepted position stood exactly on a block's top face. */
+    public boolean lastOnFloorFace;
+    /** ...and the client itself said it was on the ground there. */
+    public boolean lastGroundedOnFace;
+    /** {@link #lastGroundedOnFace} as it stood when the client closed its previous tick. */
+    public boolean groundedAtTickEnd;
+    /**
+     * The client's tick ends are ViaBackwards' 50 ms timer (client older than
+     * 1.21.2), not its own: checks that count moves per client tick stand down.
+     * 0 = not asked yet, 1 = real, 2 = synthetic. Survives resetMovement.
+     */
+    public volatile int tickEndKind;
+    /** The last position packet claimed the ground and the server's support scan agreed. */
+    public boolean lastGroundBacked;
 
     // ------------------------------------------------------------------
     // Blink (token bucket + inter-arrival-time variance)
@@ -593,6 +698,10 @@ public final class PlayerData {
     public long usingItemSinceTick = -1;
     /** Confirmed-violation buffer so a single fast tick never convicts. */
     public double noSlowBuffer;
+    /** Horizontal speed on the previous judged using-item tick, to tell a
+     *  decaying sprint-carry (honest) from a flat-held excess (real NoSlow).
+     *  -1 = no sample yet / the judged run was broken. */
+    public double noSlowLastHDist = -1;
 
     // ------------------------------------------------------------------
     // World

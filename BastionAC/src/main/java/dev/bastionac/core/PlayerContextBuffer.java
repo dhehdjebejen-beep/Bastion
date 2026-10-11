@@ -73,6 +73,8 @@ public final class PlayerContextBuffer {
     static final byte F_SNEAKING = 1 << 2;
     static final byte F_USING_ITEM = 1 << 3;
     static final byte F_IN_LIQUID = 1 << 4;
+    /** The packet carried a rotation (3.0). Without it the yaw/pitch are the last ones the client sent. */
+    static final byte F_LOOK = 1 << 5;
 
     /** Dumps directory, resolved lazily against the game dir. */
     private static volatile Path dumpDir;
@@ -150,7 +152,8 @@ public final class PlayerContextBuffer {
                     .append((flags & F_SPRINTING) != 0 ? ",sprint" : "")
                     .append((flags & F_SNEAKING) != 0 ? ",sneak" : "")
                     .append((flags & F_USING_ITEM) != 0 ? ",use" : "")
-                    .append((flags & F_IN_LIQUID) != 0 ? ",liquid" : "");
+                    .append((flags & F_IN_LIQUID) != 0 ? ",liquid" : "")
+                    .append((flags & F_LOOK) != 0 ? ",look" : "");
             if (aux != 0) sb.append(",aux=").append(aux);
             sb.append('\n');
         }
@@ -213,6 +216,32 @@ public final class PlayerContextBuffer {
         if (player == null) return;
         recordMove(player.getUuid(), yaw, pitch, prevX, prevY, prevZ, newX, newY, newZ,
                 onGround, sprinting, sneaking, usingItem, inLiquid);
+    }
+
+    /**
+     * 3.0: the rotation is always the client's own raw one. Position-only
+     * packets used to be stamped with the SERVER's yaw, which is wrapped to
+     * ±180 while the client's keeps counting — every dump showed ±360° jumps
+     * that were nothing but the two numbers taking turns.
+     */
+    public static void recordMove(ServerPlayerEntity player, float rawYaw, float rawPitch, boolean hasLook,
+                                  double prevX, double prevY, double prevZ,
+                                  double newX, double newY, double newZ,
+                                  boolean onGround, boolean sprinting, boolean sneaking,
+                                  boolean usingItem, boolean inLiquid) {
+        if (player == null) return;
+        Ring r = RINGS.get(player.getUuid());
+        if (r == null) return;
+        byte flags = 0;
+        if (onGround) flags |= F_ON_GROUND;
+        if (sprinting) flags |= F_SPRINTING;
+        if (sneaking) flags |= F_SNEAKING;
+        if (usingItem) flags |= F_USING_ITEM;
+        if (inLiquid) flags |= F_IN_LIQUID;
+        if (hasLook) flags |= F_LOOK;
+        r.write(System.currentTimeMillis(), rawYaw, rawPitch,
+                centi(newX - prevX), centi(newY - prevY), centi(newZ - prevZ),
+                flags, KIND_MOVE, 0);
     }
 
     /** UUID-keyed variant so tests can feed the buffer without Minecraft. */

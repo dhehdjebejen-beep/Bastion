@@ -212,6 +212,8 @@ public final class AttackChainDetector {
         Verdict after = chain.verdictAt(now);
         if (after == Verdict.BURNED) {
             report(chain, Verdict.BURNED);
+            dev.bastionac.argus.Argus.signal(chain.uuid, chain.name, dev.bastionac.argus.Signal.Kind.CHAIN_BURNED,
+                    String.join("+", chain.alertKinds(now)));
             banOnBurned(chain);
             chain.events.clear();
             chain.score = 0;
@@ -220,12 +222,16 @@ public final class AttackChainDetector {
         } else if (after == Verdict.WATCH && (before != Verdict.WATCH || !chain.reportedWatch)) {
             chain.reportedWatch = true;
             report(chain, Verdict.WATCH);
+            dev.bastionac.argus.Argus.signal(chain.uuid, chain.name, dev.bastionac.argus.Signal.Kind.CHAIN_WATCH,
+                    String.join("+", chain.alertKinds(now)));
         }
     }
 
     /** Probe feed: a sub-threshold borderline flag worth remembering (context only). */
     public static void probe(ServerPlayerEntityLike player, String kind, String detail) {
         event(player, Stage.PROBE, kind, detail);
+        // Probes (X-ray verdicts above all) lived only in memory; the journal keeps them.
+        if (player != null) AcJournal.write("probe", player.name(), String.valueOf(player.uuid()), kind, 0, detail, null);
     }
 
     /** Exploit feed: a confirmed alert (VL ≥ alert threshold). */

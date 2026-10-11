@@ -178,7 +178,7 @@ public final class ClaimConfig {
                 best = t;
             }
         }
-        return best != null ? best : new Tier(0, 1, 50_000);
+        return best != null ? best : defaultTiers().get(0);
     }
 
     public int maxClaimsFor(int playHours) {
@@ -213,21 +213,59 @@ public final class ClaimConfig {
             }
             cfg.opBypassProtection = false;
         }
-        cfg.configVersion = 2;
+        if (cfg.configVersion < 3 && existed && cfg.progression != null && isOldDefaultTiers(cfg.progression.tiers)) {
+            // 1.18.0: the owner found the limits too tight (2026-10-04). Only the
+            // untouched 1.x defaults are replaced; tiers an admin wrote stay.
+            cfg.progression.tiers = new ArrayList<>(defaultTiers());
+            warn.accept("config.json: claim limits raised to the 1.18 defaults"
+                    + " (0 h: 2 x 80 000, 5 h: 4 x 150 000, 15 h: 8 x 250 000 blocks).");
+        }
+        if (cfg.configVersion < 3 && cfg.messages != null && OLD_PROGRESS.equals(cfg.messages.get("limit.progress"))) {
+            cfg.messages.remove("limit.progress");   // the tiers are filled in at runtime now
+        }
+        cfg.configVersion = 3;
         cfg.fillDefaults();
         cfg.clamp();
         Files.writeString(file, GSON.toJson(cfg) + System.lineSeparator(), StandardCharsets.UTF_8);
         return cfg;
     }
 
+    private static final String OLD_PROGRESS =
+            "&7Наиграй больше часов, чтобы поднять лимит: &f10ч&7 → 3 привата, &f20ч&7 → 6.";
+
+    /** "&f5ч&7 → 4 привата, &f15ч&7 → 8" — the tiers still ahead of a player. */
+    public String progressText(int playHours) {
+        StringBuilder b = new StringBuilder();
+        progression.tiers.stream().filter(t -> t.minHours > playHours)
+                .sorted(java.util.Comparator.comparingInt(t -> t.minHours))
+                .forEach(t -> {
+                    if (b.length() > 0) b.append("&7, ");
+                    b.append("&f").append(t.minHours).append("ч&7 → ").append(t.maxClaims)
+                            .append(" прив. по ").append(t.maxBlocksPerClaim).append(" бл.");
+                });
+        return b.length() == 0 ? "&7у вас уже наибольший уровень" : b.toString();
+    }
+
+    /** Play-time tiers: a newcomer can claim a base and a farm on day one. */
+    static List<Tier> defaultTiers() {
+        return List.of(new Tier(0, 2, 80_000), new Tier(5, 4, 150_000), new Tier(15, 8, 250_000));
+    }
+
+    /** The 1.x defaults, which config.json files written before 1.18 carry verbatim. */
+    static boolean isOldDefaultTiers(List<Tier> tiers) {
+        if (tiers == null || tiers.size() != 3) return false;
+        long[][] old = {{0, 1, 50_000}, {10, 3, 100_000}, {20, 6, 120_000}};
+        for (int i = 0; i < 3; i++) {
+            Tier t = tiers.get(i);
+            if (t == null || t.minHours != old[i][0] || t.maxClaims != old[i][1] || t.maxBlocksPerClaim != old[i][2]) return false;
+        }
+        return true;
+    }
+
     private void fillDefaults() {
         if (progression == null) progression = new Progression();
         if (progression.tiers == null) progression.tiers = new ArrayList<>();
-        if (progression.tiers.isEmpty()) {
-            progression.tiers.add(new Tier(0, 1, 50_000));
-            progression.tiers.add(new Tier(10, 3, 100_000));
-            progression.tiers.add(new Tier(20, 6, 120_000));
-        }
+        if (progression.tiers.isEmpty()) progression.tiers.addAll(defaultTiers());
         if (protection == null) protection = new Protection();
         if (worldEdit == null) worldEdit = new WorldEdit();
         if (wandItem == null || wandItem.isBlank()) wandItem = "minecraft:wooden_axe";
@@ -325,7 +363,7 @@ public final class ClaimConfig {
         m.put("create.overlap", "&cОбласть пересекается с чужим приватом &f%s&c (владелец &f%s&c).");
         m.put("create.limitClaims", "&cЛимит приватов для тебя: &f%s&c. Часов сыграно: &f%s&c.");
         m.put("create.limitBlocks", "&cСлишком большой приват: &f%s&c > лимита &f%s&c блоков (твой тир).");
-        m.put("limit.progress", "&7Наиграй больше часов, чтобы поднять лимит: &f10ч&7 → 3 привата, &f20ч&7 → 6.");
+        m.put("limit.progress", "&7Наиграй больше часов, чтобы поднять лимит: %s.");
         m.put("delete.success", "&aПриват &f%s&a удалён 🗑");
         m.put("delete.notFound", "&cПривата &f%s&c нет.");
         m.put("delete.confirm", "&eУдалить приват &f%s&e? Подтверди: &f/claim delete confirm &8(60 секунд)");

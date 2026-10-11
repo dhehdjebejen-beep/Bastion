@@ -31,7 +31,7 @@ public final class HistoryManager {
     private static final int MAX_PUNISH = 2000;
     private static final long RETENTION_MS = 30L * 24 * 3_600_000L; // 30 days
 
-    public enum Kind { ALERT, KICK, TEMPBAN, MANUAL_BAN, UNBAN, VL_CLEAR, EDR_CHAIN_BAN, NET_LINK }
+    public enum Kind { ALERT, KICK, TEMPBAN, MANUAL_BAN, UNBAN, VL_CLEAR, EDR_CHAIN_BAN, NET_LINK, ARGUS_BAN }
 
     /** One recorded event. Public fields for straightforward Gson (de)serialisation. */
     public static final class Event {
@@ -80,6 +80,7 @@ public final class HistoryManager {
         e.evidence = evidence == null || evidence.isEmpty() ? null : new LinkedHashMap<>(evidence);
         add(ALERTS, e, MAX_ALERTS);
         dirty = true; // flushed on tick / shutdown (alerts can be frequent)
+        AcJournal.write("alert", e.name, e.uuid, e.check, vl, details, evidence);
     }
 
     public static void recordPunishment(Kind kind, UUID uuid, String name, String check, int hours, String details) {
@@ -89,6 +90,8 @@ public final class HistoryManager {
         e.details = details;
         add(PUNISH, e, MAX_PUNISH);
         save(); // punishments are rare and important — persist immediately
+        AcJournal.write(kind.name().toLowerCase(java.util.Locale.ROOT), name, e.uuid, check, 0,
+                (hours > 0 ? hours + " ч; " : "") + (details == null ? "" : details), null);
     }
 
     private static Event base(Kind kind, UUID uuid, String name) {

@@ -52,6 +52,29 @@ public abstract class ServerPlayNetworkHandlerMixin {
                 && player.getEntityWorld().getServer().isOnThread();
     }
 
+    /**
+     * The netty-thread pass of a packet (vanilla calls every play handler
+     * once there, only to re-queue it for the server thread). Its moment is
+     * the packet's real arrival: stamp it, so the server-thread pass knows
+     * when the packet came in rather than when the server got to it.
+     */
+    @Unique
+    private PlayerData bastionac$netty(Object packet) {
+        if (player == null || !BastionAC.enabled() || player.getEntityWorld().getServer().isOnThread()) return null;
+        PlayerData d = BastionAC.data(player);
+        if (d != null) d.arrivals.stamp(packet, System.currentTimeMillis());
+        return d;
+    }
+
+    /** Server-thread pass: the arrival stamp of this packet (now, when it was never stamped). */
+    @Unique
+    private static long bastionac$arrival(PlayerData d, Object packet) {
+        long now = System.currentTimeMillis();
+        long at = d.arrivals.arrivalOf(packet, now);
+        d.currentArrivalMs = at;
+        return at;
+    }
+
     // PacketGuard taps: protocol abuse filters run on every packet, judge
     // without heuristics and can drop the connection outright.
     // Judged on the server-thread invocation only: the netty-thread call
@@ -78,10 +101,17 @@ public abstract class ServerPlayNetworkHandlerMixin {
 
     @Inject(method = "onPlayerMove", at = @At("HEAD"), cancellable = true)
     private void bastionac$onPlayerMove(PlayerMoveC2SPacket packet, CallbackInfo ci) {
+        PlayerData nd = bastionac$netty(packet);
+        if (nd != null) {
+            // Old clients have no tick ends of their own: their move packets are the clock.
+            MovementChecks.timerArrival(player, nd, System.currentTimeMillis(), false);
+            return;
+        }
         if (!bastionac$ready()) return;
         dev.bastionac.checks.PacketGuard.onAnyPacket(player);
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        dev.bastionac.telemetry.Telemetry.move(player, packet, bastionac$arrival(d, packet));
         // Packet-order invariant: count the moves inside this client tick.
         dev.bastionac.checks.ClientChecks.onMovePacket(player, d);
         if (packet.changesPosition()) {
@@ -103,8 +133,12 @@ public abstract class ServerPlayNetworkHandlerMixin {
             double nx = packet.getX(player.getX());
             double ny = packet.getY(player.getY());
             double nz = packet.getZ(player.getZ());
+            if (packet.changesLook()) {
+                d.rawYaw = packet.getYaw(0f);
+                d.rawPitch = packet.getPitch(0f);
+            }
             dev.bastionac.core.PlayerContextBuffer.recordMove(player,
-                    packet.getYaw(player.getYaw()), packet.getPitch(player.getPitch()),
+                    d.rawYaw, d.rawPitch, packet.changesLook(),
                     player.getX(), player.getY(), player.getZ(), nx, ny, nz,
                     packet.isOnGround(), player.isSprinting(), player.isSneaking(),
                     player.isUsingItem(), player.isTouchingWater());
@@ -130,25 +164,111 @@ public abstract class ServerPlayNetworkHandlerMixin {
         dev.bastionac.checks.PacketGuard.onAnyPacket(player);
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        // A frozen player is taken off any vehicle; a steering packet that still
+        // arrives (ridden before the tick dismounted them) must not move it.
+        if (dev.bastionac.core.FreezeManager.isStaffFrozen(player.getUuid())) {
+            ci.cancel();
+            return;
+        }
         if (dev.bastionac.checks.VehicleChecks.onVehicleMove(player, d, packet) != Action.NONE) {
             ci.cancel();
         }
     }
 
-    @Inject(method = "onClientTickEnd", at = @At("HEAD"))
-    private void bastionac$onClientTickEnd(ClientTickEndC2SPacket packet, CallbackInfo ci) {
+    // Every server teleport makes a vanilla client answer with a confirm AND a
+    // full move packet straight from the packet handler, inside whatever tick
+    // it is in — one more move than its own tick sends. PacketOrder must not
+    // count that one (a player after every long /tp, and in the resync loop
+    // vanilla runs while the destination chunk loads).
+    //
+    // 3.0: the confirm is matched against the ids vanilla actually sent. It
+    // used to count only while teleportPending was set — and a move packet
+    // the client sent BEFORE it saw a short teleport (a setback, vanilla's
+    // own put-back) lands near enough the target to clear that flag. The
+    // confirm then arrived unaccounted, its Full move counted as a second
+    // move of the tick, and an AFK player in a put-back loop was kicked for
+    // PacketOrder (a live case, 2026-10-08).
+    @Inject(method = "onTeleportConfirm", at = @At("HEAD"))
+    private void bastionac$onTeleportConfirm(net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket packet,
+                                             CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        long at = bastionac$arrival(d, packet);
+        boolean valid = d.consumeTeleportConfirm(packet.getTeleportId());
+        if (valid) d.teleportConfirmsThisClientTick++;
+        dev.bastionac.telemetry.Telemetry.teleportConfirm(player, packet.getTeleportId(), valid, at);
+    }
+
+    /** After vanilla took the confirm: if it was the last teleport, movement starts again from its target. */
+    @Inject(method = "onTeleportConfirm", at = @At("TAIL"))
+    private void bastionac$afterTeleportConfirm(net.minecraft.network.packet.c2s.play.TeleportConfirmC2SPacket packet,
+                                                CallbackInfo ci) {
+        if (!bastionac$ready()) return;
+        PlayerData d = BastionAC.data(player);
+        if (d == null || !d.teleportPending) return;
+        if (((PlayNetworkHandlerAccessor) (Object) this).bastionac$requestedTeleportPos() != null) return;
+        d.teleportPending = false;
+        d.resetMovement(d.tpX, d.tpY, d.tpZ);
+        d.resetMovePackets();
+    }
+
+    /** Vanilla refused the move and is putting the player back (moved wrongly / into a block / too fast). */
+    @Inject(method = "onPlayerMove", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/server/network/ServerPlayNetworkHandler;requestTeleport(DDDFF)V"))
+    private void bastionac$onVanillaPutBack(PlayerMoveC2SPacket packet, CallbackInfo ci) {
+        if (!bastionac$ready()) return;
+        PlayerData d = BastionAC.data(player);
+        if (d == null || d.teleportPending) return;   // vanilla re-sending a pending teleport is not a refusal
+        dev.bastionac.core.CorrectionTracker.onVanillaCorrection(player, d, packet);
+    }
+
+    @Inject(method = "onPlayerInput", at = @At("HEAD"))
+    private void bastionac$onPlayerInput(net.minecraft.network.packet.c2s.play.PlayerInputC2SPacket packet,
+                                         CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
+        if (!bastionac$ready()) return;
+        PlayerData d = BastionAC.data(player);
+        if (d == null) return;
+        long at = bastionac$arrival(d, packet);
+        d.inputBits = dev.bastionac.telemetry.Telemetry.inputBits(packet.input());
+        dev.bastionac.telemetry.Telemetry.input(player, packet.input(), at);
+    }
+
+    @Inject(method = "onCloseHandledScreen", at = @At("HEAD"))
+    private void bastionac$onCloseHandledScreen(net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket packet,
+                                                CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
+        if (!bastionac$ready()) return;
+        PlayerData d = BastionAC.data(player);
+        if (d == null) return;
+        dev.bastionac.telemetry.Telemetry.close(player, packet.getSyncId(), bastionac$arrival(d, packet));
+    }
+
+    @Inject(method = "onClientTickEnd", at = @At("HEAD"))
+    private void bastionac$onClientTickEnd(ClientTickEndC2SPacket packet, CallbackInfo ci) {
+        PlayerData nd = bastionac$netty(packet);
+        if (nd != null) {
+            // 1.21.2+: every client tick ends with this packet — the exact clock for Timer.
+            MovementChecks.timerArrival(player, nd, System.currentTimeMillis(), true);
+            return;
+        }
+        if (!bastionac$ready()) return;
+        PlayerData d = BastionAC.data(player);
+        if (d == null) return;
+        dev.bastionac.telemetry.Telemetry.tickEnd(player, bastionac$arrival(d, packet));
         dev.bastionac.checks.ClientChecks.onClientTickEnd(player, d);
     }
 
     @Inject(method = "onClickSlot", at = @At("HEAD"), cancellable = true)
     private void bastionac$onClickSlot(ClickSlotC2SPacket packet, CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
         if (!bastionac$ready()) return;
         dev.bastionac.checks.PacketGuard.onAnyPacket(player);
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        dev.bastionac.telemetry.Telemetry.click(player, packet, bastionac$arrival(d, packet));
         dev.bastionac.checks.ClientChecks.beforeSlotClick(player, d);
         if (dev.bastionac.checks.ClientChecks.onSlotClick(player, d, packet) != Action.NONE) {
             ci.cancel();
@@ -165,9 +285,11 @@ public abstract class ServerPlayNetworkHandlerMixin {
 
     @Inject(method = "onPlayerInteractEntity", at = @At("HEAD"), cancellable = true)
     private void bastionac$onPlayerInteractEntity(PlayerInteractEntityC2SPacket packet, CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        long arrivedAt = bastionac$arrival(d, packet);
 
         boolean[] isAttack = {false};
         packet.handle(new PlayerInteractEntityC2SPacket.Handler() {
@@ -186,10 +308,27 @@ public abstract class ServerPlayNetworkHandlerMixin {
         });
         if (!isAttack[0]) return;
 
+        if (dev.bastionac.core.FreezeManager.blocksActions(player)) {
+            ci.cancel();
+            return;
+        }
         Entity target = packet.getEntity(player.getEntityWorld());
         if (target == null || target == player) return;
+        // 3.0: the client must have been shown this entity before it can hit it.
+        if (!d.isFullyExempt(BastionAC.serverTick())
+                && !dev.bastionac.core.EntityKnowledge.knows(player.getUuid(), target.getId())) {
+            boolean refuse = BastionAC.flag(player, d, dev.bastionac.core.CheckType.ENTITYPREDICT, String.format(
+                    "удар по %s (id %d), которую клиенту ещё не показывали — предсказание id (CrystalAura)",
+                    net.minecraft.registry.Registries.ENTITY_TYPE.getId(target.getType()).getPath(), target.getId()));
+            if (refuse) {
+                d.attackVetoTick = BastionAC.serverTick();
+                ci.cancel();
+                return;
+            }
+        }
         dev.bastionac.core.AttackRate.record(player.getUuid());
         dev.bastionac.core.PlayerContextBuffer.recordAttack(player, target.getId());
+        dev.bastionac.telemetry.Telemetry.attack(player, target, arrivedAt);
 
         // An attack ends any armed mining session as far as we are concerned, so a
         // cheat cannot keep a break timer running in the background while it
@@ -207,10 +346,17 @@ public abstract class ServerPlayNetworkHandlerMixin {
 
     @Inject(method = "onPlayerAction", at = @At("HEAD"), cancellable = true)
     private void bastionac$onPlayerAction(PlayerActionC2SPacket packet, CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
         if (!bastionac$ready()) return;
         dev.bastionac.checks.PacketGuard.onAnyPacket(player);
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        dev.bastionac.telemetry.Telemetry.action(player, packet, bastionac$arrival(d, packet));
+        if (dev.bastionac.core.FreezeManager.blocksActions(player)
+                && packet.getAction() != PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND) {
+            ci.cancel();
+            return;
+        }
         dev.bastionac.core.PlayerContextBuffer.recordEvent(player, "action", packet.getAction().name());
         if (WorldChecks.onAction(player, d, packet) != Action.NONE) {
             ci.cancel();
@@ -219,9 +365,15 @@ public abstract class ServerPlayNetworkHandlerMixin {
 
     @Inject(method = "onPlayerInteractBlock", at = @At("HEAD"), cancellable = true)
     private void bastionac$onPlayerInteractBlock(PlayerInteractBlockC2SPacket packet, CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        dev.bastionac.telemetry.Telemetry.place(player, packet, bastionac$arrival(d, packet));
+        if (dev.bastionac.core.FreezeManager.blocksActions(player)) {
+            ci.cancel();
+            return;
+        }
         dev.bastionac.core.PlayerContextBuffer.recordEvent(player, "place",
                 String.valueOf(packet.getBlockHitResult().getBlockPos().asLong()));
         if (WorldChecks.onInteractBlock(player, d, packet) != Action.NONE) {
@@ -229,11 +381,49 @@ public abstract class ServerPlayNetworkHandlerMixin {
         }
     }
 
+    // Staff freeze: no item use (an ender pearl or a chorus fruit is a way out),
+    // and no commands except talking to staff.
+    @Inject(method = "onPlayerInteractItem", at = @At("HEAD"), cancellable = true)
+    private void bastionac$onPlayerInteractItem(net.minecraft.network.packet.c2s.play.PlayerInteractItemC2SPacket packet,
+                                                CallbackInfo ci) {
+        if (player != null && dev.bastionac.core.FreezeManager.blocksActions(player)) {
+            ci.cancel();
+            return;
+        }
+        if (bastionac$netty(packet) != null) return;
+        if (!bastionac$ready()) return;
+        PlayerData d = BastionAC.data(player);
+        if (d != null) dev.bastionac.telemetry.Telemetry.useItem(player, packet, bastionac$arrival(d, packet));
+    }
+
+    @Inject(method = "onCommandExecution", at = @At("HEAD"), cancellable = true)
+    private void bastionac$onCommandExecution(net.minecraft.network.packet.c2s.play.CommandExecutionC2SPacket packet,
+                                              CallbackInfo ci) {
+        bastionac$frozenCommand(packet.command(), ci);
+    }
+
+    @Inject(method = "onChatCommandSigned", at = @At("HEAD"), cancellable = true)
+    private void bastionac$onChatCommandSigned(net.minecraft.network.packet.c2s.play.ChatCommandSignedC2SPacket packet,
+                                               CallbackInfo ci) {
+        bastionac$frozenCommand(packet.command(), ci);
+    }
+
+    @Unique
+    private void bastionac$frozenCommand(String command, CallbackInfo ci) {
+        if (player == null || !dev.bastionac.core.FreezeManager.blocksActions(player)) return;
+        if (dev.bastionac.core.FreezeManager.commandAllowed(command)) return;
+        ci.cancel();
+        player.getEntityWorld().getServer().execute(() -> player.sendMessage(net.minecraft.text.Text.literal(
+                "§b❄ Вы заморожены: §7доступны только личные сообщения (/msg, /r)"), false));
+    }
+
     @Inject(method = "onHandSwing", at = @At("HEAD"))
     private void bastionac$onHandSwing(HandSwingC2SPacket packet, CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        dev.bastionac.telemetry.Telemetry.swing(player, packet.getHand().ordinal(), bastionac$arrival(d, packet));
         d.lastSwingTick = BastionAC.serverTick();
         d.recordSwing(System.currentTimeMillis());
     }
@@ -243,9 +433,11 @@ public abstract class ServerPlayNetworkHandlerMixin {
     // item change), so this only drops our timer — it raises no violation.
     @Inject(method = "onUpdateSelectedSlot", at = @At("HEAD"))
     private void bastionac$onUpdateSelectedSlot(UpdateSelectedSlotC2SPacket packet, CallbackInfo ci) {
+        if (bastionac$netty(packet) != null) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
+        dev.bastionac.telemetry.Telemetry.slot(player, packet.getSelectedSlot(), bastionac$arrival(d, packet));
         WorldChecks.invalidateMining(d);
     }
 
@@ -258,6 +450,34 @@ public abstract class ServerPlayNetworkHandlerMixin {
         if (player == null) return;
         PlayerData d = BastionAC.data(player);
         if (d != null) d.beginTeleport(x, y, z, BastionAC.serverTick());
+    }
+
+    /**
+     * After vanilla has sent the teleport: remember its id (the confirm must
+     * answer it) and take the target from vanilla itself, already resolved
+     * from any relative axes.
+     */
+    @Inject(method = "requestTeleport(Lnet/minecraft/entity/EntityPosition;Ljava/util/Set;)V", at = @At("TAIL"))
+    private void bastionac$afterRequestTeleport(EntityPosition pos, Set<PositionFlag> flags, CallbackInfo ci) {
+        if (player == null) return;
+        PlayerData d = BastionAC.data(player);
+        if (d == null) return;
+        PlayNetworkHandlerAccessor acc = (PlayNetworkHandlerAccessor) (Object) this;
+        int id = acc.bastionac$requestedTeleportId();
+        d.noteTeleportSent(id);
+        Vec3d target = acc.bastionac$requestedTeleportPos();
+        if (target != null) {
+            d.tpX = target.x;
+            d.tpY = target.y;
+            d.tpZ = target.z;
+        }
+        int rel = 0;
+        if (flags != null) {
+            if (flags.contains(PositionFlag.X)) rel |= 1;
+            if (flags.contains(PositionFlag.Y)) rel |= 2;
+            if (flags.contains(PositionFlag.Z)) rel |= 4;
+        }
+        dev.bastionac.telemetry.Telemetry.teleportSent(player, id, d.tpX, d.tpY, d.tpZ, rel);
     }
 
     @Inject(method = "requestTeleport(Lnet/minecraft/entity/EntityPosition;Ljava/util/Set;)V", at = @At("HEAD"))

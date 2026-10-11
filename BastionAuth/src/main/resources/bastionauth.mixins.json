@@ -8,14 +8,18 @@
     "ClientConnectionFirewallMixin",
     "CommandManagerMixin",
     "HandshakeCaptureMixin",
+    "InteractionManagerInvoker",
     "ItemEntityMixin",
     "LoginHelloCaptureMixin",
     "OutboundChatGateMixin",
     "PermissionFreezeMixin",
     "PlayerChatGateMixin",
+    "PlayerEntityAccessor",
     "PlayerManagerMixin",
+    "RootVehicleMixin",
     "ServerCommonNetworkHandlerAccessor",
-    "ServerPlayNetworkHandlerMixin"
+    "ServerPlayNetworkHandlerMixin",
+    "SpawnInfoMaskMixin"
   ],
   "injectors": {
     "defaultRequire": 1

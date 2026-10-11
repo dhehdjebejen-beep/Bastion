@@ -130,5 +130,32 @@ public final class Alerts {
         }
     }
 
+    /**
+     * Argus verdict for staff: one line, the findings on hover, a click opens
+     * the case (/bac argus case <id>).
+     */
+    public static void sendArgus(String name, UUID uuid, String caseId, String verdict, boolean guilty,
+                                 double score, java.util.List<String> findings) {
+        MinecraftServer srv = BastionAC.server();
+        if (srv == null) return;
+        String alertPrefix = BastionAC.config().messages.alertPrefix;
+        MutableText line = TextFmt.literal(alertPrefix + " &8[&5Аргус&8] &e" + name + " &7» "
+                + (guilty ? "&c" : "&e") + verdict + " &8(" + String.format(java.util.Locale.ROOT, "%.0f%%", score * 100)
+                + ") &8[&dдело #" + caseId + "&8]");
+        StringBuilder hover = new StringBuilder("&7Игрок: &f" + name + "\n&7Дело: &f#" + caseId + "\n");
+        int n = 0;
+        for (String f : findings) {
+            if (n++ >= 6) break;
+            hover.append("&7• &f").append(f).append("\n");
+        }
+        hover.append("\n&8Клик — открыть дело");
+        MutableText clickable = (MutableText) line.styled(s -> s
+                .withClickEvent(new ClickEvent.RunCommand("/bac argus case " + caseId))
+                .withHoverEvent(new HoverEvent.ShowText(TextFmt.literal(hover.toString()))));
+        for (ServerPlayerEntity op : srv.getPlayerManager().getPlayerList()) {
+            if (isAdmin(op) && isEnabledFor(op)) op.sendMessage(clickable, false);
+        }
+    }
+
     private Alerts() {}
 }

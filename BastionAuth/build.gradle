@@ -11,6 +11,9 @@ base {
 
 repositories {
     mavenCentral()
+    // Gradle's own HTTPS client fails on this machine; zxing is vendored in
+    // libs-repo/ (Maven layout, checksum-verified against Central).
+    maven { url = uri("libs-repo") }
 }
 
 dependencies {

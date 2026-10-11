@@ -38,7 +38,7 @@ public abstract class ClientConnectionFirewallMixin {
         AuthManager m = BastionAuth.manager();
         if (m == null || !m.isBlocked(player)) return;
         if (PacketFirewall.allowedWhileFrozen(packet, player)) return;
-        if (packet instanceof PlayerMoveC2SPacket) m.onMovePacket(player);
+        if (packet instanceof PlayerMoveC2SPacket move) m.onMovePacket(player, move);
         m.notePacketDropped(player, packet);
         ci.cancel();
     }

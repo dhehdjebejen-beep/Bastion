@@ -34,9 +34,9 @@ server — players join with an unmodified client and install nothing.
 
 | Module | Version | In one line |
 |---|---|---|
-| [**BastionAuth**](BastionAuth) | 1.8.3 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection. |
-| [**BastionClaims**](BastionClaims) | 1.17.4 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, explosions, projectiles. Also includes an operator WorldEdit with undo. |
-| [**BastionAC**](BastionAC) | 2.24.0 | Anti-cheat engine: 38 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. |
+| [**BastionAuth**](BastionAuth) | 1.11.1 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection. Before the password the player waits in spectator mode, away from their real location. |
+| [**BastionClaims**](BastionClaims) | 1.18.0 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, explosions, projectiles. Also includes an operator WorldEdit with undo. |
+| [**BastionAC**](BastionAC) | 3.0.0 | Anti-cheat engine: 40 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within the hour. |
 
 Each mod works on its own. When they run together, they talk through soft
 reflection bridges: BastionAC reads BastionAuth's account-link ledger, and
@@ -55,7 +55,10 @@ flowchart LR
     LG -->|authenticated| W((World))
     W --> AC
     subgraph AC [BastionAC]
-        CH[38 checks] --> VL[Buffers → violation levels<br/>with decay] --> ACT[Alert · mitigate · kick<br/>tempban ladder]
+        CH[40 checks] --> VL[Buffers → violation levels<br/>with decay] --> ACT[Alert · mitigate · kick<br/>tempban ladder]
+        CH --> TL[(Session telemetry)]
+        VL -->|alerts, EDR chains,<br/>suspicious moments| AR[Argus: features vs.<br/>server norms → verdict]
+        TL --> AR
     end
     W --> CL
     subgraph CL [BastionClaims]
@@ -92,7 +95,7 @@ To install, put the jar into the server's `mods/` folder next to
 
 ## Tests
 
-The repository has 236 unit tests: 80 in BastionAuth, 46 in BastionClaims and 110
+The repository has 265 unit tests: 80 in BastionAuth, 48 in BastionClaims and 137
 in BastionAC. Run them with `./gradlew test` in a module folder. The anti-cheat
 checks were also tested live with a raw-protocol client that sends the exact
 packets of the cheat modules they target.

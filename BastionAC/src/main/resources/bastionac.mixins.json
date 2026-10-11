@@ -7,7 +7,9 @@
     "ServerCommonNetworkHandlerMixin",
     "ServerPlayNetworkHandlerMixin",
     "BlockItemPlacementOutcomeMixin",
-    "GameModeChangeMixin"
+    "GameModeChangeMixin",
+    "PlayNetworkHandlerAccessor",
+    "CommonNetworkHandlerAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

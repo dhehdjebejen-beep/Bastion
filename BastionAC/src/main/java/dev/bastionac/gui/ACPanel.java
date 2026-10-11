@@ -58,6 +58,15 @@ public final class ACPanel {
                 open > 0 ? "&eБез решения: &f" + open : "&7Без решения: &fнет",
                 "&8➜ открыть"), () -> ACLinkMenu.open(admin, 0));
 
+        java.util.List<String> argus = new java.util.ArrayList<>();
+        argus.add("&7Аналитика поверх проверок: читает");
+        argus.add("&7телеметрию игрока и выносит вердикт");
+        argus.add("&7в течение часа.");
+        argus.add("");
+        argus.addAll(dev.bastionac.argus.Argus.status());
+        argus.add("&8➜ открыть");
+        gui.button(24, GuiItems.item(Items.ENDER_EYE, "&5👁 Аргус — расследования", argus), () -> ArgusMenu.open(admin));
+
         gui.set(16, GuiItems.item(myAlerts ? Items.LIME_DYE : Items.GRAY_DYE,
                         "&fМои алерты: " + (myAlerts ? "&aВКЛ" : "&cВЫКЛ"), "&8➜ клик — переключить"),
                 (p, t) -> { Alerts.toggle(p); open(p); });

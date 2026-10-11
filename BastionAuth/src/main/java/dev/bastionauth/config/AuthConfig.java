@@ -136,6 +136,15 @@ public final class AuthConfig {
          * inherit an operator session.
          */
         public boolean disableForOps = true;
+        /**
+         * 1.9: with three people online, typing the password on every rejoin
+         * was the owner's least favourite security feature. When true (the
+         * default) each operator decides for themselves with
+         * {@code /auth strict on|off} and is reminded of the choice at every
+         * login; {@link #disableForOps} is then ignored. False brings back the
+         * old server-wide rule.
+         */
+        public boolean opStrictOptional = true;
     }
 
     public static final class Linking {
@@ -154,6 +163,22 @@ public final class AuthConfig {
         public boolean blockItemPickup = true;
         /** Extra commands (without slash) allowed before login, e.g. "rules". */
         public List<String> extraCommandWhitelist = new ArrayList<>();
+        /**
+         * Before the password the client sees a plain account: no effects,
+         * armour, absorption, XP or flight, survival, no F3 coordinates — and
+         * it cannot move. See StateMask.
+         */
+        public boolean hideAccountState = true;
+        /** Before the password the player waits above their world's spawn, not at their base. See Limbo. */
+        public boolean hideLocation = true;
+        /** Limbo: this many blocks below the world's top, over an invisible client-side platform. */
+        public int limboBelowTop = 2;
+        /**
+         * Before the password the player is a spectator (once the agreement is
+         * on file) and gets their own game mode back on login — survival when
+         * that is unknown. See SpectatorGate.
+         */
+        public boolean spectatorBeforeLogin = true;
     }
 
     public static AuthConfig loadOrCreate(Path file, Consumer<String> warn) throws IOException {
@@ -196,6 +221,10 @@ public final class AuthConfig {
         if (OLD_TRUSTED_NOTE.equals(merged.get("admin.links.trustedNote"))) {
             merged.put("admin.links.trustedNote", defaultMessages().get("admin.links.trustedNote"));
         }
+        // 1.9.1: the 1.9.0 line used a {0} placeholder that String.format
+        // never fills, so ops saw a literal "{0}". Fix the saved copy too.
+        String strictOff = merged.get("opstrict.off");
+        if (strictOff != null && strictOff.contains("{0}")) merged.put("opstrict.off", strictOff.replace("{0}", "%s"));
         messages = merged;
     }
 
@@ -350,6 +379,16 @@ public final class AuthConfig {
         m.put("twofa.backup.head", "&6Резервные коды &7— на случай потери телефона, каждый работает один раз:");
         m.put("twofa.backup.tail", "&7Они же — в книге у вас в инвентаре. Спрячьте её в сундук.");
         m.put("twofa.mapTitle", "QR для двухфакторной защиты");
+        m.put("opstrict.on", "&a🔒 Строгий вход оператора &lвключён&r&a: после выхода снова нужен пароль, сессия по IP не используется.");
+        m.put("opstrict.off", "&e🔓 Строгий вход оператора &lвыключен&r&e: зайдёте с того же IP в течение %s мин — пароль не спросят.");
+        m.put("opstrict.buttonOn", "&8[&a Включить строгий вход &8]");
+        m.put("opstrict.buttonOff", "&8[&7 Выключить &8]");
+        m.put("opstrict.hoverOn", "&7Каждый вход — только с паролем. Защищает права оператора, если ваш IP общий (мобильный интернет, общежитие).");
+        m.put("opstrict.hoverOff", "&7Вход по сессии: тот же IP и не дольше времени жизни сессии.");
+        m.put("opstrict.setOn", "&aСтрогий вход включён. Ваша текущая сессия по IP удалена.");
+        m.put("opstrict.setOff", "&eСтрогий вход выключен. С этого IP вас будут пускать без пароля, пока жива сессия.");
+        m.put("opstrict.forced", "&7Строгий вход для операторов включён на весь сервер (config.json: session.opStrictOptional = false).");
+        m.put("opstrict.notOp", "&cЭта настройка только для операторов.");
         m.put("twofa.opReminder", "&e⚠ У вас права оператора, а двухфакторной защиты нет: &f/2fa включить");
         m.put("device.new", "&eВход с нового устройства. &7Если это не вы — &f/auth lock &7закроет аккаунт до разбора.");
         m.put("device.newNo2fa", "&eВход с нового устройства. &7Пароль — единственная защита аккаунта; включите &f/2fa&7.");

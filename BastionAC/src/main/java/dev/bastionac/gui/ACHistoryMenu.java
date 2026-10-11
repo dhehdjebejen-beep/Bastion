@@ -69,7 +69,8 @@ final class ACHistoryMenu {
     private static void onClick(ServerPlayerEntity admin, Event e) {
         // Punishment that is still an active ban → offer unban.
         HistoryManager.Kind kind = parseKind(e.kind);
-        if ((kind == HistoryManager.Kind.TEMPBAN || kind == HistoryManager.Kind.MANUAL_BAN)) {
+        if ((kind == HistoryManager.Kind.TEMPBAN || kind == HistoryManager.Kind.MANUAL_BAN
+                || kind == HistoryManager.Kind.ARGUS_BAN)) {
             try {
                 UUID uuid = UUID.fromString(e.uuid);
                 if (BanManager.isBanned(uuid, e.name)) {
@@ -120,13 +121,16 @@ final class ACHistoryMenu {
                 lore.add("&8" + when);
                 return GuiItems.head(e.name, "&e⚠ " + e.check, lore);
             }
-            case TEMPBAN, MANUAL_BAN -> {
+            case TEMPBAN, MANUAL_BAN, ARGUS_BAN -> {
                 lore.add("&7Срок: &f" + BanManager.formatDuration(Math.max(1, e.durationHours)));
                 if (e.details != null) lore.add("&8" + e.details);
                 lore.add("&8" + when);
                 boolean active = isActiveBan(e);
                 lore.add(active ? "&cАктивен &8· клик — разбанить" : "&8истёк/снят");
-                return GuiItems.item(Items.BARRIER, (kind == HistoryManager.Kind.MANUAL_BAN ? "&4Ручной бан " : "&cАвто-бан ") + e.name, lore);
+                String title = kind == HistoryManager.Kind.MANUAL_BAN ? "&4Ручной бан "
+                        : kind == HistoryManager.Kind.ARGUS_BAN ? "&5Бан Аргуса " : "&cАвто-бан ";
+                return GuiItems.item(kind == HistoryManager.Kind.ARGUS_BAN ? Items.ENDER_EYE : Items.BARRIER,
+                        title + e.name, lore);
             }
             case KICK -> {
                 if (e.details != null) lore.add("&8" + e.details);

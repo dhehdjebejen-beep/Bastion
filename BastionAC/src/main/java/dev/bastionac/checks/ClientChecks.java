@@ -142,16 +142,35 @@ public final class ClientChecks {
         long tick = BastionAC.serverTick();
         boolean first = !d.sendsTickEnd;
         d.sendsTickEnd = true;
-        int moves = d.movesThisClientTick;
+        int moves = Math.max(0, d.movesThisClientTick - d.teleportConfirmsThisClientTick);
         d.movesThisClientTick = 0;
+        d.teleportConfirmsThisClientTick = 0;
         int dyCount = d.tickDyCount;
         d.tickDyCount = 0;
         d.tickBaseY = Double.NaN;
         d.zeroMovesThisClientTick = 0;
+        // Criticals: how this tick ended — standing on a floor by the client's
+        // own account. A forced crit's fake hop always starts from there.
+        d.groundedAtTickEnd = d.lastGroundedOnFace;
         if (first) return;
         if (player.isCreative() || player.isSpectator()) return;
         if (d.isFullyExempt(tick) || BastionAC.isServerLagging(tick) || BastionAC.isAuthFrozen(player)) return;
         if (d.isMovementExempt(tick)) return;
+
+        // A client older than 1.21.2 has no tick ends of its own: Via cuts its
+        // packets into 50 ms windows, and a jittery connection puts two honest
+        // moves — a jump's +0.42 and +0.753 — into one. Counting moves per
+        // tick would convict it of NCP-step and PacketOrder.
+        if (d.tickEndKind == 0) {
+            int proto = dev.bastionac.core.ClientVersion.protocolOf(player.getUuid());
+            // Unknown while Via is still setting the connection up: ask again next tick.
+            if (proto > 0 || !dev.bastionac.core.ClientVersion.viaPresent()) {
+                d.tickEndKind = proto > 0 && proto < dev.bastionac.core.ClientVersion.FIRST_REAL_TICK_END ? 2 : 1;
+                // The timer switches clocks (move packets → tick ends): start it from neutral.
+                d.timer.requestReset();
+            }
+        }
+        if (d.tickEndKind == 2) return;
 
         double step = stepHeight(d.tickDys, dyCount);
         if (step > 0) {

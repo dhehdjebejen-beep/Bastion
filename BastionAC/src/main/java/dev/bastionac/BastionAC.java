@@ -102,6 +102,11 @@ public final class BastionAC implements DedicatedServerModInitializer {
         return tick;
     }
 
+    /** Duration of the last server tick, ms (telemetry). */
+    public static float lastTickMs() {
+        return lastTickDurationNanos / 1_000_000f;
+    }
+
     /** True shortly after a server-side lag spike — checks pause globally. */
     public static boolean isServerLagging(long atTick) {
         return atTick < lagGraceUntil;
@@ -203,80 +208,37 @@ public final class BastionAC implements DedicatedServerModInitializer {
         int graceTicks = 5 + Math.min(11, (int) Math.ceil(horiz * 6.0));
         d.velocityGraceUntil = Math.max(d.velocityGraceUntil, tick + graceTicks);
 
-        // Anti-KB: arm a verification transaction for meaningful knockback. The
-        // expected displacement is the closed-form sum of the decaying geometric
-        // series v * (1 - drag^n) / (1 - drag) with the vanilla air drag 0.98,
-        // over the verify window. We anchor on the SERVER position (authoritative,
-        // not client-spoofable) and require only a fraction of the expected travel,
-        // so legitimate counter-movement and lag never convict — only a client
-        // that genuinely suppresses the impulse falls short. Micro-nudges below
-        // the threshold are ignored: their displacement is under one block and
-        // would drown in movement noise.
-        ACConfig cfg = config;
-        if (cfg.check(CheckType.VELOCITY.key).enabled && horiz >= 0.4
-                && !player.isCreative() && !player.isSpectator() && !player.hasVehicle()) {
-            int n = cfg.general.velocityVerifyTicks;
-            double expected = dev.bastionac.core.MathUtil.knockbackDisplacement(horiz, n, 0.98);
-            double minExpected = expected * cfg.general.velocityMinRatio;
-            d.beginKbVerify(player.getX(), player.getZ(),
-                    velocity.x / horiz, velocity.z / horiz, minExpected, tick + n);
+        // Anti-KB: arm a ping-pinned verification transaction (KnockbackVerifier).
+        if (config.check(CheckType.VELOCITY.key).enabled) {
+            dev.bastionac.core.KnockbackVerifier.onVelocitySent(player, d, velocity.x, velocity.y, velocity.z);
         }
     }
 
-    /**
-     * Feeds a movement sample into an armed Anti-KB transaction. Called from the
-     * movement check each position packet. Runs the verdict when the window
-     * closes; a suppressed knockback accumulates a fail streak, and only a
-     * sustained streak flags — a single lag spike landing mid-window never does.
-     */
-    public static void tickKbVerify(ServerPlayerEntity player, PlayerData d, double x, double z, long tick) {
-        if (!d.kbPending) return;
-        if (tick < d.kbDeadlineTick) return;
-        double dx = x - d.kbAnchorX;
-        double dz = z - d.kbAnchorZ;
-        double moved = Math.sqrt(dx * dx + dz * dz);
-        ACConfig cfg = config;
-        d.kbPending = false;
-        if (moved + 1.0e-6 < d.kbExpectedMin) {
-            // Before counting a failure, rule out the impulse having nowhere to
-            // go. A player thrown into a wall, into water or lava, or held by a
-            // cobweb/ladder legitimately does not travel — cornering someone is
-            // ordinary PvP, and the displacement model (0.98 air drag) simply
-            // does not describe it. kbBlocked is set by the movement check for
-            // the media; the wall is probed here against real collision shapes,
-            // server-side, so a client cannot fake its way out of the test.
-            if (d.kbBlocked || wallInPath(player, d)) {
-                d.clearKbVerify();
-                return;
-            }
-            d.kbFailStreak++;
-            if (d.kbFailStreak >= cfg.general.velocityConfirmStreak) {
-                d.kbFailStreak = 0;
-                flag(player, d, CheckType.VELOCITY, String.format(
-                        "отброс %.2f бл вместо мин. %.2f (%d подряд)",
-                        moved, d.kbExpectedMin, cfg.general.velocityConfirmStreak));
-            }
-        } else {
-            // A clean transaction decays the streak rather than clearing it, so
-            // alternating lag/cheat windows still converge on a verdict.
-            d.kbFailStreak = Math.max(0, d.kbFailStreak - 1);
-        }
+    /** An explosion (wind charge included) reached this player: its fall is billed differently. */
+    public static void noteExplosion(ServerPlayerEntity player) {
+        PlayerData d = DATA.get(player.getUuid());
+        if (d != null) d.lastExplosionTick = tick;
+    }
+
+    /** After an outgoing packet is queued: the Anti-KB ping goes right behind its velocity packet. */
+    public static void afterPacketSent(ServerPlayerEntity player) {
+        PlayerData d = DATA.get(player.getUuid());
+        if (d != null && d.kbNeedPing) dev.bastionac.core.KnockbackVerifier.flushPing(player, d);
     }
 
     /**
-     * True when a solid obstruction sits in the path the impulse should have
-     * carried the player along. The player's own collision box is swept from its
-     * current place toward the knockback direction by the distance the check
-     * expected, so any wall, corner or doorway that ate the launch is found.
+     * A pong arrived (network thread). Handled on the server thread, queued
+     * behind the movement packets that came in before it, so the transaction
+     * starts exactly between the last pre-knockback move and the first one after.
      */
-    private static boolean wallInPath(ServerPlayerEntity player, PlayerData d) {
-        double dist = Math.max(0.5, d.kbExpectedMin);
-        try {
-            return !player.getEntityWorld().isSpaceEmpty(player,
-                    player.getBoundingBox().offset(d.kbDirX * dist, 0.0, d.kbDirZ * dist));
-        } catch (RuntimeException e) {
-            return true; // unloaded chunk edge — never convict on missing data
-        }
+    public static void onPong(ServerPlayerEntity player, int id) {
+        if (!dev.bastionac.core.KnockbackVerifier.isOurs(id)) return;
+        var server = player.getEntityWorld().getServer();
+        if (server == null) return;
+        server.execute(() -> {
+            PlayerData d = DATA.get(player.getUuid());
+            if (d != null) dev.bastionac.core.KnockbackVerifier.onPong(player, d, id);
+        });
     }
 
     /**
@@ -319,6 +281,8 @@ public final class BastionAC implements DedicatedServerModInitializer {
         if (cfg.general.logViolationsToConsole) {
             LOGGER.info("[VL] {} {} -> {} ({})", d.name, type.key, String.format("%.1f", vl), details);
         }
+        dev.bastionac.core.AcJournal.write("flag", d.name, player.getUuidAsString(), type.key, vl, details, null);
+        dev.bastionac.telemetry.Telemetry.flag(player, type.key, vl, details);
         // EDR chain feed: a borderline flag below the alert threshold is a
         // probe; reaching the alert threshold is an exploit event. Individually
         // either may be noise — the chain detector is what makes the pattern.
@@ -333,15 +297,20 @@ public final class BastionAC implements DedicatedServerModInitializer {
         // the retrospective review sees the packets that led up to it. Later
         // alerts of the same episode extend nothing — the dump is the moment.
         if (vl >= alertVl
-                && d.vl.tryAlert(type, System.currentTimeMillis(), 60_000L)) {
-            dev.bastionac.core.PlayerContextBuffer.snapshot(player,
+                && d.vl.tryDump(type, System.currentTimeMillis(), 60_000L)) {
+            java.nio.file.Path dump = dev.bastionac.core.PlayerContextBuffer.snapshot(player,
                     type.key + " " + String.format(java.util.Locale.ROOT, "%.1f", vl) + " — " + details);
+            dev.bastionac.core.AcJournal.write("dump", d.name, player.getUuidAsString(), type.key, vl,
+                    dump == null ? "контекст пуст — дамп не записан" : dump.getFileName().toString(), null);
         }
         MinecraftServer srv = server;
         if (srv != null && vl >= alertVl
                 && d.vl.tryAlert(type, System.currentTimeMillis(), cfg.general.alertCooldownSeconds * 1000L)) {
             Alerts.send(srv, player, type, vl, details);
             HistoryManager.recordAlert(player, type, vl, details, ShadowTelemetry.evidence(player, d));
+            // An alert opens (or feeds) an Argus case: the analyzer reads the whole session around it.
+            dev.bastionac.argus.Argus.signal(player, dev.bastionac.argus.Signal.Kind.ALERT,
+                    type.key + " VL " + String.format(java.util.Locale.ROOT, "%.1f", vl) + ": " + details);
             // Evasion watch: a staff alert landing arms the panic-pause pattern.
             dev.bastionac.core.EvasionTracker.onAlert(player);
             // An alert counts toward the progressive auto-tempban.
@@ -373,6 +342,8 @@ public final class BastionAC implements DedicatedServerModInitializer {
         PlayerData d = DATA.get(player.getUuid());
         if (d != null) d.kickedByAc = true;
         LOGGER.warn("[KICK] {} kicked by check {}", name, type.key);
+        dev.bastionac.telemetry.Telemetry.acAction(player.getUuid(), dev.bastionac.telemetry.TelemetryFormat.ACT_KICK,
+                "кик по проверке " + type.key);
         HistoryManager.recordPunishment(HistoryManager.Kind.KICK, player.getUuid(), name, type.key, 0, "авто-кик по VL");
         if (m.announceKickToEveryone) {
             srv.getPlayerManager().broadcast(
@@ -438,6 +409,7 @@ public final class BastionAC implements DedicatedServerModInitializer {
                 Files.createDirectories(dir);
                 configFile = dir.resolve("config.json");
                 config = ACConfig.loadOrCreate(configFile, warning -> LOGGER.warn("{}", warning));
+                dev.bastionac.core.FreezeManager.load(dir);
             } catch (Exception e) {
                 LOGGER.error("Failed to load config, using defaults", e);
                 config = ACConfig.defaults();
@@ -449,10 +421,18 @@ public final class BastionAC implements DedicatedServerModInitializer {
                 BanManager.init(srv, dir);
                 HistoryManager.init(dir);
                 dev.bastionac.core.PlayerContextBuffer.init(FabricLoader.getInstance().getGameDir());
+                dev.bastionac.core.AcJournal.init(FabricLoader.getInstance().getGameDir());
             } catch (Exception e) {
                 LOGGER.error("Failed to init BanManager/HistoryManager", e);
             }
             server = srv;
+            try {
+                dev.bastionac.telemetry.Telemetry.init(FabricLoader.getInstance().getGameDir());
+                dev.bastionac.argus.Argus.init(FabricLoader.getInstance().getConfigDir().resolve(MOD_ID),
+                        FabricLoader.getInstance().getGameDir());
+            } catch (Exception e) {
+                LOGGER.error("Failed to start telemetry/Argus; checks run without them", e);
+            }
             LOGGER.info("BastionAC active: {} checks, alerts {}, setback {}, auto-tempban {}",
                     CheckType.values().length,
                     config.general.alertsToOps ? "on" : "off",
@@ -461,9 +441,12 @@ public final class BastionAC implements DedicatedServerModInitializer {
         });
 
         ServerLifecycleEvents.SERVER_STOPPING.register(srv -> {
+            dev.bastionac.argus.Argus.shutdown();
+            dev.bastionac.telemetry.Telemetry.shutdown();
             server = null;
             BanManager.shutdown();
             HistoryManager.saveNow(); // blocking on purpose — the process is going away
+            dev.bastionac.core.AcJournal.flush();
             SafeFiles.flush();        // drain anything the I/O thread still holds
             DATA.clear();
         });
@@ -475,10 +458,25 @@ public final class BastionAC implements DedicatedServerModInitializer {
             // this player for a fall. The check compares the descent it
             // measured itself against whether this ever fired — an outcome
             // test, so it does not care how the client faked its landing.
+            if (entity instanceof ServerPlayerEntity hurt) {
+                dev.bastionac.telemetry.Telemetry.damage(hurt, amount, source.getName(),
+                        source.getAttacker() == null ? 0 : source.getAttacker().getId());
+            }
             if (entity instanceof ServerPlayerEntity victim
                     && source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_FALL)) {
                 PlayerData vd = DATA.get(victim.getUuid());
-                if (vd != null) vd.lastFallDamageTick = tick;
+                if (vd != null) {
+                    vd.lastFallDamageTick = tick;
+                    vd.fallDamageRaw += amount;
+                }
+            }
+            // A staff-frozen player can neither be hurt nor hurt anyone.
+            if (entity instanceof ServerPlayerEntity fv && dev.bastionac.core.FreezeManager.isStaffFrozen(fv.getUuid())) {
+                return false;
+            }
+            if (source.getAttacker() instanceof ServerPlayerEntity fa
+                    && dev.bastionac.core.FreezeManager.isStaffFrozen(fa.getUuid())) {
+                return false;
             }
             if (source.getAttacker() instanceof ServerPlayerEntity attacker) {
                 PlayerData d = DATA.get(attacker.getUuid());
@@ -500,10 +498,12 @@ public final class BastionAC implements DedicatedServerModInitializer {
             d.lastWorld = player.getEntityWorld();
             d.resetMovement(player.getX(), player.getY(), player.getZ());
             DATA.put(player.getUuid(), d);
+            dev.bastionac.core.FreezeManager.onJoin(player);
             dev.bastionac.core.PlayerContextBuffer.attach(player);
             dev.bastionac.core.ReconTracker.attach(player);
             dev.bastionac.core.EvasionTracker.attach(player);
             dev.bastionac.core.XrayTracker.attach(player, d);
+            dev.bastionac.telemetry.Telemetry.attach(player);
             dev.bastionac.core.NetworkRegistry.noteName(player.getUuid(), player.getGameProfile().name());
             dev.bastionac.core.NetworkRegistry.noteJoin(player);
             // Staff signal (never an action): the joiner's subnet matches a
@@ -514,6 +514,11 @@ public final class BastionAC implements DedicatedServerModInitializer {
         ServerPlayConnectionEvents.DISCONNECT.register((handler, srv) -> {
             ServerPlayerEntity player = handler.player;
             PlayerData leaving = DATA.get(player.getUuid());
+            String sessionFile = dev.bastionac.telemetry.Telemetry.currentFile(player.getUuid());
+            dev.bastionac.telemetry.Telemetry.detach(player.getUuid());
+            dev.bastionac.argus.Argus.onDisconnect(player.getUuid(), player.getGameProfile().name(), sessionFile);
+            dev.bastionac.core.EntityKnowledge.forget(player.getUuid());
+            dev.bastionac.core.FreezeManager.onDisconnect(player);
             DATA.remove(player.getUuid());
             Alerts.forget(player.getUuid());
             HitboxHistory.remove(player.getId());
@@ -542,6 +547,8 @@ public final class BastionAC implements DedicatedServerModInitializer {
             d.respawnGraceUntil = tick + config.general.joinGraceTicks;
             d.lastWorld = newPlayer.getEntityWorld();
             d.teleportPending = false;
+            d.timer.requestReset();
+            dev.bastionac.telemetry.Telemetry.life(newPlayer, dev.bastionac.telemetry.TelemetryFormat.LIFE_RESPAWN);
             d.clearMining(); // a break armed before dying can never be closed
             d.resetMovement(newPlayer.getX(), newPlayer.getY(), newPlayer.getZ());
             d.resetMovePackets();
@@ -557,6 +564,8 @@ public final class BastionAC implements DedicatedServerModInitializer {
             d.respawnGraceUntil = tick + 100;
             d.lastWorld = destination;
             d.teleportPending = false;
+            d.timer.requestReset();
+            dev.bastionac.telemetry.Telemetry.life(player, dev.bastionac.telemetry.TelemetryFormat.LIFE_WORLD);
             d.clearMining();
             d.resetMovement(player.getX(), player.getY(), player.getZ());
             d.resetMovePackets();
@@ -580,6 +589,10 @@ public final class BastionAC implements DedicatedServerModInitializer {
 
             HitboxHistory.snapshot(srv);
             HistoryManager.tick(tick);
+            dev.bastionac.telemetry.Telemetry.tick(srv, tick);
+            dev.bastionac.argus.Argus.tick(srv, tick);
+            if (tick % 20 == 0) dev.bastionac.core.EntityKnowledge.sweep();
+            dev.bastionac.core.FreezeManager.tick(srv, tick);
 
             // Staff-presence feed for the evasion tracker: every admin join
             // or approach arms the "collapse" watch on busy players. Cheap —
@@ -619,6 +632,7 @@ public final class BastionAC implements DedicatedServerModInitializer {
                     if (pd == null || pd.brandChecked) continue;
                     if (pd.brand == null) pd.brand = clientBrand(p);
                     dev.bastionac.checks.ClientChecks.checkBrand(p, pd);
+                    if (pd.brandChecked) dev.bastionac.telemetry.Telemetry.clientInfo(p, pd.brand);
                 }
             }
 
@@ -649,6 +663,20 @@ public final class BastionAC implements DedicatedServerModInitializer {
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 ACCommands.register(dispatcher));
+
+        // Telemetry: every block a player breaks, with how exposed it was while it still stood.
+        net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, be) -> {
+            if (player instanceof ServerPlayerEntity sp) dev.bastionac.telemetry.Telemetry.beforeBreak(sp, pos);
+            return true;
+        });
+        net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, be) -> {
+            if (player instanceof ServerPlayerEntity sp) dev.bastionac.telemetry.Telemetry.broken(sp, pos, state);
+        });
+        ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
+            if (entity instanceof ServerPlayerEntity sp) {
+                dev.bastionac.telemetry.Telemetry.life(sp, dev.bastionac.telemetry.TelemetryFormat.LIFE_DEATH);
+            }
+        });
 
         LOGGER.info("BastionAC {} loaded", VERSION);
     }
