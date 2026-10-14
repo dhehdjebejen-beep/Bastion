@@ -149,15 +149,16 @@ public final class AuthManager {
      * a dormitory, the IP belongs to dozens of strangers, any of whom could
      * type the name of someone who left in the last six hours and walk into
      * their account on an offline-mode server. The session now also has to
-     * come from the same client install: the same brand and client options
-     * (language, view distance, skin parts, main hand, chat settings…), kept
-     * as an HMAC. A session saved by an older build has no profile and asks for
-     * the password once.
+     * come from the same client install: the same brand, language and main
+     * hand, and at most one everyday setting changed (render distance, skin
+     * parts, particles, chat) — see {@link DeviceFingerprint#sessionProfile}.
+     * A session saved by an older build has no such profile and asks for the
+     * password once.
      */
     static boolean sessionMatches(Session session, String ipHmac, String profile, long now) {
         if (session == null || session.expiresAt() <= now) return false;
         if (!constantTimeEquals(session.ipHmac(), ipHmac)) return false;
-        return session.profile() != null && DeviceFingerprint.sameDevice(session.profile(), profile);
+        return DeviceFingerprint.sessionProfileMatches(session.profile(), profile);
     }
 
     private static Pattern compileNameRegex(String regex) {
@@ -390,7 +391,7 @@ public final class AuthManager {
         recordFingerprintAsync(player, uuid, name, ip);
         // The brand is bound to the uuid by now (recordFingerprintAsync claims
         // it on this thread before handing off), so the profile is complete.
-        st.deviceProfile = DeviceFingerprint.computeProfile(player, secrets);
+        st.deviceProfile = DeviceFingerprint.sessionProfile(player, secrets);
 
         boolean registered = nameCache.containsKey(name.toLowerCase(Locale.ROOT));
         long now = System.currentTimeMillis();

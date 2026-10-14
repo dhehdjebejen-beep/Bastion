@@ -206,6 +206,63 @@ public final class DeviceFingerprint {
         }
     }
 
+    /** Marks the parted session-profile format (see {@link #sessionProfile}). */
+    static final String SESSION_PROFILE_PREFIX = "s2:";
+    /** Everyday settings that may differ between a session and the rejoin that resumes it. */
+    public static final int SESSION_CHANGES_ALLOWED = 1;
+
+    /**
+     * The client profile a resumable session is bound to, kept in parts (1.12.2).
+     * The single HMAC of every option (1.12.0) broke the session whenever a
+     * player turned their render distance down for lag, toggled the cape or
+     * changed particles before relogging — the password again, for nothing.
+     *
+     * <p>Now the install itself — brand, language, main hand — must match
+     * exactly, and of the everyday settings (render distance, skin parts,
+     * particles, chat options) at most {@link #SESSION_CHANGES_ALLOWED} may
+     * differ. A stranger behind the same NAT still has to hit the brand,
+     * language and hand and all but one of the rest. Each part is its own
+     * HMAC, so nothing readable is stored.
+     */
+    public static String sessionProfile(ServerPlayerEntity player, Secrets secrets) {
+        try {
+            return sessionProfile(brandOf(player), optionsOf(player), m -> secrets.deviceHmac("session|" + m));
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Pure: the parted profile from the brand and options, with {@code hmac} for each part. */
+    static String sessionProfile(String brand, SyncedClientOptionsView v, java.util.function.UnaryOperator<String> hmac) {
+        return SESSION_PROFILE_PREFIX
+                + hmac.apply("stable|" + brand + "|" + v.language() + "|" + v.mainArm()) + ":"
+                + hmac.apply("view|" + v.viewDistance()) + ":"
+                + hmac.apply("skin|" + v.playerModelParts()) + ":"
+                + hmac.apply("particles|" + v.particleStatus()) + ":"
+                + hmac.apply("chat|" + v.chatVisibility() + "|" + v.chatColorsEnabled() + "|" + v.filtersText()
+                        + "|" + v.allowsServerListing());
+    }
+
+    /**
+     * Whether a rejoin's profile resumes a stored session: the same install,
+     * and no more than {@link #SESSION_CHANGES_ALLOWED} everyday settings
+     * changed. A profile in any other format (a session saved by 1.12.0–1.12.1,
+     * or none) never matches — the password is asked once.
+     */
+    public static boolean sessionProfileMatches(String stored, String now) {
+        if (stored == null || now == null) return false;
+        if (!stored.startsWith(SESSION_PROFILE_PREFIX) || !now.startsWith(SESSION_PROFILE_PREFIX)) return false;
+        String[] a = stored.substring(SESSION_PROFILE_PREFIX.length()).split(":", -1);
+        String[] b = now.substring(SESSION_PROFILE_PREFIX.length()).split(":", -1);
+        if (a.length != 5 || b.length != 5) return false;
+        if (!sameDevice(a[0], b[0])) return false;
+        int changed = 0;
+        for (int i = 1; i < a.length; i++) {
+            if (!sameDevice(a[i], b[i])) changed++;
+        }
+        return changed <= SESSION_CHANGES_ALLOWED;
+    }
+
     /** Computes and caches the player's device hash. Call on join (server thread). */
     public static String record(ServerPlayerEntity player, Secrets secrets) {
         String hash = compute(player, secrets);

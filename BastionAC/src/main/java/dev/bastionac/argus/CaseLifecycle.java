@@ -28,6 +28,13 @@ final class CaseLifecycle {
     static final long REANALYZE_GRACE_MS = 30 * 60_000L;
     /** A session scan right after a staff decision re-reads the session just decided. */
     static final long DECIDED_QUIET_MS = 60 * 60_000L;
+    /**
+     * A signal this long after an analysed case went quiet (no signal, no
+     * analysis) and past its deadline is a new episode and opens a new case.
+     */
+    static final long EPISODE_GAP_MS = 6 * 3_600_000L;
+    /** An analysis never reads telemetry older than this before now (unless the window itself is longer). */
+    static final long MAX_READ_SPAN_MS = 12 * 3_600_000L;
 
     private CaseLifecycle() {}
 
@@ -100,14 +107,21 @@ final class CaseLifecycle {
 
     /**
      * After a live result: the case is analysed; a verdict is final at once
-     * when it cannot change any more — guilty, or the player is gone and no new
-     * telemetry will come — instead of waiting out the deadline. A request that
-     * arrived during the analysis is due now.
+     * when it cannot change any more — the player is gone and no new telemetry
+     * will come, or "guilty" on solid ground — instead of waiting out the
+     * deadline. A request that arrived during the analysis is due now.
+     *
+     * @param solid the verdict rests on a physically impossible fact or on
+     *              enough minutes of telemetry ({@code autoBanMinMinutes}).
+     *              "Guilty" from the first couple of minutes alone is not
+     *              final: the deadline pass reads it again with more data
+     *              (3.1.2 — with a two-minute collection a first verdict can
+     *              stand on very little).
      */
-    static void settle(CaseFile c, boolean playerOnline, long now) {
+    static void settle(CaseFile c, boolean playerOnline, long now, boolean solid) {
         c.status = CaseFile.Status.ANALYZED;
         c.lastAnalyzedAt = now;
-        if (c.verdict == CaseFile.Verdict.GUILTY || !playerOnline) c.finalPass = true;
+        if ((c.verdict == CaseFile.Verdict.GUILTY && solid) || !playerOnline) c.finalPass = true;
         if (c.rerunRequested) {
             c.rerunRequested = false;
             c.dueAt = now;
@@ -155,6 +169,45 @@ final class CaseLifecycle {
         }
         c.finalPass = true;
         c.rerunRequested = false;
+    }
+
+    /**
+     * Whether a signal for this open case starts a new episode instead: the
+     * case was analysed, its deadline is past and it has been quiet (no signal,
+     * no analysis) for {@link #EPISODE_GAP_MS}. Attached to the old case, the
+     * signal used to be read together with everything since that case opened —
+     * days of play — and an old verdict was judged again on old evidence.
+     */
+    static boolean newEpisode(CaseFile c, long now) {
+        if (c == null || !c.open() || c.inFlight || c.status != CaseFile.Status.ANALYZED) return false;
+        if (now <= c.deadlineAt) return false;
+        return now - Math.max(c.lastSignalAt, c.lastAnalyzedAt) > EPISODE_GAP_MS;
+    }
+
+    /**
+     * The old case of a new episode: closed, its verdict and numbers kept. If
+     * nobody decided it and it was suspicious or guilty, it stays in the staff's
+     * default list ({@link CaseFile#awaitsDecision()}).
+     */
+    static void closeAsEpisode(CaseFile old, String nextId, long now) {
+        if (old.open()) {
+            old.status = CaseFile.Status.CLOSED;
+            old.closedAt = now;
+        }
+        old.finalPass = true;
+        old.rerunRequested = false;
+        old.closeNote = "новый эпизод — дело #" + nextId;
+    }
+
+    /**
+     * Where an analysis starts reading: {@code windowMs} before the case
+     * opened (or its first signal), but never more than
+     * {@link #MAX_READ_SPAN_MS} (or the window, if longer) before now.
+     */
+    static long readFrom(CaseFile c, long now, long windowMs) {
+        long first = c.signals.isEmpty() ? c.openedAt : c.signals.get(0).at;
+        long anchor = Math.min(c.openedAt, first) - windowMs;
+        return Math.max(anchor, now - Math.max(windowMs, MAX_READ_SPAN_MS));
     }
 
     /**

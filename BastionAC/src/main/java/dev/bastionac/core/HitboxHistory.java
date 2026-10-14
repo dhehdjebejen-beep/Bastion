@@ -85,9 +85,33 @@ public final class HitboxHistory {
      * @return {from, to} ticks back
      */
     public static int[] reachBand(int pingMs, int slack) {
-        int centre = Math.max(0, pingMs) / 50;
-        int from = Math.max(0, centre - slack);
-        int to = Math.min(DEPTH - 1, Math.max(2, centre + slack));
+        return reachBand(pingMs, pingMs, slack);
+    }
+
+    /** The widest band a jittery ping may open, in ticks (the old full window was twenty). */
+    public static final int MAX_BAND_TICKS = 12;
+
+    /**
+     * As {@link #reachBand(int, int)} for a round trip that is not steady: from
+     * the fastest recent one ({@code lowMs}) to the slowest ({@code highMs}),
+     * ± {@code slack}. On mobile networks the round trip of one hit can be far
+     * from the average; a band around a single figure then missed the box the
+     * client really saw (3.1.2). Capped at {@link #MAX_BAND_TICKS} around the
+     * middle, so jitter cannot reopen the old twenty-tick choice.
+     *
+     * @return {from, to} ticks back
+     */
+    public static int[] reachBand(int lowMs, int highMs, int slack) {
+        int lo = Math.max(0, Math.min(lowMs, highMs)) / 50;
+        int hi = Math.max(0, Math.max(lowMs, highMs)) / 50;
+        int from = Math.max(0, lo - slack);
+        int to = Math.max(2, hi + slack);
+        if (to - from > MAX_BAND_TICKS) {
+            int mid = (from + to) / 2;
+            from = Math.max(0, mid - MAX_BAND_TICKS / 2);
+            to = from + MAX_BAND_TICKS;
+        }
+        to = Math.min(DEPTH - 1, to);
         return new int[]{Math.min(from, to), to};
     }
 

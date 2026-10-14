@@ -94,6 +94,11 @@ public final class CaseFile {
 
     public String reportFile;
 
+    /** Why the case was closed when nobody decided it — e.g. a new episode took over (3.1.2). */
+    public String closeNote;
+    /** The player's previous case, when this one was opened as a new episode after it. */
+    public String previousCaseId;
+
     /** Bumped for every analysis handed to the Argus thread; a result carries the one it was started with. */
     public int generation;
     /** An analysis of this case is on the Argus thread right now (not stored: a restart loses the job). */
@@ -125,6 +130,18 @@ public final class CaseFile {
 
     public boolean open() {
         return status != Status.CLOSED;
+    }
+
+    /**
+     * Closed without anyone deciding, yet its verdict still asks for a look:
+     * "suspicious" or "guilty" with no label, no ban and no dismissal. Such a
+     * case stays in the default list — closing it for a new episode must not
+     * make an undecided verdict disappear from the staff's view.
+     */
+    public boolean awaitsDecision() {
+        return !open() && label == Label.NONE
+                && (verdict == Verdict.SUSPECT || verdict == Verdict.GUILTY)
+                && action != Action.BANNED && action != Action.DISMISSED;
     }
 
     public void addSignal(Signal s) {

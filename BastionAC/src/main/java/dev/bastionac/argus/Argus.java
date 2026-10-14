@@ -174,6 +174,13 @@ public final class Argus {
 
     private static void intake(MinecraftServer srv, Signal s, long now, ACConfig.ArgusCfg cfg) {
         CaseFile c = store.openFor(s.uuid().toString());
+        CaseFile previous = null;
+        if (CaseLifecycle.newEpisode(c, now)) {
+            // Hours after the case went quiet: a new episode gets its own case
+            // and its own window (3.1.2). The old one closes with its verdict.
+            previous = c;
+            c = null;
+        }
         if (c == null && s.kind() == Signal.Kind.SESSION_SCAN
                 && CaseLifecycle.recentlyDecided(store.ofPlayer(s.uuid().toString()), now)) {
             return;   // the session staff just judged; not a new episode
@@ -183,6 +190,10 @@ public final class Argus {
             c = store.create(s.uuid().toString(), s.name(), now);
             c.dueAt = now + cfg.collectMinutes * 60_000L;
             c.deadlineAt = now + cfg.deadlineMinutes * 60_000L;
+            if (previous != null) {
+                c.previousCaseId = previous.id;
+                CaseLifecycle.closeAsEpisode(previous, c.id, now);
+            }
         } else if (c.status == CaseFile.Status.ANALYZED && c.closedAt == 0 && now > c.deadlineAt) {
             // A new episode long after the old one was decided: give it its own hour.
             c.deadlineAt = now + cfg.deadlineMinutes * 60_000L;
@@ -200,7 +211,9 @@ public final class Argus {
         }
         if (fresh) {
             AcJournal.write("argus-case", s.name(), s.uuid().toString(), s.kind().name().toLowerCase(Locale.ROOT), 0,
-                    "дело #" + c.id + ": " + s.kind().label + (s.detail() == null ? "" : " — " + s.detail()), null);
+                    "дело #" + c.id + ": " + s.kind().label + (s.detail() == null ? "" : " — " + s.detail())
+                            + (previous == null ? "" : " (прошлое дело #" + previous.id + ": "
+                            + previous.verdict.label + ", закрыто)"), null);
         }
         Telemetry.acAction(s.uuid(), TelemetryFormat.ACT_SIGNAL, "Аргус #" + c.id + ": " + s.kind().label
                 + (s.detail() == null ? "" : " — " + s.detail()));
@@ -216,7 +229,7 @@ public final class Argus {
         in.uuid = c.uuid;
         in.name = c.name;
         long now = System.currentTimeMillis();
-        in.from = Math.min(c.openedAt, firstSignal(c)) - cfg.windowMinutes * 60_000L;
+        in.from = CaseLifecycle.readFrom(c, now, cfg.windowMinutes * 60_000L);
         in.to = now;
         in.worldSample = srv.getPlayerManager().getPlayer(uuid) != null
                 && (c.count(Signal.Kind.XRAY_PROBE) > 0 || c.count(Signal.Kind.MANUAL) > 0
@@ -247,10 +260,6 @@ public final class Argus {
             Analysis.Output result = out;
             if (s != null) s.execute(() -> applyResult(id, gen, result));
         });
-    }
-
-    private static long firstSignal(CaseFile c) {
-        return c.signals.isEmpty() ? c.openedAt : c.signals.get(0).at;
     }
 
     /** What the signals are worth before the telemetry says anything (diminishing per kind). */
@@ -317,7 +326,7 @@ public final class Argus {
         }
         MinecraftServer srv = BastionAC.server();
         boolean online = srv != null && srv.getPlayerManager().getPlayer(UUID.fromString(c.uuid)) != null;
-        CaseLifecycle.settle(c, online, now);
+        CaseLifecycle.settle(c, online, now, solidGround(r, c, cfg));
         act(c, r, before, cfg);
         store.save();
     }
@@ -364,8 +373,20 @@ public final class Argus {
         }
     }
 
+    /**
+     * A verdict that may stand without more data: a physically impossible fact,
+     * or at least {@code autoBanMinMinutes} of telemetry behind it.
+     */
+    static boolean solidGround(Scorer.Result r, CaseFile c, ACConfig.ArgusCfg cfg) {
+        return r.hardHit() || c.dataMinutes >= cfg.autoBanMinMinutes;
+    }
+
     private static boolean autoBanAllowed(CaseFile c, Scorer.Result r, ACConfig.ArgusCfg cfg) {
         if (r.score() < cfg.autoBanScore) return false;
+        // With a two-minute collection the first verdict can rest on very
+        // little; a ban waits for enough telemetry unless a fact is impossible.
+        // Staff are told meanwhile, and the deadline pass reads it again.
+        if (!solidGround(r, c, cfg)) return false;
         if (r.score() <= calibration.maxCleanScore + 0.01) return false;
         if (baselines.sessions() < cfg.minBaselineSessions && !r.hardHit()) return false;
         MinecraftServer srv = BastionAC.server();

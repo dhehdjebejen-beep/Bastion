@@ -23,6 +23,10 @@ client's own source and defaults.
 - **Backtrack via PingSpoof closed:** the lag-compensation window is capped by
   the server's own transactions.
 - Offline operators are exempt from delayed bans.
+- **3.1.2:** one case per episode — a signal hours after a case went quiet opens
+  a new case instead of re-reading days of old play; AUTO bans need at least
+  10 minutes of telemetry unless a fact is physically impossible; the reach
+  window spans the recent round-trip range on a jittery connection (capped).
 
 ## New in 3.0 — telemetry and Argus
 

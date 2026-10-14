@@ -121,7 +121,8 @@ public final class CombatChecks {
 
         // ---------------- REACH ----------------
         Vec3d eye = player.getEyePos();
-        int ping = dev.bastionac.telemetry.Telemetry.lagCompPing(player);
+        int[] rtt = dev.bastionac.telemetry.Telemetry.lagCompRange(player);
+        int ping = rtt[1];
         // Lag compensation: the boxes the target had around the moment the
         // client saw it — one round trip back, ± REACH_BAND_SLACK ticks for
         // jitter and the client's interpolation. Twenty ticks of history cover
@@ -129,7 +130,9 @@ public final class CombatChecks {
         // from now back to the full ping, and the closest of them won: a player
         // who delayed all of his traffic chose among up to twenty positions of
         // the victim — Backtrack by real lag (see HitboxHistory.reachBand).
-        int[] band = HitboxHistory.reachBand(ping, REACH_BAND_SLACK);
+        // Since 3.1.2 the band spans the fastest to the slowest recent round
+        // trip (capped), so a jittery mobile ping keeps the box it really saw.
+        int[] band = HitboxHistory.reachBand(rtt[0], rtt[1], REACH_BAND_SLACK);
         boolean playerTarget = target instanceof ServerPlayerEntity;
         List<Box> boxes = playerTarget ? HitboxHistory.between(target.getId(), band[0], band[1]) : List.of();
         if (boxes.isEmpty()) boxes = List.of(target.getBoundingBox());

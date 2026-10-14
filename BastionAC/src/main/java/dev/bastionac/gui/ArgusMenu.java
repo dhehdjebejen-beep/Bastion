@@ -36,7 +36,9 @@ public final class ArgusMenu {
 
     static void open(ServerPlayerEntity admin, int page, boolean all) {
         List<CaseFile> cases = new ArrayList<>(Argus.cases());
-        if (!all) cases.removeIf(c -> !c.open() && c.label == CaseFile.Label.NONE);
+        // Closed, undecided "suspicious"/"guilty" cases (e.g. replaced by a new
+        // episode) stay listed: closing must not hide a verdict nobody looked at.
+        if (!all) cases.removeIf(c -> !c.open() && c.label == CaseFile.Label.NONE && !c.awaitsDecision());
         // Open and suspicious first, then newest.
         cases.sort(Comparator.<CaseFile>comparingInt(c -> c.open() ? 0 : 1)
                 .thenComparingInt(c -> -c.verdict.ordinal())
@@ -61,7 +63,8 @@ public final class ArgusMenu {
         st.add("&8Аргус не банит за одиночный флаг: он читает");
         st.add("&8всю телеметрию игрока вокруг события: первый");
         st.add("&8вердикт — через несколько минут, итог — сразу");
-        st.add("&8при «виновен» или уходе игрока, иначе к сроку.");
+        st.add("&8при уверенном «виновен» или уходе игрока,");
+        st.add("&8иначе к сроку.");
         gui.button(45, GuiItems.item(Items.ENDER_EYE, "&5Аргус — расследования", st), () -> {});
         gui.button(46, modeButton(), () -> chooseMode(admin));
         gui.button(47, modelButton(), () -> {});
@@ -81,6 +84,9 @@ public final class ArgusMenu {
                 + (c.analyses > 0 ? String.format(Locale.ROOT, " &8(%.0f%%)", c.score * 100) : ""));
         lore.add("&7Статус: &f" + statusLabel(c));
         if (c.label != CaseFile.Label.NONE) lore.add("&7Решение: &f" + c.label.label + " &8(" + c.labelBy + ")");
+        else if (c.awaitsDecision()) lore.add("&eЖдёт решения персонала");
+        if (c.closeNote != null) lore.add("&8" + c.closeNote);
+        if (c.previousCaseId != null) lore.add("&7Прошлое дело: &f#" + c.previousCaseId);
         lore.add("&7Открыто: &f" + GuiItems.ago(System.currentTimeMillis() - c.openedAt) + " назад");
         lore.add("&7Сигналы: &f" + signalsLine(c));
         int n = 0;
@@ -104,6 +110,8 @@ public final class ArgusMenu {
 
         List<String> head = new ArrayList<>();
         head.add("&7Вердикт: " + c.verdict.colour + c.verdict.label);
+        if (c.closeNote != null) head.add("&8" + c.closeNote);
+        if (c.previousCaseId != null) head.add("&7Прошлое дело: &f#" + c.previousCaseId);
         if (c.analyses > 0) {
             head.add(String.format(Locale.ROOT, "&7Оценка: &f%.1f%% &8(улик %.1f, сигналы %.1f)", c.score * 100, c.evidence, c.signalEvidence));
             c.categories.forEach((k, v) -> head.add(String.format(Locale.ROOT, "&7  %s: &f%.0f%%", k, v * 100)));
@@ -242,8 +250,9 @@ public final class ArgusMenu {
                 "&7Помощник — персонал получает вердикт",
                 "&7  и кнопку бана.",
                 "&7Авто — уверенный вердикт банит сам",
-                "&7  (только при прогретых нормах",
-                "&7  и двух независимых уликах).",
+                "&7  (только при прогретых нормах,",
+                "&7  двух независимых уликах и не меньше",
+                "&7  " + dev.bastionac.BastionAC.config().argus.autoBanMinMinutes + " мин данных).",
                 "&8клик — сменить");
     }
 

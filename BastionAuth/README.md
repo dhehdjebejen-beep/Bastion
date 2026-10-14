@@ -45,9 +45,10 @@ prove who is who, and until it has, the connection must not be able to do anythi
 - **Account history, panic lock and new-device warnings.**
 - **Name protection.** A strict regex; no case-variant squatting (`steve` vs
   `Steve`); a second connection from another IP is refused while the owner is online.
-- **Session resume** only from the same IP *and* the same client (an HMAC of the
-  brand and client options): a stranger behind the same carrier NAT cannot walk into
-  someone else's account.
+- **Session resume** only from the same IP *and* the same client (keyed HMACs of
+  the brand, language and main hand, which must match, and of the everyday settings,
+  of which one may change — render distance, skin parts, particles, chat): a stranger
+  behind the same carrier NAT cannot walk into someone else's account.
 - **Agreement gate.** Server rules are handed out as books with an accept button. A
   separate timeout gives time to read them.
 

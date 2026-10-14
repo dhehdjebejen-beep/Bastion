@@ -232,6 +232,12 @@ public final class ACConfig {
         public double autoBanScore = 0.97;
         /** AUTO mode also needs this many honest sessions in the baselines first. */
         public int minBaselineSessions = 20;
+        /**
+         * AUTO mode bans only on a verdict with at least this many minutes of
+         * telemetry behind it — unless a fact is physically impossible. A
+         * thinner "guilty" goes to staff and is read again at the deadline.
+         */
+        public int autoBanMinMinutes = 10;
         /** Every finished session is read once to learn what normal looks like (and to catch what nobody flagged). */
         public boolean analyzeEverySession = true;
         /** The analyzer pauses while the server's average tick is above this (ms). */
@@ -731,6 +737,7 @@ public final class ACConfig {
         argus.guiltyScore = clampD(argus.guiltyScore <= 0 ? 0.95 : argus.guiltyScore, argus.suspectScore, 0.999);
         argus.autoBanScore = clampD(argus.autoBanScore <= 0 ? 0.97 : argus.autoBanScore, argus.guiltyScore, 0.9999);
         argus.minBaselineSessions = clampInt(argus.minBaselineSessions, 0, 10_000);
+        argus.autoBanMinMinutes = clampInt(argus.autoBanMinMinutes <= 0 ? 10 : argus.autoBanMinMinutes, 1, 240);
         argus.pauseAboveMspt = clampD(argus.pauseAboveMspt <= 0 ? 45 : argus.pauseAboveMspt, 10, 1000);
         argus.caseRetentionDays = clampInt(argus.caseRetentionDays <= 0 ? 60 : argus.caseRetentionDays, 1, 3650);
         argus.worldSampleBlocksPerTick = clampInt(argus.worldSampleBlocksPerTick <= 0 ? 6000 : argus.worldSampleBlocksPerTick, 200, 100_000);

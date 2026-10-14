@@ -589,14 +589,44 @@ public final class Telemetry {
      * keep-alive figure. Only ever lowers the claim; unknown or stale → vanilla.
      */
     public static int lagCompPing(ServerPlayerEntity p) {
+        return lagCompRange(p)[1];
+    }
+
+    /**
+     * The round-trip range lag compensation may assume, {low, high} in ms —
+     * see {@link #lagCompRange(int, int[])}. Unknown or stale → vanilla's figure.
+     */
+    public static int[] lagCompRange(ServerPlayerEntity p) {
         int latency = p.networkHandler == null ? 0 : p.networkHandler.getLatency();
         Track tr = TRACK.get(p.getUuid());
-        if (tr == null || System.currentTimeMillis() - tr.rttAtMs > 10_000) return latency;
-        int worst = -1;
+        if (tr == null || System.currentTimeMillis() - tr.rttAtMs > 10_000) return new int[]{latency, latency};
+        int[] rtts;
         synchronized (tr.rtt) {
-            for (int r : tr.rtt) worst = Math.max(worst, r);
+            rtts = tr.rtt.clone();
         }
-        return worst < 0 ? latency : Math.min(latency, worst + 50);
+        return lagCompRange(latency, rtts);
+    }
+
+    /**
+     * Pure: the round-trip range from vanilla's keep-alive latency and our last
+     * transaction round trips (-1 = none). High: the slowest transaction, plus
+     * up to 50 ms when keep-alives say more — a held-back keep-alive (PingSpoof)
+     * cannot stretch it further, while a real spike our transactions measured
+     * is never cut off by a smoothed keep-alive figure (3.1.2). Low: the
+     * fastest of them. Pure, unit-tested.
+     */
+    static int[] lagCompRange(int latency, int[] rtts) {
+        int best = Integer.MAX_VALUE;
+        int worst = -1;
+        for (int r : rtts) {
+            if (r < 0) continue;
+            best = Math.min(best, r);
+            worst = Math.max(worst, r);
+        }
+        if (worst < 0) return new int[]{latency, latency};
+        int high = Math.max(worst, Math.min(latency, worst + 50));
+        int low = Math.min(best, Math.min(latency, high));
+        return new int[]{low, high};
     }
 
     public static void keepAlive(ServerPlayerEntity p, int rttMs) {

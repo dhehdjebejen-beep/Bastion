@@ -14,7 +14,7 @@ public final class PlayerAuthState {
     public final String ip;
 
     public volatile boolean authenticated;
-    /** HMAC of the client's brand and options, taken at join — what a resumable session is bound to besides the IP. */
+    /** The client's parted session profile, taken at join — what a resumable session is bound to besides the IP. */
     public volatile String deviceProfile;
     /** The player object this state was created for — the disconnect handler removes only its own. */
     public volatile Object owner;
