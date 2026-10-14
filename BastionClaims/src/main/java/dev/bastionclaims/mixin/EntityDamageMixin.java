@@ -3,6 +3,7 @@ package dev.bastionclaims.mixin;
 import dev.bastionclaims.core.ProtectionService;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.damage.DamageSource;
+import net.minecraft.entity.decoration.ArmorStandEntity;
 import net.minecraft.entity.decoration.BlockAttachedEntity;
 import net.minecraft.entity.decoration.ItemFrameEntity;
 import net.minecraft.entity.vehicle.VehicleEntity;
@@ -19,13 +20,17 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
  * entities, which leaves out exactly the things people put in a base and lose
  * to a stranger with a bow: item frames full of gear, paintings, chest
  * minecarts and boats. {@code Entity.damage} itself is abstract, so the hook
- * goes on the three concrete declarations instead — {@link ItemFrameEntity}
+ * goes on the concrete declarations instead — {@link ItemFrameEntity}
  * overrides {@link BlockAttachedEntity}'s, hence both are listed.
  *
- * <p>Living entities (animals, armour stands, villagers) are handled through
- * the Fabric event in {@code ClaimEvents}; both paths ask the same question.
+ * <p>{@link ArmorStandEntity} is living but belongs here too: its
+ * {@code damage()} replaces {@code LivingEntity}'s without calling it, so the
+ * Fabric event never fires for it and armour stands were open to arrows,
+ * potions and every explosion. Other living entities (animals, villagers) are
+ * handled through the Fabric event in {@code ClaimEvents}; both paths ask the
+ * same question.
  */
-@Mixin({BlockAttachedEntity.class, ItemFrameEntity.class, VehicleEntity.class})
+@Mixin({BlockAttachedEntity.class, ItemFrameEntity.class, VehicleEntity.class, ArmorStandEntity.class})
 public abstract class EntityDamageMixin {
 
     @Inject(method = "damage(Lnet/minecraft/server/world/ServerWorld;Lnet/minecraft/entity/damage/DamageSource;F)Z",

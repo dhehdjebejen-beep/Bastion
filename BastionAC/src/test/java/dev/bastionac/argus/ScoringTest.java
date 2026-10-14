@@ -155,4 +155,20 @@ class ScoringTest {
         s.broken(t + 1, p, cat, 1);
         return t;
     }
+
+    @Test
+    void onePatientPlayerCannotBecomeTheNorm() {
+        Features.Spec spec = Features.spec("move.air_turn");
+        Baselines b = new Baselines();
+        // Three honest regulars, a handful of sessions each…
+        for (int p = 0; p < 3; p++) for (int i = 0; i < 6; i++) b.addSession("honest" + p, Map.of("move.air_turn", 0.03));
+        assertEquals("норма по умолчанию", b.population(spec).source(), "three players are not yet a server norm");
+        // …and one player grinding hundreds of sessions at a cheating value.
+        for (int i = 0; i < 300; i++) b.addSession("grinder", Map.of("move.air_turn", 0.30));
+        b.addSession("honest3", Map.of("move.air_turn", 0.03));
+        for (int i = 0; i < 5; i++) b.addSession("honest3", Map.of("move.air_turn", 0.03));
+        Baselines.Ref ref = b.population(spec);
+        assertTrue(ref.n() > 0, "four players make a server norm");
+        assertEquals(0.03, ref.ref(), 1e-9, "the grinder is capped and stays a minority: " + ref);
+    }
 }

@@ -18,6 +18,9 @@ import static dev.bastionac.telemetry.TelemetryFormat.MV_LOOK;
  */
 public final class CombatFeatures {
 
+    /** Hits above this ping (ms) do not count towards the reach statistic. */
+    static final int REACH_MAX_PING = 150;
+
     private CombatFeatures() {}
 
     public static void analyze(SessionData s, FeatureSet out) {
@@ -34,7 +37,14 @@ public final class CombatFeatures {
             }
             if (a.distance > 1.0f) out.sample("cmb.aim_error", a.aimError);
             if (a.aimError > 60f) blind++;
-            if (a.has(dev.bastionac.telemetry.SessionWriter.Attack.F_PLAYER)) out.sample("cmb.reach", a.distance);
+            // Reach is measured against the target's box as the server has it
+            // now; at a high ping the player legitimately hit where it was a
+            // few ticks ago. Those hits are set aside instead of excusing every
+            // hit by a ping allowance (the realtime check does the lag
+            // compensation with the hitbox history).
+            if (a.has(dev.bastionac.telemetry.SessionWriter.Attack.F_PLAYER) && a.ping <= REACH_MAX_PING) {
+                out.sample("cmb.reach", a.distance);
+            }
             if (flickBefore(s, a.t) > 25.0) snaps++;
         }
         out.rate("cmb.aim_center", center, centerJudged);
@@ -115,11 +125,10 @@ public final class CombatFeatures {
         out.rate("cmb.rot_const", equal, pairs);
         if (combatSteps.n >= 40) {
             double[] steps = combatSteps.toArray();
-            double step = MathUtil.rotationGcd(steps);
-            if (step > 0) {
-                double onGrid = MathUtil.onGridRatio(steps, step);
-                out.rate("cmb.gcd_off", (1 - onGrid) * steps.length, steps.length);
-            }
+            // No common grid at all is the strongest form of the signal, not
+            // a reason to skip it (bestGridFit, 3.1).
+            double onGrid = MathUtil.bestGridFit(steps).ratio();
+            if (!Double.isNaN(onGrid)) out.rate("cmb.gcd_off", (1 - onGrid) * steps.length, steps.length);
         }
     }
 

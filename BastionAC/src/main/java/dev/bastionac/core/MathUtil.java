@@ -153,5 +153,51 @@ public final class MathUtil {
         return total == 0 ? 0 : (double) on / total;
     }
 
+    /** The sensitivity step that explains the most deltas, and the share it explains. */
+    public record GridFit(double step, double ratio) {}
+
+    /**
+     * The best grid the deltas sit on, found robustly. {@link #rotationGcd}
+     * returns 0 whenever the deltas share no common divisor — which is exactly
+     * what interpolated aim looks like — and its callers then skipped the
+     * feature: the cleaner the aimbot, the surer it was to go unjudged. One
+     * noisy delta also collapsed a human's GCD the same way.
+     *
+     * <p>Here every candidate step comes from the data: each of the smallest
+     * distinct deltas and its halves and thirds (a human's smallest turn is a
+     * mouse count or two). The candidate that puts most deltas on its grid
+     * wins. A hand on a mouse scores ~1.0 for its own step; computed aim
+     * lands at the few per cent random chance gives. The ratio is NaN when
+     * there is nothing to judge (too few or only large deltas). Pure, unit-tested.
+     */
+    public static GridFit bestGridFit(double[] deltas) {
+        if (deltas == null || deltas.length < 2) return new GridFit(0, Double.NaN);
+        double floor = 0.0015;
+        java.util.TreeSet<Long> small = new java.util.TreeSet<>();
+        for (double d : deltas) {
+            double a = Math.abs(d);
+            if (a >= floor && a <= 3.0) small.add(Math.round(a * 100_000.0));
+        }
+        java.util.List<Double> candidates = new java.util.ArrayList<>();
+        int taken = 0;
+        for (long micro : small) {
+            if (taken++ >= 40) break;
+            double v = micro / 100_000.0;
+            for (int k = 1; k <= 3; k++) if (v / k >= floor) candidates.add(v / k);
+        }
+        double gcd = rotationGcd(deltas);
+        if (gcd > 0) candidates.add(gcd);
+        // Nothing small enough to read a grid from (only big turns): no verdict.
+        if (candidates.isEmpty()) return new GridFit(0, Double.NaN);
+        GridFit best = new GridFit(0, 0);
+        for (double step : candidates) {
+            double r = onGridRatio(deltas, step);
+            if (r > best.ratio() + 1e-12 || (Math.abs(r - best.ratio()) <= 1e-12 && step > best.step())) {
+                best = new GridFit(step, r);
+            }
+        }
+        return best;
+    }
+
     private MathUtil() {}
 }

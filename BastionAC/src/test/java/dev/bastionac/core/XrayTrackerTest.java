@@ -73,4 +73,22 @@ class XrayTrackerTest {
         assertEquals(XrayTracker.OreFamily.DIAMOND, XrayTracker.classify(true, false, true));
         assertEquals(XrayTracker.OreFamily.OTHER, XrayTracker.classify(false, false, false));
     }
+
+    @Test
+    void hiddenOreAlertsAreThrottledButCounted() {
+        PlayerData d = new PlayerData(java.util.UUID.randomUUID(), "miner");
+        assertEquals(1, XrayTracker.hiddenBatch(d, 1_000, 60), "the first one goes out at once");
+        assertEquals(0, XrayTracker.hiddenBatch(d, 5_000, 60), "then a minute of quiet");
+        assertEquals(0, XrayTracker.hiddenBatch(d, 30_000, 60));
+        assertEquals(3, XrayTracker.hiddenBatch(d, 61_000, 60), "the next alert reports the skipped ones too");
+        assertEquals(0, XrayTracker.hiddenBatch(d, 62_000, 60));
+    }
+
+    @Test
+    void everyFindingHasAStaffLabel() {
+        for (String k : new String[]{XrayTracker.KIND_HIDDEN, XrayTracker.KIND_PURE,
+                XrayTracker.KIND_RATIO, XrayTracker.KIND_DROP}) {
+            assertFalse(XrayTracker.labelOf(k).equals(k), k + " must read as Russian for staff");
+        }
+    }
 }

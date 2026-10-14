@@ -4,11 +4,13 @@ import dev.bastionclaims.core.ProtectionService;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.FireBlock;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.world.World;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.random.Random;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.Redirect;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -32,5 +34,31 @@ public abstract class FireBlockMixin {
                                                      Random random, CallbackInfo ci) {
         String dim = world.getRegistryKey().getValue().toString();
         if (ProtectionService.fireSpreadBlocked(dim, pos.getX(), pos.getY(), pos.getZ())) ci.cancel();
+    }
+
+    /**
+     * A fire burning just OUTSIDE the claim still ticks, and its tick reaches
+     * into the neighbours: {@code trySpreadingFire} burns the adjacent block
+     * away or sets it alight. Stopping only the fires inside left exactly that
+     * open — the wall on the border burned from the outside in.
+     */
+    @Inject(method = "trySpreadingFire", at = @At("HEAD"), cancellable = true)
+    private void bastionclaims$noBurnAcross(World world, BlockPos pos, int spreadFactor, Random random,
+                                            int currentAge, CallbackInfo ci) {
+        String dim = world.getRegistryKey().getValue().toString();
+        if (ProtectionService.fireSpreadBlocked(dim, pos.getX(), pos.getY(), pos.getZ())) ci.cancel();
+    }
+
+    /** The same outside fire also seeds new fire a few blocks around it — not into the claim. */
+    @Redirect(method = "scheduledTick", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/server/world/ServerWorld;setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;I)Z"))
+    private boolean bastionclaims$noSeedAcross(ServerWorld world, BlockPos pos, BlockState state, int flags) {
+        // Only new fire placed elsewhere is refused; the fire ageing in place
+        // (same position) is the claim-free fire itself.
+        if (state.getBlock() instanceof FireBlock) {
+            String dim = world.getRegistryKey().getValue().toString();
+            if (ProtectionService.fireSpreadBlocked(dim, pos.getX(), pos.getY(), pos.getZ())) return false;
+        }
+        return world.setBlockState(pos, state, flags);
     }
 }

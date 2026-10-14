@@ -115,6 +115,45 @@ public final class Claim {
     /** Why, for the message on the border. */
     public String arrestReason = "";
 
+    /** What a claim role may do. A member without a role may do all of it. */
+    public enum Perm {
+        BUILD("build", "строить и ломать"),
+        CONTAINERS("containers", "сундуки и станки"),
+        DOORS("doors", "двери, кнопки, рычаги"),
+        ENTITIES("entities", "существа и рамки");
+
+        public final String key;
+        public final String label;
+
+        Perm(String key, String label) {
+            this.key = key;
+            this.label = label;
+        }
+
+        public static Perm parse(String s) {
+            if (s == null) return null;
+            String v = s.trim().toLowerCase(Locale.ROOT);
+            for (Perm p : values()) if (p.key.equals(v) || p.name().equalsIgnoreCase(v)) return p;
+            return switch (v) {
+                case "стройка", "блоки", "break", "place" -> BUILD;
+                case "сундуки", "chests", "станки" -> CONTAINERS;
+                case "двери", "кнопки", "buttons" -> DOORS;
+                case "существа", "мобы", "mobs" -> ENTITIES;
+                default -> null;
+            };
+        }
+    }
+
+    /**
+     * Roles defined in this claim: name → the permission keys it grants.
+     * A member given a role may do only what the role allows (and whatever
+     * the guest flags open to everybody); a member without one keeps full
+     * member rights, exactly as before roles existed.
+     */
+    public java.util.Map<String, List<String>> roles = new java.util.LinkedHashMap<>();
+    /** Member UUID → role name. */
+    public java.util.Map<String, String> memberRoles = new java.util.LinkedHashMap<>();
+
     public Claim() {}
 
     /** Builds a claim from two arbitrary corners, normalising min/max. */
@@ -266,6 +305,39 @@ public final class Claim {
         return isOwner(uuid) || isMember(uuid);
     }
 
+    /**
+     * Whether this player may do {@code perm} here as owner or member. The
+     * owner may do everything; a member without a role too; a member with a
+     * role only what it grants. Non-members get {@code false} — the guest
+     * flags are judged by the caller.
+     */
+    public boolean can(java.util.UUID uuid, Perm perm) {
+        if (isOwner(uuid)) return true;
+        if (!isMember(uuid)) return false;
+        List<String> granted = roleGrants(roleOf(uuid));
+        return granted == null || granted.contains(perm.key);
+    }
+
+    /** The role of a member, or null for a full member (or a role that no longer exists). */
+    public String roleOf(java.util.UUID uuid) {
+        if (uuid == null || memberRoles == null) return null;
+        String r = memberRoles.get(uuid.toString());
+        return r != null && roles != null && roles.containsKey(r) ? r : null;
+    }
+
+    /** The permissions a role grants, or null when there is no such role. */
+    public List<String> roleGrants(String role) {
+        if (role == null || roles == null) return null;
+        return roles.get(role);
+    }
+
+    /** Role name as typed, matched case-insensitively against the existing ones; null when none matches. */
+    public String findRole(String typed) {
+        if (typed == null || roles == null) return null;
+        for (String r : roles.keySet()) if (r.equalsIgnoreCase(typed.trim())) return r;
+        return null;
+    }
+
     /** Owner or trusted member. */
     public boolean isTrusted(String playerName) {
         return isOwner(playerName) || isMember(playerName);
@@ -293,6 +365,7 @@ public final class Claim {
 
     public boolean removeMemberUuid(java.util.UUID uuid) {
         if (uuid == null || memberUuids == null) return false;
+        if (memberRoles != null) memberRoles.remove(uuid.toString());
         return memberUuids.remove(uuid.toString());
     }
 

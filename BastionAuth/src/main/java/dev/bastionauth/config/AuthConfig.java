@@ -114,8 +114,19 @@ public final class AuthConfig {
         public int ipBlockMinutes = 15;
         /** Join attempts allowed per IP per minute (bot-flood guard). */
         public int maxJoinsPerIpPerMinute = 6;
-        /** Maximum accounts that may be registered from one IP. */
+        /** Accounts that may be registered from one IP straight away. */
         public int maxAccountsPerIp = 5;
+        /**
+         * Past {@link #maxAccountsPerIp}, allow further accounts with a growing
+         * wait instead of refusing for good: the next one opens
+         * {@link #extraAccountWaitDays} after the latest registration from the
+         * IP, the one after it twice that, and so on. Off = the old hard limit.
+         */
+        public boolean extraAccountsWithWait = true;
+        /** The waiting step for accounts past the limit, in days. */
+        public int extraAccountWaitDays = 7;
+        /** Absolute ceiling of accounts per IP even with waiting; 0 = none. */
+        public int maxAccountsPerIpHard = 0;
         /**
          * Whether a temporarily blocked IP is refused at the connection stage
          * too. Off: the block only refuses {@code /login}, so ten wrong
@@ -249,6 +260,8 @@ public final class AuthConfig {
         bruteForce.ipBlockMinutes = clampInt(bruteForce.ipBlockMinutes, 1, 1440);
         bruteForce.maxJoinsPerIpPerMinute = clampInt(bruteForce.maxJoinsPerIpPerMinute, 2, 60);
         bruteForce.maxAccountsPerIp = clampInt(bruteForce.maxAccountsPerIp, 1, 100);
+        bruteForce.extraAccountWaitDays = clampInt(bruteForce.extraAccountWaitDays <= 0 ? 7 : bruteForce.extraAccountWaitDays, 1, 365);
+        bruteForce.maxAccountsPerIpHard = clampInt(bruteForce.maxAccountsPerIpHard, 0, 1000);
         session.ttlMinutes = clampInt(session.ttlMinutes, 1, 1440);
         linking.timingWindowHours = clampInt(linking.timingWindowHours, 1, 24 * 365);
         linking.channelsDelaySeconds = clampInt(linking.channelsDelaySeconds, 1, 120);
@@ -292,6 +305,7 @@ public final class AuthConfig {
         m.put("register.nameTaken", "&cЭтот ник уже занят (другим написанием букв).");
         m.put("register.mismatch", "&cПароли не совпадают, попробуйте ещё раз.");
         m.put("register.ipLimit", "&cС вашего IP уже зарегистрировано слишком много аккаунтов.");
+        m.put("register.ipWait", "&cС вашего IP уже &f%s&c аккаунтов. Следующий можно будет зарегистрировать &f%s &7(через %s)&c.");
         m.put("register.success", "&aРегистрация успешна. Добро пожаловать!");
         m.put("login.notRegistered", "&cВы не зарегистрированы. Используйте &f/register <пароль> <пароль>");
         m.put("login.already", "&aВы уже вошли.");

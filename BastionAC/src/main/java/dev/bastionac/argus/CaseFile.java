@@ -94,6 +94,15 @@ public final class CaseFile {
 
     public String reportFile;
 
+    /** Bumped for every analysis handed to the Argus thread; a result carries the one it was started with. */
+    public int generation;
+    /** An analysis of this case is on the Argus thread right now (not stored: a restart loses the job). */
+    public transient boolean inFlight;
+    /** Someone asked for another analysis while one was running. */
+    public transient boolean rerunRequested;
+    /** Staff who asked for this case and want its result, whatever it is (session only). */
+    public transient java.util.Set<String> waitingStaff;
+
     public static final class SignalEntry {
         public long at;
         public String kind;

@@ -97,4 +97,30 @@ class MathUtilTest {
     void horizontalDistance() {
         assertEquals(5.0, MathUtil.horizontal(3, 4), 1e-9);
     }
+
+    @Test
+    void gridFitFindsAHandsStepEvenWithANoisyDelta() {
+        double step = Math.pow(0.5, 3) * 8 * 0.15;    // 50 % sensitivity
+        java.util.Random r = new java.util.Random(3);
+        double[] d = new double[200];
+        for (int i = 0; i < d.length; i++) d[i] = (1 + r.nextInt(40)) * step * (r.nextBoolean() ? 1 : -1);
+        d[17] = 0.123456;                              // one stray value (a teleport, a rounding)
+        MathUtil.GridFit fit = MathUtil.bestGridFit(d);
+        assertTrue(fit.ratio() > 0.98, "a mouse sits on its grid: " + fit);
+        assertEquals(0, MathUtil.rotationGcd(d), 1e-9, "while the exact GCD is ruined by the one stray delta");
+    }
+
+    @Test
+    void computedAimHasNoGridAtAll() {
+        java.util.Random r = new java.util.Random(5);
+        double[] d = new double[200];
+        for (int i = 0; i < d.length; i++) d[i] = (r.nextDouble() * 8 + 0.05) * (r.nextBoolean() ? 1 : -1);
+        MathUtil.GridFit fit = MathUtil.bestGridFit(d);
+        assertTrue(fit.ratio() < 0.3, "interpolated aim must not find a grid: " + fit);
+    }
+
+    @Test
+    void onlyBigTurnsAreNoVerdict() {
+        assertTrue(Double.isNaN(MathUtil.bestGridFit(new double[]{45.30001, 90.70003, 120.10007}).ratio()));
+    }
 }

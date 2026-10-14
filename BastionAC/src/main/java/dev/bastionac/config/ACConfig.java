@@ -37,6 +37,14 @@ public final class ACConfig {
     public static final class General {
         /** Ops receive in-game alerts by default (each admin can /bac alerts off). */
         public boolean alertsToOps = true;
+        /**
+         * Tell staff (chat and console) about X-ray findings. Until 3.1 the X-ray
+         * tracker only fed the attack chain and Argus and never said a word to
+         * anyone: Argus reacted to X-ray while staff saw nothing at all.
+         */
+        public boolean xrayAlerts = true;
+        /** Hidden-ore breaks are reported at most once per this many seconds per player (verdicts always). */
+        public int xrayHiddenAlertSeconds = 60;
         /** Minimum seconds between repeated alerts for the same player+check. */
         public int alertCooldownSeconds = 5;
         /** Allow movement setbacks (teleport back to last good position). */
@@ -172,7 +180,7 @@ public final class ACConfig {
     }
 
     /** Current schema revision — see {@link General#configVersion}. */
-    public static final int CONFIG_VERSION = 13;
+    public static final int CONFIG_VERSION = 14;
 
     /** Telemetry v2: the per-session recording the analyzer and the owner read. */
     public static final class TelemetryCfg {
@@ -195,7 +203,7 @@ public final class ACConfig {
      * Argus — the analytical investigation that runs beside the checks. It
      * does not react to a single flag: an EDR chain, an alert or a suspicious
      * moment opens a case, the analyzer reads the player's telemetry in its
-     * own thread and returns a verdict within the hour.
+     * own thread and returns a verdict within minutes.
      */
     public static final class ArgusCfg {
         public boolean enabled = true;
@@ -206,11 +214,14 @@ public final class ACConfig {
          */
         public String mode = "ASSIST";
         /** Minutes to keep collecting after the first signal before the first analysis. */
-        public int collectMinutes = 10;
-        /** The final verdict comes at the latest this many minutes after the first signal. */
-        public int deadlineMinutes = 60;
+        public int collectMinutes = 2;
+        /**
+         * The final verdict comes at the latest this many minutes after the first
+         * signal — sooner when it cannot change any more (guilty, or the player left).
+         */
+        public int deadlineMinutes = 15;
         /** A case with fresh signals is analysed again at most this often. */
-        public int reanalyzeMinutes = 15;
+        public int reanalyzeMinutes = 3;
         /** How much telemetry before the signal the analysis reads. */
         public int windowMinutes = 60;
         /** Score from which a case is "suspicious" (staff should look). */
@@ -603,6 +614,16 @@ public final class ACConfig {
                     punishment.banExcludedChecks.add(key);
                 }
             }
+            if (general.configVersion < 14) {
+                // v14: X-ray alerts are new; switch them on for existing configs.
+                general.xrayAlerts = true;
+                if (general.xrayHiddenAlertSeconds <= 0) general.xrayHiddenAlertSeconds = 60;
+                // v14: Argus answers in minutes, not within the hour. Only the
+                // old defaults move; timings an admin chose stay as they are.
+                if (argus.collectMinutes == 10) argus.collectMinutes = 2;
+                if (argus.deadlineMinutes == 60) argus.deadlineMinutes = 15;
+                if (argus.reanalyzeMinutes == 15) argus.reanalyzeMinutes = 3;
+            }
             if (general.configVersion < 13) {
                 if (!punishment.banExcludedChecks.contains("entitypredict")) punishment.banExcludedChecks.add("entitypredict");
                 // v13: Timer is a balance now. Its flags are rarer and each one
@@ -681,6 +702,7 @@ public final class ACConfig {
 
     void clamp() {
         general.alertCooldownSeconds = clampInt(general.alertCooldownSeconds, 1, 300);
+        general.xrayHiddenAlertSeconds = clampInt(general.xrayHiddenAlertSeconds <= 0 ? 60 : general.xrayHiddenAlertSeconds, 5, 3600);
         general.setbackMinIntervalTicks = clampInt(general.setbackMinIntervalTicks, 1, 100);
         general.joinGraceTicks = clampInt(general.joinGraceTicks, 20, 1200);
         // A value of 0 means the key was absent from an older config — restore the default.
@@ -701,9 +723,9 @@ public final class ACConfig {
             argus.mode = "ASSIST";
         }
         argus.mode = argus.mode.toUpperCase(Locale.ROOT);
-        argus.collectMinutes = clampInt(argus.collectMinutes <= 0 ? 10 : argus.collectMinutes, 1, 240);
-        argus.deadlineMinutes = clampInt(argus.deadlineMinutes <= 0 ? 60 : argus.deadlineMinutes, argus.collectMinutes, 24 * 60);
-        argus.reanalyzeMinutes = clampInt(argus.reanalyzeMinutes <= 0 ? 15 : argus.reanalyzeMinutes, 1, 240);
+        argus.collectMinutes = clampInt(argus.collectMinutes <= 0 ? 2 : argus.collectMinutes, 1, 240);
+        argus.deadlineMinutes = clampInt(argus.deadlineMinutes <= 0 ? 15 : argus.deadlineMinutes, argus.collectMinutes, 24 * 60);
+        argus.reanalyzeMinutes = clampInt(argus.reanalyzeMinutes <= 0 ? 3 : argus.reanalyzeMinutes, 1, 240);
         argus.windowMinutes = clampInt(argus.windowMinutes <= 0 ? 60 : argus.windowMinutes, 5, 24 * 60);
         argus.suspectScore = clampD(argus.suspectScore <= 0 ? 0.6 : argus.suspectScore, 0.2, 0.99);
         argus.guiltyScore = clampD(argus.guiltyScore <= 0 ? 0.95 : argus.guiltyScore, argus.suspectScore, 0.999);

@@ -85,6 +85,7 @@ public final class Database implements AutoCloseable {
             // network (survives Wi-Fi → mobile), the launcher-claimed UUID,
             // the address the client typed, and its declared plugin channels.
             migrateColumn("device_fingerprints", "profile_hash", "TEXT");
+            migrateColumn("sessions", "profile", "TEXT");
             migrateColumn("device_fingerprints", "client_uuid", "TEXT");
             migrateColumn("device_fingerprints", "host_used", "TEXT");
             migrateColumn("device_fingerprints", "channels_hash", "TEXT");
@@ -302,15 +303,16 @@ public final class Database implements AutoCloseable {
     // Resumable sessions (survive restarts; IP-bound + TTL-limited)
     // ------------------------------------------------------------------
 
-    public record SessionRow(String uuid, String ipHmac, long expiresAt) {}
+    public record SessionRow(String uuid, String ipHmac, long expiresAt, String profile) {}
 
     /** Best-effort: session persistence must never break auth. */
-    public synchronized void saveSession(String uuid, String ipHmac, long expiresAt) {
+    public synchronized void saveSession(String uuid, String ipHmac, long expiresAt, String profile) {
         try (PreparedStatement ps = conn.prepareStatement(
-                "INSERT OR REPLACE INTO sessions(uuid, ip_hmac, expires_at) VALUES(?,?,?)")) {
+                "INSERT OR REPLACE INTO sessions(uuid, ip_hmac, expires_at, profile) VALUES(?,?,?,?)")) {
             ps.setString(1, uuid);
             ps.setString(2, ipHmac);
             ps.setLong(3, expiresAt);
+            ps.setString(4, profile);
             ps.executeUpdate();
         } catch (SQLException ignored) {
         }
@@ -318,9 +320,9 @@ public final class Database implements AutoCloseable {
 
     public synchronized java.util.List<SessionRow> loadSessions() {
         java.util.List<SessionRow> out = new java.util.ArrayList<>();
-        try (PreparedStatement ps = conn.prepareStatement("SELECT uuid, ip_hmac, expires_at FROM sessions");
+        try (PreparedStatement ps = conn.prepareStatement("SELECT uuid, ip_hmac, expires_at, profile FROM sessions");
              ResultSet rs = ps.executeQuery()) {
-            while (rs.next()) out.add(new SessionRow(rs.getString(1), rs.getString(2), rs.getLong(3)));
+            while (rs.next()) out.add(new SessionRow(rs.getString(1), rs.getString(2), rs.getLong(3), rs.getString(4)));
         } catch (SQLException ignored) {
         }
         return out;
@@ -464,6 +466,16 @@ public final class Database implements AutoCloseable {
         try (PreparedStatement ps = conn.prepareStatement("DELETE FROM users WHERE username_lower = ?")) {
             ps.setString(1, nameLower);
             return ps.executeUpdate() > 0;
+        }
+    }
+
+    /** When the latest account registered from this IP was created (0 if none). */
+    public synchronized long lastRegistrationByRegIp(String regIpHmac) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT MAX(created_at) FROM users WHERE reg_ip_hmac = ?")) {
+            ps.setString(1, regIpHmac);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : 0L;
+            }
         }
     }
 

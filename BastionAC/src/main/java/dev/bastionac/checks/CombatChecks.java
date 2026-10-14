@@ -64,9 +64,12 @@ public final class CombatChecks {
         // camera work. Observe-only by default (see ACConfig: gcd).
         if (d.gcdSamples >= 20) {
             double[] deltas = rotationWindow(d);
-            double step = dev.bastionac.core.MathUtil.rotationGcd(deltas);
-            if (step > 0) {
-                double onGrid = dev.bastionac.core.MathUtil.onGridRatio(deltas, step);
+            // bestGridFit: deltas with no common grid at all used to return
+            // step 0 and skip the check — the purest interpolated aim passed.
+            dev.bastionac.core.MathUtil.GridFit fit = dev.bastionac.core.MathUtil.bestGridFit(deltas);
+            double step = fit.step();
+            if (!Double.isNaN(fit.ratio())) {
+                double onGrid = fit.ratio();
                 if (onGrid < 0.75) {
                     d.gcdOffGridRatio = onGrid;
                     d.gcdBuffer += 1;
@@ -115,7 +118,7 @@ public final class CombatChecks {
 
         // ---------------- REACH ----------------
         Vec3d eye = player.getEyePos();
-        int ping = player.networkHandler.getLatency();
+        int ping = dev.bastionac.telemetry.Telemetry.lagCompPing(player);
         // Lag-compensation backtrack window, bounded to the player's ping. Taking
         // the closest of ALL historical boxes hands a chaser the victim's oldest
         // (nearest) position, so the extra reach it grants is victim_speed *
