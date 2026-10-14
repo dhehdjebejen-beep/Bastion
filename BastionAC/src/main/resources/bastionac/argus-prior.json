@@ -1,0 +1,24 @@
+{
+  "version": "lab-3.3.0",
+  "note": "Argus Lab: 500 honest norm sessions, 750 honest + 192 cheating training sessions; held-out: FP 0.0%, stress FP 0.0%, detection 74.8% (with norms)",
+  "bias": -3.0,
+  "weights": {
+    "cmb.aim_center": 1.191,
+    "cmb.aim_error": 1.0,
+    "cmb.click_rhythm": 1.101,
+    "cmb.gcd_off": 2.461,
+    "cmb.reach": 2.5,
+    "cmb.reach_over": 1.461,
+    "cmb.rot_const": 1.008,
+    "mine.diamond_reveal_z": 1.009,
+    "mine.reveal_z": 2.23,
+    "move.air_gain": 1.279,
+    "move.air_turn": 1.229,
+    "move.jump_nokey": 1.303,
+    "pkt.blind_stall": 2.5,
+    "pkt.ping_gap": 2.5,
+    "pkt.tick_rate": 1.029,
+    "pkt.timer_episodes": 1.025,
+    "sig": 1.0
+  }
+}

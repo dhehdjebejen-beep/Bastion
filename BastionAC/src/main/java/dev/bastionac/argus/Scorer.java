@@ -41,6 +41,9 @@ public final class Scorer {
         }
     }
 
+    /** Episodes at which a per-hour feature counts half, whatever the hours. */
+    static final double EVENTS_HALF = 4;
+
     private Scorer() {}
 
     public static Result score(FeatureSet fs, Baselines base, String uuid, Calibration cal, double signalEvidence) {
@@ -76,6 +79,12 @@ public final class Scorer {
             }
             double conf = v.support() / (v.support() + spec.halfSupport());
             if (spec.agg() == Features.Agg.FLAG) conf = 1;
+            // Per hour: the count of episodes is the data, not the hours they
+            // came in. Seven Blink stalls in ten minutes are seven, however
+            // short the window (3.3: a 10-minute case could never weigh them).
+            if (spec.agg() == Features.Agg.PER_HOUR && Double.isFinite(v.events())) {
+                conf = Math.max(conf, v.events() / (v.events() + EVENTS_HALF));
+            }
             double cap = spec.hard() ? 5 : 4;
             double e = spec.weight() * conf * clamp((z - 3) / 2, 0, cap);
             // A sudden change of this player's own play (only on top of an unusual value).

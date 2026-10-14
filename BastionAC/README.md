@@ -18,6 +18,31 @@ the final pass. Every stage's time is kept for the last run. The case list updat
 the cases that are moving. Only the changed slot is sent; the window is never
 reopened.
 
+## New in 3.3
+
+- **Argus is trained.** Argus Lab generates synthetic sessions in the real
+  telemetry format:
+  - honest players of every ping, sensitivity, aim and click rhythm;
+  - honest players on a bad day;
+  - 12 cheats at adjustable strength, alone and in bundles.
+  Every session runs through the live feature code and scorer.
+- **The trained model ships with the mod** (`bastionac/argus-prior.json`).
+  Staff labels refine it instead of starting from all-ones. On the held-out
+  set, at 0 % false alarms (0 % on the stress set too), detection rose from
+  59 % to 75 %: Blink 0 → 83 %, X-ray 67 → 97 %, PingSpoof 25 → 67 %, smooth
+  KillAura 67 → 100 %.
+- **Training safeguards:**
+  - one feature adds at most 1.2 logit to any honest session;
+  - an empty session is never suspicious (bias ≤ −2.5);
+  - a labelled cheater with no evidence teaches nothing.
+- **Fixed:**
+  - per-hour features (Blink) now count episodes, not hours;
+  - the click rhythm ignores pauses (log scale);
+  - reach is judged at any ping, with the allowance taken from how fast the
+    target actually backed off.
+- `./gradlew argusLab` runs the bench; `--args="500 12 --write"` retrains the
+  model. Full report in Russian: [ARGUS-LAB.ru.md](ARGUS-LAB.ru.md).
+
 ## New in 3.1
 
 - **Argus obeys staff and answers in minutes.** A cheater / not a cheater / ban /
@@ -156,7 +181,7 @@ flowchart LR
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test    # 167 unit tests
+./gradlew test    # 189 unit tests
 ```
 
 The config is `config/bastionac/config.json`. It has per-check weight, alert,

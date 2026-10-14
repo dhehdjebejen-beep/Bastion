@@ -18,8 +18,23 @@ public final class FeatureSet {
         public final Prim.Doubles samples = new Prim.Doubles();
     }
 
-    /** A finished feature value and how much data stands behind it. */
-    public record Value(double value, double support) {}
+    /**
+     * A finished feature value and how much data stands behind it. For a
+     * per-hour feature {@code events} is the count itself — a handful of
+     * impossible episodes in ten minutes says more than the ten minutes do.
+     */
+    public record Value(double value, double support, double events) {
+        public Value(double value, double support) {
+            this(value, support, Double.NaN);
+        }
+    }
+
+    /**
+     * A per-hour rate is never computed over less than this many hours: one
+     * honest hiccup in the first three minutes must not read as twenty an
+     * hour (3.3).
+     */
+    public static final double PER_HOUR_FLOOR_H = 0.25;
 
     private final Map<String, Acc> accs = new LinkedHashMap<>();
 
@@ -77,10 +92,12 @@ public final class FeatureSet {
         if (a == null) return null;
         double[] s = Arrays.copyOf(a.samples.a, a.samples.n);
         return switch (spec.agg()) {
-            case RATE, PER_HOUR -> a.den > 0 ? new Value(a.num / a.den, a.den) : null;
+            case RATE -> a.den > 0 ? new Value(a.num / a.den, a.den) : null;
+            case PER_HOUR -> a.den > 0 ? new Value(a.num / Math.max(a.den, PER_HOUR_FLOOR_H), a.den, a.num) : null;
             case MEDIAN -> s.length == 0 ? null : new Value(Stats.percentile(s, 0.5), s.length);
             case P95 -> s.length == 0 ? null : new Value(Stats.percentile(s, 0.95), s.length);
             case CV -> s.length < 3 ? null : new Value(Stats.cv(s), s.length);
+            case LOG_CV -> s.length < 3 ? null : new Value(Math.log(Math.max(1e-3, Stats.cv(s))), s.length);
             case KURTOSIS -> s.length < 4 ? null : new Value(Stats.excessKurtosis(s), s.length);
             case MAX -> s.length == 0 ? null : new Value(Stats.max(s), s.length);
             case FLAG -> s.length == 0 ? null : new Value(Stats.max(s), 1);

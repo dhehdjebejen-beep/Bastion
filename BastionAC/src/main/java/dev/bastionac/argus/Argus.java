@@ -86,6 +86,8 @@ public final class Argus {
             BastionAC.LOGGER.info("Argus ready: {} cases, norms from {} sessions, {} labelled cases, mode {}",
                     store.all().size(), baselines.sessions(), calibration.cheaters + calibration.clean, mode());
             if (baselines.sessions() == 0 && BastionAC.config().argus.analyzeEverySession) seedBaselines();
+            // A new prior shipped (or a pre-3.3 model): refit the owner's labels on top of it.
+            if (!calibration.onCurrentPrior()) refit();
         } catch (Exception e) {
             BastionAC.LOGGER.error("Argus failed to start; the checks run without it", e);
             ready = false;
@@ -658,7 +660,8 @@ public final class Argus {
         out.add("&7Режим: &f" + modeLabel(mode()));
         out.add("&7Открытых дел: &f" + open + " &8(подозрительных " + suspect + ")");
         out.add("&7Нормы: &f" + baselines.sessions() + " &7сессий");
-        out.add("&7Меток владельца: &f" + calibration.cheaters + " &7читеров, &f" + calibration.clean + " &7чистых");
+        out.add("&7Модель: &f" + Calibration.Prior.get().version()
+                + " &7+ меток владельца: &f" + calibration.cheaters + " &7читеров, &f" + calibration.clean + " &7чистых");
         out.add("&7Разборов: &f" + analysesDone + "&7, фоновых: &f" + scansDone
                 + (lastAnalysisMs > 0 ? " &8(последний " + lastDurationMs + " мс)" : ""));
         String cur = worker == null ? null : worker.current();

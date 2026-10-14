@@ -51,15 +51,103 @@ public final class CombatFeatures {
         out.rate("cmb.blind_hit", blind, s.attacks.size());
         out.rate("cmb.snap", snaps, s.attacks.size());
 
-        // Clicking rhythm: intervals inside streaks (a second's pause ends a streak).
+        // Clicking rhythm: intervals inside streaks (a second's pause ends a
+        // streak) and inside the rhythm itself. A pause of 0.8 s between two
+        // flurries used to land in the sample too, and one such pause in thirty
+        // clicks drowned the evenness of an autoclicker completely (3.3).
+        Prim.Doubles gaps = new Prim.Doubles();
         for (int i = 1; i < s.attacks.size(); i++) {
             long dt = s.attacks.get(i).t - s.attacks.get(i - 1).t;
-            if (dt > 0 && dt < 1000) {
-                out.sample("cmb.click_cv", dt);
-                out.sample("cmb.click_kurt", dt);
+            if (dt > 0 && dt < 1000) gaps.add(dt);
+        }
+        if (gaps.n >= 4) {
+            double cut = RHYTHM_CUT * Stats.median(gaps.toArray());
+            for (int i = 0; i < gaps.n; i++) {
+                if (gaps.a[i] > cut) continue;
+                out.sample("cmb.click_rhythm", gaps.a[i]);
+                out.sample("cmb.rhythm_kurt", gaps.a[i]);
             }
         }
+        reachOver(s, out);
     }
+
+    /** A click gap longer than this many median gaps is a pause, not the rhythm. */
+    static final double RHYTHM_CUT = 2.5;
+    /** Past this distance (plus how far the target could have backed off) a vanilla hand cannot have hit. */
+    static final double REACH_LINE = 3.1;
+
+    /**
+     * Share of hits on players past {@link #REACH_LINE}. The 95th percentile
+     * rests on its last few hits; this counts every one of them, so a steady
+     * +0.4 blocks shows after thirty hits instead of three hundred (3.3).
+     *
+     * <p>Every ping counts. The distance is measured to where the target is on
+     * the server; the player swung at where it was half a round trip plus the
+     * client's interpolation earlier — so the allowance is how far the target
+     * moved <em>away</em> from the player in that time (how fast the gap was
+     * opening, read from the target's track). A target walking sideways or
+     * towards the player gives no allowance at any ping; one sprinting away
+     * gives a lot. Setting every high-ping hit aside, as the percentile does,
+     * let a lagging (or fake-lagging) client reach as far as it liked. The
+     * first hit of a fight has no track yet and is left out.
+     */
+    static void reachOver(SessionData s, FeatureSet out) {
+        long over = 0, judged = 0;
+        for (SessionData.Attack a : s.attacks) {
+            if (!a.has(dev.bastionac.telemetry.SessionWriter.Attack.F_PLAYER)) continue;
+            double away = recession(s, a);
+            // No track of the target yet (the first hit of a fight): how fast it
+            // was backing off is unknown, and a target running off can measure
+            // far past 3 blocks at any ping — that hit is not judged. In a
+            // fight that lasts, every later hit has its track.
+            if (Double.isNaN(away)) continue;
+            judged++;
+            if (a.distance > reachAllowance(away, a.ping)) over++;
+        }
+        out.rate("cmb.reach_over", over, judged);
+    }
+
+    /** The farthest an honest hit could measure, given the ping and how fast the target backed off (blocks/tick). */
+    static double reachAllowance(double away, int ping) {
+        double ticks = (Math.max(0, ping) / 2.0 + INTERP_MS) / 50.0;
+        return REACH_LINE + Math.max(0, away) * ticks + Math.max(0, ping) * 0.0005;
+    }
+
+    /**
+     * How fast the target was moving away from the attacker just before the
+     * hit, in blocks per tick, from the per-tick track the server keeps of
+     * every recently hit target (the target's own velocity is useless for
+     * players: the server never simulates them). The track is relative to the
+     * attacker's eyes, so the attacker backing off counts too — that only
+     * widens the allowance. NaN when there is no track of this target yet.
+     */
+    static double recession(SessionData s, SessionData.Attack a) {
+        int hi = MovementFeatures.lowerBound(s.targetT.a, s.targetT.n, a.t + 1) - 1;
+        int last = -1;
+        double best = Double.NaN;
+        for (int i = hi; i >= 0 && s.targetT.a[i] >= a.t - 400; i--) {
+            if (s.targetId.a[i] != a.targetId) continue;
+            if (last < 0) {
+                last = i;
+                continue;
+            }
+            long dt = s.targetT.a[last] - s.targetT.a[i];
+            if (dt < 40) continue;
+            double r1 = len(s, last), r0 = len(s, i);
+            double rate = (r1 - r0) / (dt / 50.0);
+            best = Double.isNaN(best) ? rate : Math.max(best, rate);
+            last = i;
+        }
+        return best;
+    }
+
+    private static double len(SessionData s, int i) {
+        double x = s.targetDX.a[i], y = s.targetDY.a[i], z = s.targetDZ.a[i];
+        return Math.sqrt(x * x + y * y + z * z);
+    }
+
+    /** What the client's entity interpolation adds to the age of the target it sees. */
+    static final double INTERP_MS = 100;
 
     /** Largest single rotation step in the 160 ms before an attack (degrees). */
     static double flickBefore(SessionData s, long t) {

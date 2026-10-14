@@ -27,7 +27,7 @@ public final class Features {
     }
 
     /** How the accumulated numbers become the feature's value. */
-    public enum Agg { RATE, MEDIAN, P95, CV, KURTOSIS, MAX, PER_HOUR, FLAG, Z }
+    public enum Agg { RATE, MEDIAN, P95, CV, LOG_CV, KURTOSIS, MAX, PER_HOUR, FLAG, Z }
 
     /**
      * @param direction   +1: higher is suspicious; -1: lower is suspicious
@@ -104,14 +104,20 @@ public final class Features {
                 "одинаковые шаги поворота подряд (интерполяция)", "%", 100));
         add(new Spec("cmb.gcd_off", Category.COMBAT, Agg.RATE, 1, 0.15, 0.12, 0.08, 200, 80, 0.8, false,
                 "повороты мимо сетки чувствительности", "%", 100));
-        add(new Spec("cmb.click_cv", Category.COMBAT, Agg.CV, -1, 0.45, 0.12, 0.08, 60, 25, 0.9, false,
-                "ровность кликов (вариация интервалов)", "", 1));
-        add(new Spec("cmb.click_kurt", Category.COMBAT, Agg.KURTOSIS, -1, 2.0, 1.5, 1.0, 60, 30, 0.6, false,
+        // The rhythm without its pauses, on a log scale (3.3): near zero a
+        // plain scale squeezes 0.04 (a machine) and 0.13 (a steady hand)
+        // together. Honest hands sit around ln 0.3 ≈ −1.2. A new key, so norms
+        // learned on the old linear value are not compared with it.
+        add(new Spec("cmb.click_rhythm", Category.COMBAT, Agg.LOG_CV, -1, -1.2, 0.35, 0.25, 60, 25, 0.9, false,
+                "ровность кликов (ln вариации, без пауз)", "", 1));
+        add(new Spec("cmb.rhythm_kurt", Category.COMBAT, Agg.KURTOSIS, -1, 2.0, 1.5, 1.0, 60, 30, 0.6, false,
                 "форма распределения кликов (эксцесс)", "", 1));
         // Weight 1.6 (was 1.2) since high-ping hits are set aside: a p95 well
         // past vanilla's 3 blocks on a low ping is now worth a look by itself.
         add(new Spec("cmb.reach", Category.COMBAT, Agg.P95, 1, 2.85, 0.12, 0.08, 30, 10, 1.6, false,
                 "дистанция удара по игрокам (95-й процентиль)", " бл", 1));
+        add(new Spec("cmb.reach_over", Category.COMBAT, Agg.RATE, 1, 0.01, 0.02, 0.015, 30, 15, 1.4, false,
+                "удары дальше 3,1 блока при низком пинге", "%", 100));
         add(new Spec("cmb.blind_hit", Category.COMBAT, Agg.RATE, 1, 0.01, 0.03, 0.02, 40, 15, 1.0, false,
                 "удары по целям вне поля зрения", "%", 100));
         add(new Spec("cmb.yaw_wrap", Category.COMBAT, Agg.PER_HOUR, 1, 0.0, 0.5, 0.5, 0.3, 0.05, 1.4, true,

@@ -75,3 +75,24 @@ java {
     sourceCompatibility = JavaVersion.VERSION_21
     targetCompatibility = JavaVersion.VERSION_21
 }
+
+// Argus Lab: the synthetic bench, and the retraining of the shipped prior.
+//   ./gradlew argusLab                                  bench report (300 honest, 10 per cheat)
+//   ./gradlew argusLab --args="500 12 --write"          retrain src/main/resources/bastionac/argus-prior.json
+//   ./gradlew argusLab --args="--real <dir with .btl.gz>"   also score a live server's sessions
+tasks.register("argusLab", JavaExec) {
+    group = "verification"
+    description = "Argus Lab: benchmark and retrain the shipped Argus prior"
+    dependsOn tasks.named("testClasses")
+    mainClass = "dev.bastionac.argus.ArgusLab"
+    workingDir = projectDir
+    jvmArgs "-Dstdout.encoding=UTF-8"
+    doFirst {
+        classpath = files(
+                sourceSets.test.output.classesDirs,
+                sourceSets.test.output.resourcesDir,
+                sourceSets.main.output.classesDirs,
+                sourceSets.main.output.resourcesDir,
+                configurations.testRuntimeClasspath)
+    }
+}
