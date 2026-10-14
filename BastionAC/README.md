@@ -7,6 +7,17 @@ mod. It started as a targeted answer to **Meteor** and its forks and grew into a
 general engine; version 2.24 added a full pass over **Wurst 7**, built from that
 client's own source and defaults.
 
+## New in 3.2 — Argus progress, live
+
+The case card shows what Argus is doing with the case right now and how long it
+takes, redrawn twice a second while the card is open: collecting (with a
+countdown), queued (jobs ahead), waiting for a lagging server, then each stage of
+the analysis — telemetry files read, physics replay, packets, combat, client, the
+rock around the tunnels (cells read), mining, scoring — and finally the wait for
+the final pass. Every stage's time is kept for the last run. The case list updates
+the cases that are moving. Only the changed slot is sent; the window is never
+reopened.
+
 ## New in 3.1
 
 - **Argus obeys staff and answers in minutes.** A cheater / not a cheater / ban /

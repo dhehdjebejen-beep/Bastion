@@ -24,7 +24,8 @@ public final class WorldSampler {
         final ServerWorld world;
         final WorldSample sample;
         final CompletableFuture<WorldSample> done = new CompletableFuture<>();
-        int next;
+        /** Written by the server thread, read by the Argus thread for its progress. */
+        volatile int next;
 
         Job(ServerWorld world, WorldSample sample) {
             this.world = world;
@@ -82,5 +83,18 @@ public final class WorldSampler {
 
     public static int pending() {
         return QUEUE.size();
+    }
+
+    /**
+     * How far the request behind {@code future} has got: {cells read, cells in
+     * all, requests before it}; null when it is no longer queued.
+     */
+    public static int[] progressOf(CompletableFuture<?> future) {
+        int before = 0;
+        for (Job j : QUEUE) {
+            if (j.done == future) return new int[]{j.next, j.sample.cells.length, before};
+            before++;
+        }
+        return null;
     }
 }

@@ -17,7 +17,8 @@ final class ArgusWorker {
     static final int PRIO_LABELS = 1;
     static final int PRIO_SCAN = 2;
 
-    private record Job(int priority, long seq, String what, Runnable task) implements Comparable<Job> {
+    private record Job(int priority, long seq, String what, ArgusProgress progress, Runnable task)
+            implements Comparable<Job> {
         @Override
         public int compareTo(Job o) {
             int p = Integer.compare(priority, o.priority);
@@ -39,7 +40,25 @@ final class ArgusWorker {
     }
 
     void submit(int priority, String what, Runnable task) {
-        queue.add(new Job(priority, seq.incrementAndGet(), what, task));
+        submit(priority, what, null, task);
+    }
+
+    /** As above, with the case's progress record (queue position and waiting are reported into it). */
+    void submit(int priority, String what, ArgusProgress progress, Runnable task) {
+        queue.add(new Job(priority, seq.incrementAndGet(), what, progress, task));
+    }
+
+    /**
+     * Server thread, twice a second: tells every queued case how many jobs are
+     * before it (the one running included), for the live menu.
+     */
+    void updateAhead() {
+        Job[] jobs = queue.toArray(new Job[0]);
+        java.util.Arrays.sort(jobs);
+        int busy = current != null ? 1 : 0;
+        for (int i = 0; i < jobs.length; i++) {
+            if (jobs[i].progress() != null) jobs[i].progress().ahead(i + busy);
+        }
     }
 
     int pending() {
@@ -66,7 +85,7 @@ final class ArgusWorker {
             }
             // A case someone is waiting on yields to a lagging server only
             // briefly; background scans can afford the full two minutes.
-            waitForQuietServer(job.priority() == PRIO_CASE ? 20_000 : 120_000);
+            waitForQuietServer(job.priority() == PRIO_CASE ? 20_000 : 120_000, job.progress());
             current = job.what();
             try {
                 job.task().run();
@@ -78,12 +97,21 @@ final class ArgusWorker {
         }
     }
 
-    /** Some patience (up to {@code maxMs}) while the average tick is over the configured line. */
-    private void waitForQuietServer(long maxMs) {
+    /**
+     * Some patience (up to {@code maxMs}) while the average tick is over the
+     * configured line. A waiting case says so in its progress.
+     */
+    private void waitForQuietServer(long maxMs, ArgusProgress progress) {
         long until = System.currentTimeMillis() + maxMs;
         while (running && System.currentTimeMillis() < until) {
             var srv = BastionAC.server();
-            if (srv == null || srv.getAverageTickTime() <= BastionAC.config().argus.pauseAboveMspt) return;
+            double limit = BastionAC.config().argus.pauseAboveMspt;
+            if (srv == null || srv.getAverageTickTime() <= limit) return;
+            if (progress != null) {
+                progress.stage(ArgusProgress.Stage.WAITING_SERVER);
+                progress.detail(String.format(java.util.Locale.ROOT, "тик %.0f мс при пороге %.0f мс",
+                        srv.getAverageTickTime(), limit));
+            }
             try {
                 Thread.sleep(500);
             } catch (InterruptedException e) {

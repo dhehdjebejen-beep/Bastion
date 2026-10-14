@@ -37,6 +37,8 @@ final class Analysis {
         double signalEvidence;
         /** A single file instead of a window (the background session scan). */
         Path file;
+        /** Where the live menu reads how far this run has got; null for background scans. */
+        ArgusProgress progress;
     }
 
     /** What came out. */
@@ -80,17 +82,35 @@ final class Analysis {
 
     static Output run(Input in, Baselines base, Calibration cal) {
         Output out = new Output();
+        ArgusProgress p = in.progress;
         try {
+            at(p, ArgusProgress.Stage.READING);
             TelemetryIO.drain(10_000);   // chunks the server thread handed over must be on disk first
             List<SessionData> sessions = load(in, out);
             if (sessions.isEmpty()) {
+                at(p, ArgusProgress.Stage.SCORING);
                 out.result = Scorer.score(out.features, base, in.uuid, cal, in.signalEvidence);
                 return out;
             }
+            // One stage at a time over all sessions, so the live menu moves
+            // forward only. Every feature still sees its sessions in order.
+            int n = sessions.size();
+            at(p, ArgusProgress.Stage.MOVEMENT);
+            for (int i = 0; i < n; i++) {
+                step(p, i, n);
+                MovementFeatures.analyze(sessions.get(i), out.features, BLOCKS);
+            }
+            at(p, ArgusProgress.Stage.PACKETS);
+            for (int i = 0; i < n; i++) {
+                step(p, i, n);
+                PacketFeatures.analyze(sessions.get(i), out.features);
+            }
+            at(p, ArgusProgress.Stage.COMBAT);
+            for (int i = 0; i < n; i++) {
+                step(p, i, n);
+                CombatFeatures.analyze(sessions.get(i), out.features);
+            }
             for (SessionData s : sessions) {
-                MovementFeatures.analyze(s, out.features, BLOCKS);
-                PacketFeatures.analyze(s, out.features);
-                CombatFeatures.analyze(s, out.features);
                 out.minutes += s.durationMs() / 60_000.0;
                 out.attacks += s.attacks.size();
                 out.broken += s.brokenT.n;
@@ -101,14 +121,21 @@ final class Analysis {
                 }
                 if (s.hasInput) out.keys = true;
             }
+            at(p, ArgusProgress.Stage.CLIENT);
             SessionData last = sessions.get(sessions.size() - 1);
             ClientFeatures.analyze(last, out.features);
             out.brand = last.brand;
             out.protocol = last.protocol;
             out.cheatChannel = ClientFeatures.cheatChannel(last);
 
-            WorldSample sample = in.worldSample ? sample(sessions, out) : null;
-            for (SessionData s : sessions) MiningFeatures.analyze(s, out.features, CLASSIFY, sample);
+            if (in.worldSample) at(p, ArgusProgress.Stage.WORLD);
+            WorldSample sample = in.worldSample ? sample(sessions, out, p) : null;
+            at(p, ArgusProgress.Stage.MINING);
+            for (int i = 0; i < n; i++) {
+                step(p, i, n);
+                MiningFeatures.analyze(sessions.get(i), out.features, CLASSIFY, sample);
+            }
+            at(p, ArgusProgress.Stage.SCORING);
             out.result = Scorer.score(out.features, base, in.uuid, cal, in.signalEvidence);
         } catch (Throwable t) {
             out.error = t.toString();
@@ -132,7 +159,9 @@ final class Analysis {
             }
         }
         List<SessionData> sessions = new ArrayList<>();
-        for (Path f : files) {
+        for (int i = 0; i < files.size(); i++) {
+            Path f = files.get(i);
+            step(in.progress, i, files.size());
             SessionData s = in.file != null ? TelemetryReader.read(f) : TelemetryReader.read(f, in.from, in.to);
             if (s.moveT.n == 0 && s.brokenT.n == 0 && s.attacks.isEmpty() && s.tickEndT.n == 0) continue;
             sessions.add(s);
@@ -159,7 +188,7 @@ final class Analysis {
      * broke, grown by a few blocks — only when there was real digging, and
      * only as much as the sampler allows (the most recent digging first).
      */
-    private static WorldSample sample(List<SessionData> sessions, Output out) {
+    private static WorldSample sample(List<SessionData> sessions, Output out, ArgusProgress progress) {
         List<long[]> dug = new ArrayList<>();
         for (SessionData s : sessions) {
             for (int i = 0; i < s.brokenT.n; i++) {
@@ -190,14 +219,43 @@ final class Analysis {
         }
         if (box == null) return null;
         try {
-            WorldSample w = WorldSampler.request((int) box[0] - 6, (int) box[1] - 4, (int) box[2] - 6,
-                    (int) box[3] + 6, (int) box[4] + 4, (int) box[5] + 6).get(90, TimeUnit.SECONDS);
+            java.util.concurrent.CompletableFuture<WorldSample> f = WorldSampler.request((int) box[0] - 6,
+                    (int) box[1] - 4, (int) box[2] - 6, (int) box[3] + 6, (int) box[4] + 4, (int) box[5] + 6);
+            // Wait in small steps, reporting how many cells the server has read.
+            long until = System.currentTimeMillis() + 90_000;
+            WorldSample w;
+            while (true) {
+                try {
+                    w = f.get(250, TimeUnit.MILLISECONDS);
+                    break;
+                } catch (java.util.concurrent.TimeoutException te) {
+                    if (System.currentTimeMillis() > until) throw te;
+                    int[] pr = WorldSampler.progressOf(f);
+                    if (progress != null && pr != null) {
+                        progress.step(pr[0], pr[1]);
+                        progress.detail(pr[2] > 0 ? "ждёт очереди чтения мира (" + pr[2] + ")"
+                                : String.format(java.util.Locale.ROOT, "прочитано %,d из %,d блоков", pr[0], pr[1]));
+                    }
+                }
+            }
             out.sampled = w != null;
             out.sampleNote = w == null ? "мир не прочитан" : "прочитано " + w.volume() + " блоков вокруг туннелей";
             return w;
         } catch (Exception e) {
             out.sampleNote = "мир не прочитан: " + e.getClass().getSimpleName();
             return null;
+        }
+    }
+
+    private static void at(ArgusProgress p, ArgusProgress.Stage s) {
+        if (p != null) p.stage(s);
+    }
+
+    /** Before item {@code i} of {@code n} (so the bar shows work done, not started). */
+    private static void step(ArgusProgress p, int i, int n) {
+        if (p != null) {
+            p.step(i, n);
+            p.detail(n > 1 ? (i + 1) + " из " + n : null);
         }
     }
 

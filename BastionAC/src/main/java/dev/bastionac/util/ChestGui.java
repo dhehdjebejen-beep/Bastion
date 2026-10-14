@@ -123,6 +123,28 @@ public final class ChestGui {
                 (syncId, playerInv, p) -> new Handler(syncId, playerInv, this), title));
     }
 
+    /** Whether this very panel is what the player has on screen right now. */
+    public boolean isShownTo(ServerPlayerEntity player) {
+        return player.currentScreenHandler instanceof Handler h && h.gui == this;
+    }
+
+    /**
+     * Rewrites one slot of this panel while it is open — a live value (a
+     * countdown, a progress bar) without rebuilding or reopening the window,
+     * so the cursor and an open tooltip stay where they are. Nothing is sent
+     * when the item did not change. Returns false once the player has moved
+     * on to another screen.
+     */
+    public boolean refresh(ServerPlayerEntity player, int slot, ItemStack item) {
+        if (slot < 0 || slot >= items.length || item == null) return false;
+        if (!(player.currentScreenHandler instanceof Handler h) || h.gui != this) return false;
+        if (items[slot] != null && ItemStack.areEqual(items[slot], item)) return true;
+        items[slot] = item;
+        h.getInventory().setStack(slot, item.copy());
+        h.sendContentUpdates();
+        return true;
+    }
+
     private static ScreenHandlerType<GenericContainerScreenHandler> typeFor(int rows) {
         return switch (rows) {
             case 1 -> ScreenHandlerType.GENERIC_9X1;

@@ -1,6 +1,7 @@
 package dev.bastionac.gui;
 
 import dev.bastionac.argus.Argus;
+import dev.bastionac.argus.ArgusProgress;
 import dev.bastionac.argus.CaseFile;
 import dev.bastionac.argus.Calibration;
 import dev.bastionac.argus.Signal;
@@ -50,6 +51,7 @@ public final class ArgusMenu {
         int slot = 0;
         for (int i = p * PAGE; i < Math.min(cases.size(), (p + 1) * PAGE); i++) {
             CaseFile c = cases.get(i);
+            if (moving(c)) live(admin, gui, slot, c.id, false);
             gui.button(slot++, caseIcon(c), () -> openCase(admin, c.id));
         }
         if (cases.isEmpty()) {
@@ -83,6 +85,8 @@ public final class ArgusMenu {
         lore.add("&7Вердикт: " + c.verdict.colour + c.verdict.label
                 + (c.analyses > 0 ? String.format(Locale.ROOT, " &8(%.0f%%)", c.score * 100) : ""));
         lore.add("&7Статус: &f" + statusLabel(c));
+        String now = liveLine(c);
+        if (now != null) lore.add(now);
         if (c.label != CaseFile.Label.NONE) lore.add("&7Решение: &f" + c.label.label + " &8(" + c.labelBy + ")");
         else if (c.awaitsDecision()) lore.add("&eЖдёт решения персонала");
         if (c.closeNote != null) lore.add("&8" + c.closeNote);
@@ -127,6 +131,10 @@ public final class ArgusMenu {
             for (String w : wrap(c.reportFile, 46)) head.add("&8" + w);
         }
         gui.button(4, GuiItems.head(c.name, iconColour(c) + c.name + " &8#" + c.id, head), () -> {});
+
+        // How far Argus is with this case — redrawn twice a second while the card is open.
+        gui.button(13, progressItem(c), () -> openCase(admin, c.id));
+        live(admin, gui, 13, c.id, true);
 
         // Findings.
         List<String> fl = new ArrayList<>();
@@ -226,6 +234,7 @@ public final class ArgusMenu {
         int slot = 0;
         for (CaseFile c : cases) {
             if (slot >= 27) break;
+            if (moving(c)) live(admin, gui, slot, c.id, false);
             gui.button(slot++, caseIcon(c), () -> openCase(admin, c.id));
         }
         gui.button(31, GuiItems.item(Items.SPYGLASS, "&5Начать расследование",
@@ -307,12 +316,186 @@ public final class ArgusMenu {
         return GuiItems.item(current ? Items.NETHER_STAR : icon, title, lines);
     }
 
+    // ---------------------------------------------------------------- live progress (3.2)
+
+    /** A slot of an open menu that shows something changing by itself. */
+    private record Live(ServerPlayerEntity admin, ChestGui gui, int slot, String caseId, boolean card) {}
+
+    private static final List<Live> LIVE = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+    /** Registers a live slot; the admin's slots of any other (older) panel are dropped. */
+    private static void live(ServerPlayerEntity admin, ChestGui gui, int slot, String caseId, boolean card) {
+        LIVE.removeIf(l -> l.admin() == admin && l.gui() != gui);
+        LIVE.add(new Live(admin, gui, slot, caseId, card));
+    }
+
+    /**
+     * Server thread, twice a second (from {@code Argus.tick}): redraws every
+     * live slot that is still on someone's screen and forgets the rest. Only
+     * slots whose item changed are sent.
+     */
+    public static void tickLive() {
+        for (Live l : LIVE) {
+            CaseFile c = Argus.get(l.caseId());
+            if (c == null || l.admin().isRemoved() || !l.gui().isShownTo(l.admin())) {
+                LIVE.remove(l);
+                continue;
+            }
+            net.minecraft.item.ItemStack item = l.card() ? progressItem(c) : caseIcon(c);
+            if (!l.gui().refresh(l.admin(), l.slot(), item)) LIVE.remove(l);
+        }
+    }
+
+    /** A case whose list icon changes on its own: collecting, queued, being read or waiting for its final pass. */
+    private static boolean moving(CaseFile c) {
+        return c.inFlight || (c.open() && !(c.status == CaseFile.Status.ANALYZED && c.finalPass));
+    }
+
+    /** One line for the list: what Argus is doing with the case right now, or null. */
+    private static String liveLine(CaseFile c) {
+        ArgusProgress.View p = Argus.progress(c.id);
+        if (!c.inFlight || p == null || p.done()) return null;
+        long now = System.currentTimeMillis();
+        return "&d▶ " + p.stage().label + (p.detail() == null ? "" : " &8(" + p.detail() + ")")
+                + " &7" + dur(now - p.stageAt());
+    }
+
+    /**
+     * The live "Ход расследования" item: what Argus is doing with the case
+     * now, how long each stage takes, and what comes next.
+     */
+    static net.minecraft.item.ItemStack progressItem(CaseFile c) {
+        long now = System.currentTimeMillis();
+        ArgusProgress.View p = Argus.progress(c.id);
+        List<String> lore = new ArrayList<>();
+        Item icon;
+        String title;
+        if (c.inFlight && p != null && !p.done()) {
+            icon = Items.CLOCK;
+            switch (p.stage()) {
+                case QUEUED -> {
+                    title = "&eВ очереди на разбор";
+                    lore.add("&7Задач перед делом: &f" + p.ahead());
+                    String cur = Argus.currentJob();
+                    if (cur != null) lore.add("&8сейчас: " + cur);
+                }
+                case WAITING_SERVER -> {
+                    title = "&6Ждёт разгрузки сервера";
+                    if (p.detail() != null) lore.add("&7" + p.detail());
+                    lore.add("&8Аргус уступает игре, пока сервер");
+                    lore.add("&8тормозит (дело ждёт не больше 20 с)");
+                }
+                default -> {
+                    title = "&dРазбор: " + p.stage().label;
+                    if (p.detail() != null) lore.add("&7Сейчас: &f" + p.detail());
+                }
+            }
+            lore.add(bar(p.fraction()) + String.format(Locale.ROOT, " &f%.0f%%", p.fraction() * 100));
+            lore.add("&7Этап идёт: &f" + dur(now - p.stageAt()));
+            lore.add("&7С постановки в очередь: &f" + dur(now - p.queuedAt()));
+            if (Argus.lastDurationMs() > 0) lore.add("&8обычно разбор длится ~" + dur(Argus.lastDurationMs()));
+            lore.add("");
+            stages(lore, p, now);
+        } else {
+            switch (c.status) {
+                case COLLECTING -> {
+                    icon = Items.HOPPER;
+                    title = "&eСбор данных";
+                    long start = c.lastAnalyzedAt > 0 ? c.lastAnalyzedAt : c.openedAt;
+                    long total = Math.max(1, c.dueAt - start);
+                    long left = c.dueAt - now;
+                    lore.add("&7Аргус копит телеметрию перед разбором");
+                    lore.add(bar((double) (now - start) / total));
+                    lore.add(left > 0 ? "&7Разбор через: &f" + clock(left) : "&7Разбор — сейчас");
+                }
+                case QUEUED, ANALYZING -> {
+                    icon = Items.HOPPER;
+                    title = "&eОжидает разбора";
+                    lore.add("&8задача будет поставлена заново");
+                }
+                case ANALYZED -> {
+                    if (!c.finalPass) {
+                        icon = Items.COMPASS;
+                        title = "&bРазобрано, итог к сроку";
+                        long total = Math.max(1, c.deadlineAt - c.openedAt);
+                        lore.add(bar((double) (now - c.openedAt) / total));
+                        lore.add("&7Итоговый разбор: &f" + GuiItems.stamp(c.deadlineAt)
+                                + " &8(через " + clock(Math.max(0, c.deadlineAt - now)) + ")");
+                        if (c.pendingSignals) {
+                            long again = c.lastAnalyzedAt + dev.bastionac.BastionAC.config().argus.reanalyzeMinutes * 60_000L - now;
+                            lore.add("&7Новые сигналы: повтор " + (again > 0 ? "через &f" + clock(again) : "&fсейчас"));
+                        }
+                    } else {
+                        icon = Items.LIME_DYE;
+                        title = "&aИтог вынесен";
+                        lore.add("&7Вердикт: " + c.verdict.colour + c.verdict.label);
+                    }
+                }
+                default -> {
+                    icon = Items.GRAY_DYE;
+                    title = "&8Дело закрыто";
+                    if (c.closeNote != null) lore.add("&8" + c.closeNote);
+                }
+            }
+            if (p != null && p.done()) {
+                lore.add("");
+                lore.add("&7Последний разбор: &f" + dur(p.runMs(now)) + " &8(" + GuiItems.ago(now - p.finishedAt())
+                        + " назад)");
+                stages(lore, p, now);
+            }
+        }
+        lore.add("&8обновляется вживую · клик — обновить карточку");
+        return GuiItems.item(icon, title, lore);
+    }
+
+    /** The stages of a run: done with their time, the current one, those still to come. */
+    private static void stages(List<String> lore, ArgusProgress.View p, long now) {
+        Long q = p.took().get(ArgusProgress.Stage.QUEUED);
+        Long w = p.took().get(ArgusProgress.Stage.WAITING_SERVER);
+        if (q != null) lore.add("&a✔ &7очередь &8" + dur(q));
+        if (w != null) lore.add("&a✔ &7ожидание сервера &8" + dur(w));
+        for (ArgusProgress.Stage s : ArgusProgress.Stage.values()) {
+            if (!s.working()) continue;
+            Long took = p.took().get(s);
+            if (s == p.stage()) {
+                lore.add("&d▶ &f" + s.label + " &8" + dur(now - p.stageAt()));
+            } else if (took != null) {
+                lore.add("&a✔ &7" + s.label + " &8" + dur(took));
+            } else if (p.done() || s.ordinal() < p.stage().ordinal()) {
+                lore.add("&8– " + s.label + " (не понадобилось)");
+            } else {
+                lore.add("&8○ " + s.label);
+            }
+        }
+    }
+
+    /** A twenty-notch bar. */
+    private static String bar(double fraction) {
+        int k = (int) Math.round(Math.max(0, Math.min(1, fraction)) * 20);
+        return "&a" + "|".repeat(k) + "&8" + "|".repeat(20 - k);
+    }
+
+    /** "45 мс", "1.2 с", "2:05", "1 ч 05 мин". */
+    static String dur(long ms) {
+        ms = Math.max(0, ms);
+        if (ms < 1000) return ms + " мс";
+        if (ms < 60_000) return String.format(Locale.ROOT, "%.1f с", ms / 1000.0);
+        return clock(ms);
+    }
+
+    /** "2:05", or "1 ч 05 мин" from an hour up. */
+    static String clock(long ms) {
+        long s = Math.max(0, ms) / 1000;
+        if (s >= 3600) return String.format(Locale.ROOT, "%d ч %02d мин", s / 3600, (s % 3600) / 60);
+        return String.format(Locale.ROOT, "%d:%02d", s / 60, s % 60);
+    }
+
     // ---------------------------------------------------------------- text helpers
 
     private static String statusLabel(CaseFile c) {
         return switch (c.status) {
             case COLLECTING -> "сбор данных, разбор через "
-                    + GuiItems.ago(Math.max(0, c.dueAt - System.currentTimeMillis()));
+                    + clock(Math.max(0, c.dueAt - System.currentTimeMillis()));
             case QUEUED -> "в очереди на разбор";
             case ANALYZING -> "разбирается";
             case ANALYZED -> (c.finalPass ? "разобрано (итог)" : "разобрано, итог до "

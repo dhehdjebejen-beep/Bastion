@@ -58,6 +58,8 @@ public final class Argus {
     private static volatile boolean dirtyModel;
     private static volatile long lastAnalysisMs;
     private static volatile long lastDurationMs;
+    /** The latest run of each case, for the live menu (3.2). */
+    private static final java.util.Map<String, ArgusProgress> PROGRESS = new java.util.concurrent.ConcurrentHashMap<>();
     private static volatile int analysesDone;
     private static volatile int scansDone;
     /** Players the owner has called cheaters — kept out of every norm. */
@@ -129,6 +131,11 @@ public final class Argus {
     public static void tick(MinecraftServer srv, long tick) {
         if (!ready) return;
         WorldSampler.tick();
+        if (tick % 10 == 0) {
+            // The live menu: queue positions, then every open case card and list.
+            if (worker != null) worker.updateAhead();
+            dev.bastionac.gui.ArgusMenu.tickLive();
+        }
         if (tick % 20 != 0) return;
         if (advance(srv)) store.save();
         if (tick % (20 * 600) == 0) {
@@ -136,6 +143,10 @@ public final class Argus {
             long now = System.currentTimeMillis();
             int pruned = store.prune(now, cfg.caseRetentionDays);
             if (pruned > 0) store.save();
+            PROGRESS.entrySet().removeIf(e -> {
+                ArgusProgress.View v = e.getValue().view();
+                return v.done() && now - v.finishedAt() > 3_600_000L;
+            });
             if (dirtyModel) saveAll();
         }
     }
@@ -236,7 +247,10 @@ public final class Argus {
                 || c.count(Signal.Kind.CHAIN_BURNED) > 0 || c.count(Signal.Kind.SESSION_SCAN) > 0);
         in.signalEvidence = signalEvidence(c);
         String id = c.id;
-        worker.submit(ArgusWorker.PRIO_CASE, "дело #" + id + " (" + c.name + ")", () -> {
+        ArgusProgress progress = new ArgusProgress(id, gen, now);
+        PROGRESS.put(id, progress);
+        in.progress = progress;
+        worker.submit(ArgusWorker.PRIO_CASE, "дело #" + id + " (" + c.name + ")", progress, () -> {
             MinecraftServer s = BastionAC.server();
             if (s != null) s.execute(() -> {
                 CaseFile live = store.byId(id);
@@ -254,6 +268,7 @@ public final class Argus {
                 out.result = Scorer.score(new dev.bastionac.argus.features.FeatureSet(), baselines, in.uuid,
                         calibration, in.signalEvidence);
             }
+            progress.stage(ArgusProgress.Stage.DONE);
             lastDurationMs = System.currentTimeMillis() - t0;
             lastAnalysisMs = System.currentTimeMillis();
             analysesDone++;
@@ -613,6 +628,22 @@ public final class Argus {
     }
 
     /** One status block for the panel and the command. */
+    /** How far the latest analysis of a case has got (or how its last one went); null if none this session. */
+    public static ArgusProgress.View progress(String caseId) {
+        ArgusProgress p = caseId == null ? null : PROGRESS.get(caseId);
+        return p == null ? null : p.view();
+    }
+
+    /** How long the latest analysis took (ms), for a rough "usually takes" in the menu. */
+    public static long lastDurationMs() {
+        return lastDurationMs;
+    }
+
+    /** What the Argus thread is doing right now (null = idle). */
+    public static String currentJob() {
+        return worker == null ? null : worker.current();
+    }
+
     public static List<String> status() {
         List<String> out = new ArrayList<>();
         if (!ready) {
