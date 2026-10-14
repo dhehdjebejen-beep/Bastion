@@ -119,7 +119,7 @@ sequenceDiagram
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionauth-<версия>.jar
-./gradlew test    # 88 юнит-тестов
+./gradlew test    # 90 юнит-тестов
 ```
 
 Внутри мода — BouncyCastle, sqlite-jdbc и ZXing. На сервере нужен Fabric API.

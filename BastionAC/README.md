@@ -18,6 +18,39 @@ the final pass. Every stage's time is kept for the last run. The case list updat
 the cases that are moving. Only the changed slot is sent; the window is never
 reopened.
 
+## New in 3.3
+
+- **Argus is trained.** Argus Lab generates synthetic sessions in the real
+  telemetry format:
+  - honest players of every ping, sensitivity, aim and click rhythm;
+  - honest players on a bad day;
+  - 12 cheats at adjustable strength, alone and in bundles.
+  Every session runs through the live feature code and scorer.
+- **The trained model ships with the mod** (`bastionac/argus-prior.json`).
+  Staff labels refine it instead of starting from all-ones. It is trained on
+  three independent corpora (bagging), with and without server norms. On the
+  held-out set, at 0 % false alarms (0 % on the stress set too), detection
+  is 75.7 % with norms and 70.4 % on a fresh server: X-ray 100 %, smooth
+  KillAura 100 % (86 % without norms), Blink 92 %, PingSpoof 67 %, Reach
+  +0.9 100 %, AimAssist at full strength 50 %.
+- **Lag-compensated aim and reaction lag.** Aim error is measured against the
+  target's track at the moment the player could see it: on a 100 ms ping a
+  KillAura used to "miss like a human". The aim's reaction time to the
+  target's own jinks (minus ping and interpolation) is 3.5–6.4 ticks for a
+  hand and ≈ 0 for an aura; the strength of the answer with no reaction at
+  all is 0.02–0.10 for a hand and 0.6–0.8 for an aura.
+- **Training safeguards:**
+  - one feature adds at most 1.2 logit to any honest session;
+  - an empty session is never suspicious (bias ≤ −2.5);
+  - a labelled cheater with no evidence teaches nothing.
+- **Fixed:**
+  - per-hour features (Blink) now count episodes, not hours;
+  - the click rhythm ignores pauses (log scale);
+  - reach is judged at any ping, with the allowance taken from how fast the
+    target actually backed off.
+- `./gradlew argusLab` runs the bench; `--args="500 12 --write"` retrains the
+  model. Full report in Russian: [ARGUS-LAB.ru.md](ARGUS-LAB.ru.md).
+
 ## New in 3.1
 
 - **Argus obeys staff and answers in minutes.** A cheater / not a cheater / ban /
@@ -156,7 +189,7 @@ flowchart LR
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test    # 167 unit tests
+./gradlew test    # 190 unit tests
 ```
 
 The config is `config/bastionac/config.json`. It has per-check weight, alert,

@@ -117,7 +117,7 @@ sequenceDiagram
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionauth-<version>.jar
-./gradlew test    # 88 unit tests
+./gradlew test    # 90 unit tests
 ```
 
 The mod bundles BouncyCastle, sqlite-jdbc and ZXing. Fabric API is required on the
