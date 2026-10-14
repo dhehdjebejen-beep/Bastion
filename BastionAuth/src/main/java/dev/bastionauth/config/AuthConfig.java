@@ -128,6 +128,14 @@ public final class AuthConfig {
         /** Absolute ceiling of accounts per IP even with waiting; 0 = none. */
         public int maxAccountsPerIpHard = 0;
         /**
+         * Accounts nobody has logged into for this many days no longer count
+         * towards the per-IP quota (nor towards its waiting time). Behind a
+         * carrier NAT the quota is shared by strangers: one person registering
+         * throwaway accounts used to make every newcomer on that IP wait for
+         * weeks. 0 = count every account ever registered.
+         */
+        public int quotaIgnoresDormantDays = 30;
+        /**
          * Whether a temporarily blocked IP is refused at the connection stage
          * too. Off: the block only refuses {@code /login}, so ten wrong
          * passwords behind a carrier NAT do not lock every neighbour out of
@@ -262,6 +270,7 @@ public final class AuthConfig {
         bruteForce.maxAccountsPerIp = clampInt(bruteForce.maxAccountsPerIp, 1, 100);
         bruteForce.extraAccountWaitDays = clampInt(bruteForce.extraAccountWaitDays <= 0 ? 7 : bruteForce.extraAccountWaitDays, 1, 365);
         bruteForce.maxAccountsPerIpHard = clampInt(bruteForce.maxAccountsPerIpHard, 0, 1000);
+        bruteForce.quotaIgnoresDormantDays = clampInt(bruteForce.quotaIgnoresDormantDays, 0, 3650);
         session.ttlMinutes = clampInt(session.ttlMinutes, 1, 1440);
         linking.timingWindowHours = clampInt(linking.timingWindowHours, 1, 24 * 365);
         linking.channelsDelaySeconds = clampInt(linking.channelsDelaySeconds, 1, 120);

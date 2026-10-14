@@ -39,9 +39,9 @@ server — players join with an unmodified client and install nothing.
 
 | Module | Version | In one line |
 |---|---|---|
-| [**BastionAuth**](BastionAuth) | 1.12.0 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP and client profile. Before the password the player waits in spectator mode, away from their real location. |
-| [**BastionClaims**](BastionClaims) | 1.19.0 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers, explosions, fire, projectiles, falling blocks, griefing mobs. Member roles inside a claim. Also includes an operator WorldEdit with undo. |
-| [**BastionAC**](BastionAC) | 3.1.0 | Anti-cheat engine: 40 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within minutes. |
+| [**BastionAuth**](BastionAuth) | 1.12.1 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP and client profile. Before the password the player waits in spectator mode, away from their real location. |
+| [**BastionClaims**](BastionClaims) | 1.19.1 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers, explosions, fire, projectiles, falling blocks, griefing mobs. Member roles inside a claim. Also includes an operator WorldEdit with undo. |
+| [**BastionAC**](BastionAC) | 3.1.1 | Anti-cheat engine: 40 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within minutes. |
 
 Each mod works on its own. When they run together, they talk through soft
 reflection bridges: BastionAC reads BastionAuth's account-link ledger, and
@@ -100,7 +100,7 @@ To install, put the jar into the server's `mods/` folder next to
 
 ## Tests
 
-The repository has 310 unit tests: 87 in BastionAuth, 58 in BastionClaims and 165
+The repository has 313 unit tests: 88 in BastionAuth, 58 in BastionClaims and 167
 in BastionAC. Run them with `./gradlew test` in a module folder. The anti-cheat
 checks were also tested live with a raw-protocol client that sends the exact
 packets of the cheat modules they target.

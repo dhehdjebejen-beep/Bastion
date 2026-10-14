@@ -471,10 +471,29 @@ public final class Database implements AutoCloseable {
 
     /** When the latest account registered from this IP was created (0 if none). */
     public synchronized long lastRegistrationByRegIp(String regIpHmac) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement("SELECT MAX(created_at) FROM users WHERE reg_ip_hmac = ?")) {
+        return lastRegistrationByRegIp(regIpHmac, 0L);
+    }
+
+    /** As above, among accounts last logged into at or after {@code activeSince}. */
+    public synchronized long lastRegistrationByRegIp(String regIpHmac, long activeSince) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT MAX(created_at) FROM users WHERE reg_ip_hmac = ? AND last_login_at >= ?")) {
             ps.setString(1, regIpHmac);
+            ps.setLong(2, activeSince);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getLong(1) : 0L;
+            }
+        }
+    }
+
+    /** Accounts registered from this IP and last logged into at or after {@code activeSince}. */
+    public synchronized int countActiveByRegIp(String regIpHmac, long activeSince) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT COUNT(*) FROM users WHERE reg_ip_hmac = ? AND last_login_at >= ?")) {
+            ps.setString(1, regIpHmac);
+            ps.setLong(2, activeSince);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
             }
         }
     }

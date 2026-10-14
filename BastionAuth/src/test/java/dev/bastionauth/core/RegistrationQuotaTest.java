@@ -36,4 +36,11 @@ class RegistrationQuotaTest {
         assertEquals("5 ч 20 мин", AuthManager.humanWait(5 * 3_600_000L + 20 * 60_000L));
         assertEquals("1 мин", AuthManager.humanWait(10_000));
     }
+
+    @Test
+    void dormantAccountsStopCounting() {
+        long now = 100L * 86_400_000L;
+        assertEquals(now - 30L * 86_400_000L, RegistrationQuota.activeSince(now, 30));
+        assertEquals(0L, RegistrationQuota.activeSince(now, 0), "0 = every account counts");
+    }
 }

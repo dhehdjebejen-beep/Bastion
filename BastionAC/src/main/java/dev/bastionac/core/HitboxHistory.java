@@ -57,6 +57,40 @@ public final class HitboxHistory {
         return out;
     }
 
+    /**
+     * Boxes recorded between {@code fromTicksBack} and {@code toTicksBack}
+     * ticks ago, inclusive (most recent first). 0 is the current tick.
+     */
+    public static List<Box> between(int entityId, int fromTicksBack, int toTicksBack) {
+        Box[] ring = BOXES.get(entityId);
+        List<Box> out = new ArrayList<>();
+        if (ring == null) return out;
+        int lo = Math.max(0, fromTicksBack);
+        int hi = Math.min(toTicksBack, TICKS - 1);
+        for (int i = lo; i <= hi; i++) {
+            Box b = ring[Math.floorMod(cursor - i, TICKS)];
+            if (b != null) out.add(b);
+        }
+        return out;
+    }
+
+    /**
+     * The ticks-back band a hit may legitimately have been aimed at: where the
+     * target was about one round trip ago (what the client saw when it
+     * clicked), give or take {@code slack} ticks for jitter and the client's
+     * entity interpolation. Taking every box from now back to the full ping
+     * instead — the old window — let a player who delays all of his traffic
+     * pick the nearest of up to twenty positions: Backtrack by real lag.
+     *
+     * @return {from, to} ticks back
+     */
+    public static int[] reachBand(int pingMs, int slack) {
+        int centre = Math.max(0, pingMs) / 50;
+        int from = Math.max(0, centre - slack);
+        int to = Math.min(DEPTH - 1, Math.max(2, centre + slack));
+        return new int[]{Math.min(from, to), to};
+    }
+
     public static void remove(int entityId) {
         BOXES.remove(entityId);
     }

@@ -157,7 +157,7 @@ flowchart LR
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionac-<версия>.jar
-./gradlew test    # 165 юнит-тестов
+./gradlew test    # 167 юнит-тестов
 ```
 
 Конфиг — `config/bastionac/config.json`. В нём у каждой проверки свой вес, пороги

@@ -11,6 +11,7 @@
     "FallingBlockMixin",
     "FarmlandMixin",
     "FireBlockMixin",
+    "FishingBobberMixin",
     "FlowableFluidMixin",
     "FrostWalkerMixin",
     "HopperBlockEntityMixin",
@@ -25,6 +26,9 @@
     "PistonHandlerMixin",
     "ProjectileBlockHitMixin",
     "SaplingGrowthMixin",
+    "SculkSpreadMixins$Block",
+    "SculkSpreadMixins$Manager",
+    "SculkSpreadMixins$Vein",
     "SmallFireballMixin"
   ],
   "injectors": {

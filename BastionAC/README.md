@@ -141,7 +141,7 @@ flowchart LR
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test    # 165 unit tests
+./gradlew test    # 167 unit tests
 ```
 
 The config is `config/bastionac/config.json`. It has per-check weight, alert,
