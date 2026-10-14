@@ -123,7 +123,7 @@ final class ArgusLab {
             if (sc.cheat() == Cheat.XRAY) {
                 p.dig = Math.max(p.dig, 0.5);
                 p.fight = Math.min(p.fight, 0.15);
-            } else if (sc.cheat().ordinal() <= Cheat.AUTOCLICKER.ordinal()) {
+            } else if (sc.cheat().ordinal() <= Cheat.AUTOCLICKER.ordinal() || sc.cheat() == Cheat.BLINK) {
                 p.fight = Math.max(p.fight, 0.45);
                 p.dig = Math.min(p.dig, 0.15);
             }
@@ -379,49 +379,84 @@ final class ArgusLab {
      *                   sessions from a server: mostly honest, unlabelled)
      */
     static Calibration.Prior trainPrior(List<Played> train, List<Played> alsoHonest, Baselines base, String version) {
-        List<Calibration.Sample> raw = samples(train, base);
-        int nC = 0, nH = 0;
-        for (Calibration.Sample s : raw) {
-            if (s.cheater()) nC++;
-            else nH++;
+        return trainBagged(List.of(train), alsoHonest, base, version);
+    }
+
+    /**
+     * Bagged and in both regimes. Each bag (an independently played training
+     * corpus) is fitted on its own; the prior is the mean of their weights, so
+     * no weight rests on the luck of one seed. Every session is a training
+     * example twice: scored against the server's norms and against the
+     * built-in priors (a fresh server without norms) — the model has to work
+     * in both.
+     */
+    static Calibration.Prior trainBagged(List<List<Played>> bags, List<Played> alsoHonest, Baselines base, String version) {
+        Baselines cold = new Baselines();
+        // The honest budget: whatever a feature once gave an honest player (in
+        // any bag, either regime), its weight may turn into at most
+        // HONEST_BUDGET of logit — a feature honest play can light up never
+        // decides a case on its own.
+        List<Calibration.Sample> honestAll = new ArrayList<>();
+        for (List<Played> bag : bags) {
+            for (Calibration.Sample s : samples(bag, base)) if (!s.cheater()) honestAll.add(s);
+            for (Calibration.Sample s : samples(bag, cold)) if (!s.cheater()) honestAll.add(s);
         }
-        double wC = nC == 0 ? 1 : (double) nH / nC;
-        List<Calibration.Sample> weighted = new ArrayList<>();
-        for (Calibration.Sample s : raw) weighted.add(new Calibration.Sample(s.evidence(), s.signals(), s.cheater(), s.cheater() ? wC : 1));
-        // The honest budget: whatever a feature once gave an honest player,
-        // its weight may turn into at most HONEST_BUDGET of logit — a feature
-        // honest play can light up never decides a case on its own.
+        honestAll.addAll(samples(alsoHonest, base));
+        honestAll.addAll(samples(alsoHonest, cold));
         Map<String, Double> caps = new TreeMap<>();
-        List<Calibration.Sample> budget = new ArrayList<>(raw);
-        budget.addAll(samples(alsoHonest, base));
-        for (Calibration.Sample s : budget) {
-            if (s.cheater()) continue;
+        for (Calibration.Sample s : honestAll) {
             s.evidence().forEach((k, e) -> {
                 if (e > 0) caps.merge(k, HONEST_BUDGET / e, Math::min);
             });
         }
-        // The prior's bias stays at 3.2's −3: nothing found is worth 4.7 %, as it always was.
-        Calibration.Fit f = Calibration.optimise(weighted, Calibration.Prior.NEUTRAL, 0.02, 6000, caps,
-                Calibration.DEFAULT_BIAS);
+        Map<String, Double> sum = new TreeMap<>();
+        Map<String, Integer> count = new TreeMap<>();
+        double biasSum = 0;
+        for (List<Played> bag : bags) {
+            List<Calibration.Sample> raw = new ArrayList<>(samples(bag, base));
+            raw.addAll(samples(bag, cold));
+            int nC = 0, nH = 0;
+            for (Calibration.Sample s : raw) {
+                if (s.cheater()) nC++;
+                else nH++;
+            }
+            double wC = nC == 0 ? 1 : (double) nH / nC;
+            List<Calibration.Sample> weighted = new ArrayList<>();
+            for (Calibration.Sample s : raw) {
+                weighted.add(new Calibration.Sample(s.evidence(), s.signals(), s.cheater(), s.cheater() ? wC : 1));
+            }
+            // The prior's bias stays at 3.2's −3: nothing found is worth 4.7 %, as it always was.
+            Calibration.Fit f = Calibration.optimise(weighted, Calibration.Prior.NEUTRAL, 0.02, 6000, caps,
+                    Calibration.DEFAULT_BIAS);
+            biasSum += f.bias();
+            f.weights().forEach((k, v) -> {
+                sum.merge(k, v, Double::sum);
+                count.merge(k, 1, Integer::sum);
+            });
+        }
+        // Mean over the bags; a key a bag never saw counts as its neutral 1.
         // The lab is a model of the game, not the game: no weight it learns
         // may go past LAB_MAX_WEIGHT (staff labels on a live server may, up to 3).
         Map<String, Double> fitted = new TreeMap<>();
-        f.weights().forEach((k, v) -> fitted.put(k, Math.min(LAB_MAX_WEIGHT, v)));
-        f = new Calibration.Fit(f.bias(), fitted);
+        for (Map.Entry<String, Double> e : sum.entrySet()) {
+            int missing = bags.size() - count.get(e.getKey());
+            double mean = (e.getValue() + missing * 1.0) / bags.size();
+            fitted.put(e.getKey(), Math.min(LAB_MAX_WEIGHT, mean));
+        }
         double worst = Double.NEGATIVE_INFINITY;
-        for (Calibration.Sample s : raw) {
-            if (s.cheater()) continue;
-            double z = f.bias();
-            for (Map.Entry<String, Double> e : s.evidence().entrySet()) z += f.weights().getOrDefault(e.getKey(), 1.0) * e.getValue();
+        for (Calibration.Sample s : honestAll) {
+            double z = biasSum / bags.size();
+            for (Map.Entry<String, Double> e : s.evidence().entrySet()) z += fitted.getOrDefault(e.getKey(), 1.0) * e.getValue();
             worst = Math.max(worst, z);
         }
         double ceiling = Math.log(HONEST_CEILING / (1 - HONEST_CEILING));
-        double b = f.bias();
+        double b = biasSum / bags.size();
         if (worst > ceiling) b -= worst - ceiling;
         b = Math.max(Calibration.MIN_BIAS, Math.min(Calibration.MAX_BIAS, b));
         Map<String, Double> w = new TreeMap<>();
-        f.weights().forEach((k, v) -> w.put(k, Math.round(v * 1000) / 1000.0));
-        return new Calibration.Prior(version, Math.round(b * 1000) / 1000.0, w);
+        // Rounded down: rounding must never carry a weight over its honest budget.
+        fitted.forEach((k, v) -> w.put(k, Math.floor(v * 1000) / 1000.0));
+        return new Calibration.Prior(version, Math.floor(b * 1000) / 1000.0, w);
     }
 
     /** The highest weight the lab may give a feature. */
@@ -502,13 +537,20 @@ final class ArgusLab {
         long t0 = System.currentTimeMillis();
         WorldSample rock = LabSimulator.rock(4242);
         List<Played> norms = corpus(1, honest, 0, List.of(), rock);
-        List<Played> train = corpus(1_000_000, honest, 1, trainingScenarios(7, perCheat), rock);
-        // Honest players on bad days belong in training too: what a feature
-        // does to them is what keeps its weight down.
-        train.addAll(stressCorpus(1_500_000, honest / 2, rock));
+        int nBags = 3;
+        List<List<Played>> bags = new ArrayList<>();
+        for (int k = 0; k < nBags; k++) {
+            long from = 1_000_000 + k * 10_000_000L;
+            List<Played> bag = corpus(from, honest, 1, trainingScenarios(7 + k, perCheat), rock);
+            // Honest players on bad days belong in training too: what a feature
+            // does to them is what keeps its weight down.
+            bag.addAll(stressCorpus(from + 500_000, honest / 2, rock));
+            bags.add(bag);
+        }
+        List<Played> train = bags.get(0);
         List<Played> test = corpus(2_000_000, honest, perCheat, cheatScenarios(0.25, 0.5, 1.0), rock);
-        System.out.printf(Locale.ROOT, "corpus: %d + %d + %d sessions in %.1f s%n", norms.size(), train.size(), test.size(),
-                (System.currentTimeMillis() - t0) / 1000.0);
+        System.out.printf(Locale.ROOT, "corpus: %d norms + %d×%d training + %d test sessions in %.1f s%n", norms.size(),
+                nBags, train.size(), test.size(), (System.currentTimeMillis() - t0) / 1000.0);
         List<Played> everything = new ArrayList<>(norms);
         everything.addAll(test);
         System.out.println(distributions(everything));
@@ -521,7 +563,7 @@ final class ArgusLab {
         System.out.println(coldBefore.report("без норм, модель без обучения (все веса 1)"));
 
         String version = "lab-3.3.0";
-        Calibration.Prior prior = trainPrior(train, realSessions, base, version);
+        Calibration.Prior prior = trainBagged(bags, realSessions, base, version);
         Calibration trained = model(prior);
         Bench after = benchmark(test, base, trained);
         System.out.println(after.report("нормы сервера, обученный prior"));
@@ -530,6 +572,7 @@ final class ArgusLab {
         Calibration.Prior.override(null);
 
         System.out.println(summary(before, after, coldBefore, coldAfter));
+        System.out.println(ablation(test, base, prior));
         List<Played> stress = stressCorpus(3_000_000, honest, rock);
         Bench stressBench = benchmark(stress, base, trained);
         System.out.println(stressBench.report("стресс: честные с плохой сетью, лагами и ровными кликами"));
@@ -538,8 +581,9 @@ final class ArgusLab {
             System.out.println(benchmark(realSessions, baselines(realSessions), trained).report("реальные сессии, их собственные нормы"));
         }
         String json = priorJson(prior, String.format(Locale.ROOT,
-                "Argus Lab: %d honest norm sessions, %d honest + %d cheating training sessions; held-out: FP %.1f%%, stress FP %.1f%%, detection %.1f%% (with norms)",
-                honest, honest + honest / 2, train.size() - honest - honest / 2, 100 * after.fpRate(), 100 * stressBench.fpRate(), 100 * after.detection()));
+                "Argus Lab: %d honest norm sessions, %d bags of %d honest + %d cheating training sessions, each with and without norms; held-out: FP %.1f%%, stress FP %.1f%%, detection %.1f%% (with norms), %.1f%% (without)",
+                honest, nBags, honest + honest / 2, train.size() - honest - honest / 2, 100 * after.fpRate(),
+                100 * stressBench.fpRate(), 100 * after.detection(), 100 * coldAfter.detection()));
         System.out.println(json);
         if (write) {
             java.nio.file.Path out = java.nio.file.Path.of("src/main/resources/bastionac/argus-prior.json");
@@ -547,6 +591,29 @@ final class ArgusLab {
             java.nio.file.Files.writeString(out, json);
             System.out.println("written " + out.toAbsolutePath());
         }
+    }
+
+    /**
+     * What each feature is worth: detection with the feature's weight set to
+     * zero, against the full model (held-out, with norms). A feature whose
+     * removal costs nothing is either redundant or idle on this bench.
+     */
+    static String ablation(List<Played> test, Baselines base, Calibration.Prior prior) {
+        StringBuilder sb = new StringBuilder("== вклад признаков (детект без признака, с нормами) ==\n");
+        double full = benchmark(test, base, model(prior)).detection();
+        List<String[]> rows = new ArrayList<>();
+        for (String key : prior.weights().keySet()) {
+            if (Calibration.SIG.equals(key)) continue;
+            Map<String, Double> w = new TreeMap<>(prior.weights());
+            w.put(key, 0.0);
+            Bench b = benchmark(test, base, model(new Calibration.Prior(prior.version(), prior.bias(), w)));
+            rows.add(new String[]{key, String.format(Locale.ROOT, "%.1f", 100 * (full - b.detection()))});
+        }
+        Calibration.Prior.override(null);
+        rows.sort((x, y) -> Double.compare(Double.parseDouble(y[1]), Double.parseDouble(x[1])));
+        sb.append(String.format(Locale.ROOT, "полная модель: %.1f%%%n", 100 * full));
+        for (String[] r : rows) sb.append(String.format(Locale.ROOT, "  %-22s −%s п.п.%n", r[0], r[1]));
+        return sb.toString();
     }
 
     /** Detection per cheat, before and after training, as one table. */

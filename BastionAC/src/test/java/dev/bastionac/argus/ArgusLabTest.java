@@ -68,6 +68,30 @@ class ArgusLabTest {
     }
 
     @Test
+    void anAimModuleAnswersTheTargetAtOnce() {
+        // The reaction lag reads ≈ 0 ticks for every aim module and 3+ for a hand.
+        List<ArgusLab.Played> hands = ArgusLab.corpus(5_000_000, 12, 0, List.of(), ROCK);
+        List<ArgusLab.Played> modules = ArgusLab.corpus(6_000_000, 0, 2, List.of(
+                new ArgusLab.Scenario(Cheat.AURA, 1.0), new ArgusLab.Scenario(Cheat.AURA_SMOOTH, 0.5),
+                new ArgusLab.Scenario(Cheat.AIM_ASSIST, 1.0)), ROCK);
+        dev.bastionac.argus.features.Features.Spec lag = dev.bastionac.argus.features.Features.spec("cmb.track_lag");
+        dev.bastionac.argus.features.Features.Spec instant = dev.bastionac.argus.features.Features.spec("cmb.track_instant");
+        for (ArgusLab.Played p : hands) {
+            dev.bastionac.argus.features.FeatureSet.Value v = p.features().value(lag);
+            if (v != null) assertTrue(v.value() > 2.0, "a hand reacting in " + v.value() + " ticks");
+            dev.bastionac.argus.features.FeatureSet.Value i = p.features().value(instant);
+            if (i != null) assertTrue(i.value() < 0.25, "a hand answering at once by " + i.value());
+        }
+        for (ArgusLab.Played p : modules) {
+            dev.bastionac.argus.features.FeatureSet.Value v = p.features().value(lag);
+            assertTrue(v != null && v.value() < 1.5, p.scenario() + " reacting in " + (v == null ? "?" : v.value()));
+            if (p.cheat() != Cheat.AIM_ASSIST) {
+                assertTrue(p.features().value(instant).value() > 0.4, p.scenario() + " answers at once");
+            }
+        }
+    }
+
+    @Test
     void trainingRespectsTheHonestBudgetAndTheBias() {
         WorldSample rock = ROCK;
         Baselines norms = ArgusLab.baselines(ArgusLab.corpus(1, 30, 0, List.of(), rock));

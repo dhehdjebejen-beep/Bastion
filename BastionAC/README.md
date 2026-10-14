@@ -27,10 +27,18 @@ reopened.
   - 12 cheats at adjustable strength, alone and in bundles.
   Every session runs through the live feature code and scorer.
 - **The trained model ships with the mod** (`bastionac/argus-prior.json`).
-  Staff labels refine it instead of starting from all-ones. On the held-out
-  set, at 0 % false alarms (0 % on the stress set too), detection rose from
-  59 % to 75 %: Blink 0 → 83 %, X-ray 67 → 97 %, PingSpoof 25 → 67 %, smooth
-  KillAura 67 → 100 %.
+  Staff labels refine it instead of starting from all-ones. It is trained on
+  three independent corpora (bagging), with and without server norms. On the
+  held-out set, at 0 % false alarms (0 % on the stress set too), detection
+  is 75.7 % with norms and 70.4 % on a fresh server: X-ray 100 %, smooth
+  KillAura 100 % (86 % without norms), Blink 92 %, PingSpoof 67 %, Reach
+  +0.9 100 %, AimAssist at full strength 50 %.
+- **Lag-compensated aim and reaction lag.** Aim error is measured against the
+  target's track at the moment the player could see it: on a 100 ms ping a
+  KillAura used to "miss like a human". The aim's reaction time to the
+  target's own jinks (minus ping and interpolation) is 3.5–6.4 ticks for a
+  hand and ≈ 0 for an aura; the strength of the answer with no reaction at
+  all is 0.02–0.10 for a hand and 0.6–0.8 for an aura.
 - **Training safeguards:**
   - one feature adds at most 1.2 logit to any honest session;
   - an empty session is never suspicious (bias ≤ −2.5);
@@ -181,7 +189,7 @@ flowchart LR
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test    # 189 unit tests
+./gradlew test    # 190 unit tests
 ```
 
 The config is `config/bastionac/config.json`. It has per-check weight, alert,

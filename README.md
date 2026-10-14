@@ -100,7 +100,7 @@ To install, put the jar into the server's `mods/` folder next to
 
 ## Tests
 
-The repository has 337 unit tests: 90 in BastionAuth, 58 in BastionClaims and 189
+The repository has 338 unit tests: 90 in BastionAuth, 58 in BastionClaims and 190
 in BastionAC. Run them with `./gradlew test` in a module folder. The anti-cheat
 checks were also tested live with a raw-protocol client that sends the exact
 packets of the cheat modules they target.

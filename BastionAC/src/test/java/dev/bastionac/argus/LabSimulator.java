@@ -83,6 +83,8 @@ final class LabSimulator {
     final WorldSample rock;
 
     private long t = 1_000_000;
+    /** Ticks to the next Blink burst — counted across the whole session, roaming or fighting. */
+    private int blinkIn = 100;
     private double clientClock = 1_000_000;
     private double x, y = 64, z, vx, vy, vz;
     private boolean ground = true;
@@ -193,9 +195,19 @@ final class LabSimulator {
 
     /** Vanilla movement for one tick on flat ground; the cheats that bend it, bend it here. */
     private void move(boolean forward, boolean jumpKey) {
+        move(forward, 0, jumpKey);
+    }
+
+    /**
+     * @param strafe +1 left (A), −1 right (D), 0 none — vanilla's input vector
+     *               (sideways, forward), normalised past length 1, times 0.98,
+     *               turned by the yaw
+     */
+    private void move(boolean forward, int strafe, boolean jumpKey) {
         boolean bhop = on(Cheat.BHOP) && forward && rnd.nextDouble() < 0.6 * level(Cheat.BHOP) + 0.2;
         boolean jump = (jumpKey || bhop) && ground;
-        int keys = (forward ? IN_FORWARD | IN_SPRINT : 0) | (jumpKey ? IN_JUMP : 0);
+        int keys = (forward ? IN_FORWARD | IN_SPRINT : 0) | (jumpKey ? IN_JUMP : 0)
+                | (strafe > 0 ? IN_LEFT : strafe < 0 ? IN_RIGHT : 0);
         w.input(t, keys);
         if (Math.abs(vx) < 0.003) vx = 0;
         if (Math.abs(vy) < 0.003) vy = 0;
@@ -213,15 +225,22 @@ final class LabSimulator {
         double slip = startGround ? 0.6 : 1.0;
         double airAccel = 0.026 * (1 + 1.6 * level(Cheat.SPEED));
         double accel = startGround ? 0.13 * 0.21600002 / (slip * slip * slip) : airAccel;
-        if (forward) {
-            vx += fx * accel * 0.98;
-            vz += fz * accel * 0.98;
+        double in = forward ? 1 : 0, side = strafe;
+        double len = Math.sqrt(in * in + side * side);
+        if (len > 1) {
+            in /= len;
+            side /= len;
+        }
+        if (len > 0) {
+            double sin = Math.sin(r), cos = Math.cos(r);
+            vx += (side * cos - in * sin) * accel * 0.98;
+            vz += (in * cos + side * sin) * accel * 0.98;
         }
         if (!startGround && on(Cheat.STRAFE)) {
             double kick = 0.07 * level(Cheat.STRAFE);
-            double side = (tick / 40) % 2 == 0 ? 1 : -1;
-            vx += fz * kick * side;
-            vz -= fx * kick * side;
+            double dir = (tick / 40) % 2 == 0 ? 1 : -1;
+            vx += fz * kick * dir;
+            vz -= fx * kick * dir;
         }
         x += vx;
         z += vz;
@@ -251,7 +270,6 @@ final class LabSimulator {
     /** Walking, sprinting, jumping, looking around. */
     private void roam(int ticks) {
         boolean blink = on(Cheat.BLINK);
-        int nextBlink = 200 + rnd.nextInt(200);
         for (int i = 0; i < ticks; i++) {
             advance();
             boolean forward = rnd.nextDouble() < 0.85;
@@ -259,9 +277,8 @@ final class LabSimulator {
             if (i % 60 == 0) turn(rnd.nextGaussian() * 40, rnd.nextGaussian() * 8);
             else if (rnd.nextDouble() < 0.3) turn(rnd.nextGaussian() * 3, rnd.nextGaussian() * 1.5);
             move(forward, jump);
-            if (blink && --nextBlink <= 0) {
+            if (blink && --blinkIn <= 0) {
                 blinkBurst();
-                nextBlink = (int) (400 / Math.max(0.2, level(Cheat.BLINK))) + rnd.nextInt(200);
                 continue;
             }
             sendMove();
@@ -274,6 +291,7 @@ final class LabSimulator {
      * while it still answers our pings, then flushes the held moves at once.
      */
     private void blinkBurst() {
+        blinkIn = (int) (300 / Math.max(0.2, level(Cheat.BLINK))) + rnd.nextInt(200);
         int held = 15 + (int) (25 * level(Cheat.BLINK));
         double[][] path = new double[held][];
         for (int k = 0; k < held; k++) {
@@ -300,120 +318,148 @@ final class LabSimulator {
 
     // ---------------------------------------------------------------- fighting
 
-    /** A duel: the target circles; the player chases, aims and clicks. */
+    /**
+     * A duel. The target is a body in the world: it circles the player at the
+     * distance the fight is at, jinks, closes in and backs off; the player
+     * sprints at it and strafes. Everyone — honest or not — sees the target a
+     * round trip plus the client's interpolation late (that is what the
+     * server's clock makes of it), from where it stands now: its own strafing
+     * it allows for at once. For the target's moves a hand needs its reaction
+     * time on top and makes up part of it by leading; a module answers at once.
+     */
     private void fight(int ticks) {
-        double targetBearing = yaw + rnd.nextGaussian() * 30;
-        double targetPitch = 4 + rnd.nextGaussian() * 3;
-        double orbit = (rnd.nextBoolean() ? 1 : -1) * (1.5 + rnd.nextDouble() * 2.5);
         boolean aura = on(Cheat.AURA), smooth = on(Cheat.AURA_SMOOTH), assist = on(Cheat.AIM_ASSIST);
         double fakeStep = 0.0013 + rnd.nextDouble() * 0.2;   // a GCD-fix module's chosen "sensitivity"
         long nextClick = t + 200 + rnd.nextInt(300);
-        int reactionTicks = 2 + (int) ((1 - p.aimSkill) * 4);
-        double[] lagged = new double[reactionTicks + 1];
-        java.util.Arrays.fill(lagged, targetBearing);
-        float prevDy = 0;
-        double prefer = Math.min(2.95, p.reach) + 0.9 * level(Cheat.REACH) * 0.8;
-        gap = prefer + 0.3;
-        gapV = 0;
-        java.util.Arrays.fill(gapHistory, gap);
+        int net = (int) Math.round((p.pingMs + 100 + rnd.nextGaussian() * 15) / 50.0);
+        int reaction = 3 + (int) Math.round((1 - p.aimSkill) * 2 + rnd.nextDouble());
+        double lead = 0.5 + 0.45 * p.aimSkill;   // how much of its own lag a hand makes up by leading
+        // A Reach user fights near the edge of the reach it bought, not at its old distance.
+        double prefer = on(Cheat.REACH)
+                ? Math.max(Math.min(2.95, p.reach), 3.0 + 0.9 * level(Cheat.REACH) * 0.85 - 0.2)
+                : Math.min(2.95, p.reach);
+        double start = Math.toRadians(yaw + rnd.nextGaussian() * 30);
+        double tx = x - Math.sin(start) * (prefer + 0.3), tz = z + Math.cos(start) * (prefer + 0.3);
+        double orbit = (rnd.nextBoolean() ? 1 : -1) * (0.06 + rnd.nextDouble() * 0.14);   // blocks a tick round the player
+        double gapOff = 0, targetPitch = 4 + rnd.nextGaussian() * 3;
+        java.util.Arrays.fill(histX, tx);
+        java.util.Arrays.fill(histZ, tz);
+        int strafe = 0, strafeLeft = 0;
         for (int i = 0; i < ticks; i++) {
             advance();
-            targetBearing += orbit + rnd.nextGaussian() * 1.2;
+            // The target: round the player, holding the distance it wants.
+            double rx = tx - x, rz = tz - z, d = Math.max(0.3, Math.hypot(rx, rz));
+            double ux = rx / d, uz = rz / d;
+            if (rnd.nextInt(40) == 0) orbit = -orbit;                // a jink: the strafe reverses
+            gapOff = gapOff * 0.97 + rnd.nextGaussian() * 0.04;
+            double pull = Math.max(-0.3, Math.min(0.3, (prefer + 0.3 + gapOff - d) * 0.6));
+            tx += -uz * orbit + ux * pull + rnd.nextGaussian() * 0.03;
+            tz += ux * orbit + uz * pull + rnd.nextGaussian() * 0.03;
             targetPitch += rnd.nextGaussian() * 0.3;
-            System.arraycopy(lagged, 0, lagged, 1, lagged.length - 1);
-            lagged[0] = targetBearing;
-            double seen = lagged[lagged.length - 1];   // a human reacts to where the target was
+            histX[++hi % histX.length] = tx;
+            histZ[hi % histZ.length] = tz;
 
+            // What the player sees: the target net ticks old, from where it stands now.
+            double seenNow = seenYaw(net), seenOld = seenYaw(net + reaction);
+            double seenVel = wrap(seenOld - seenYaw(net + reaction + 4)) / 4.0;
             float dy, dp;
             if (aura && !smooth) {
-                // Computed: straight onto the target; in exact floats.
-                dy = (float) wrap(targetBearing - yaw);
+                // Computed: straight onto the target it sees; in exact floats.
+                dy = (float) wrap(seenNow - yaw);
                 dp = (float) (targetPitch - pitch);
             } else if (smooth) {
                 // Interpolated towards the target and snapped to a fake sensitivity grid.
                 double k = 0.35 + 0.4 * level(Cheat.AURA_SMOOTH);
-                double wantY = wrap(targetBearing - yaw) * k + rnd.nextGaussian() * 0.15;
+                double wantY = wrap(seenNow - yaw) * k + rnd.nextGaussian() * 0.15;
                 double wantP = (targetPitch - pitch) * k;
                 dy = (float) (Math.round(wantY / fakeStep) * fakeStep);
                 dp = (float) (Math.round(wantP / fakeStep) * fakeStep);
             } else {
-                // A hand: part of the way to where it saw the target, with noise.
+                // A hand: towards where it saw the target a reaction ago, led a little, with noise.
+                double aim = seenOld + seenVel * reaction * lead;
                 double gain = 0.25 + 0.35 * p.aimSkill + 0.15 * rnd.nextDouble();
                 double noise = (1.6 - p.aimSkill) * 1.4;
-                double wantY = wrap(seen - yaw) * gain + rnd.nextGaussian() * noise;
+                double wantY = wrap(aim - yaw) * gain + rnd.nextGaussian() * noise;
                 double wantP = (targetPitch - pitch) * gain * 0.5 + rnd.nextGaussian() * noise * 0.4;
                 if (assist) {
-                    double pull = 0.25 + 0.5 * level(Cheat.AIM_ASSIST);
-                    wantY += wrap(targetBearing - yaw - wantY) * pull;
-                    wantP += (targetPitch - pitch - wantP) * pull;
+                    // The module pulls the hand towards the target as it is seen now.
+                    double pullA = 0.25 + 0.5 * level(Cheat.AIM_ASSIST);
+                    wantY += wrap(seenNow - yaw - wantY) * pullA;
+                    wantP += (targetPitch - pitch - wantP) * pullA;
                 }
-                double s = p.step();
-                dy = (float) (Math.round(wantY / s) * s);
-                dp = (float) (Math.round(wantP / s) * s);
+                double st = p.step();
+                dy = (float) (Math.round(wantY / st) * st);
+                dp = (float) (Math.round(wantP / st) * st);
             }
             yaw += dy;
             pitch = (float) Math.max(-90, Math.min(90, pitch + dp));
-            prevDy = dy;
 
-            // The gap to the target: it drifts around the distance this player
-            // likes to fight at, now closing, now opening.
-            gapV = gapV * 0.85 + rnd.nextGaussian() * 0.05 + (prefer - gap) * 0.04;
-            gap = Math.max(0.6, Math.min(4.8, gap + gapV));
-            gapHistory[++gapIdx % gapHistory.length] = gap;
+            if (on(Cheat.BLINK) && --blinkIn <= 0) blinkBurst();
 
-            boolean jump = rnd.nextDouble() < 0.12;
-            move(rnd.nextDouble() < 0.9, jump);
-            sendMove();
-            {
-                double br = Math.toRadians(targetBearing);
-                double c = gap + 0.3;
-                w.target(t, 7, (float) (-Math.sin(br) * c), -0.7f, (float) (Math.cos(br) * c), 0.3f, 1.8f);
+            // Sprinting at it, strafing left and right.
+            if (--strafeLeft <= 0) {
+                strafe = rnd.nextInt(3) - 1;
+                strafeLeft = 8 + rnd.nextInt(30);
             }
+            // Pressing in only when the target is farther than this player likes to hit from.
+            boolean press = Math.hypot(tx - x, tz - z) - 0.3 > prefer - 0.1 ? rnd.nextDouble() < 0.9 : rnd.nextDouble() < 0.2;
+            move(press, strafe, rnd.nextDouble() < 0.12);
+            sendMove();
+            double horiz = Math.hypot(tx - x, tz - z);
+            double ty = -Math.tan(Math.toRadians(targetPitch)) * horiz;   // centre, from the eyes
+            w.target(t, 7, (float) (tx - x), (float) ty, (float) (tz - z), 0.3f, 1.8f);
 
             if (t >= nextClick) {
+                // The client swings at the target it sees — a round trip plus
+                // its interpolation old — and a vanilla client only does when
+                // that is within 3 blocks. The server measures to where the
+                // target is now.
+                int ago = (int) Math.round((p.pingMs + 100 * (0.6 + 0.6 * rnd.nextDouble())) / 50.0);
+                int j = Math.max(0, hi - ago) % histX.length;
+                double seenGap = Math.hypot(histX[j] - x, histZ[j] - z) - 0.3;
+                nextClick = t + clickGap();
+                // Nor does it hit what the crosshair is not on (a module that
+                // aims for itself always is).
+                double off = Math.abs(wrap(seenYaw(net) - yaw));
+                double half = Math.toDegrees(Math.atan2(0.45, Math.max(0.5, seenGap + 0.3)));
+                if (seenGap > 3.0 + 0.9 * level(Cheat.REACH) || (!aura && off > half)) {
+                    endTick();   // swung at air: no attack packet
+                    continue;
+                }
                 SessionWriter.Attack a = new SessionWriter.Attack();
                 a.targetId = 7;
                 a.flags = SessionWriter.Attack.F_PLAYER | SessionWriter.Attack.F_SPRINTING;
-                // The client swings at the target it sees — half a round trip
-                // plus its interpolation old — and a vanilla client only does
-                // when that is within 3 blocks. The server measures to where
-                // the target is now.
-                int ago = (int) Math.round((p.pingMs / 2.0 + 100 * (0.6 + 0.6 * rnd.nextDouble())) / 50.0);
-                double seenGap = gapHistory[Math.max(0, gapIdx - ago) % gapHistory.length];
-                double maxReach = 3.0 + 0.9 * level(Cheat.REACH);
-                if (seenGap > maxReach) {
-                    nextClick = t + clickGap();   // swung at air: no attack packet
-                    endTick();
-                    continue;
-                }
-                double dist = Math.max(0.5, gap + rnd.nextGaussian() * 0.02);
-                double br = Math.toRadians(targetBearing);
-                double ux = -Math.sin(br), uz = Math.cos(br);
-                a.distance = (float) dist;
+                a.distance = (float) Math.max(0.5, horiz - 0.3 + rnd.nextGaussian() * 0.02);
                 a.eyeX = x;
                 a.eyeY = y + 1.62;
                 a.eyeZ = z;
-                a.cx = x + ux * (dist + 0.3);
-                a.cy = y + 0.9;
-                a.cz = z + uz * (dist + 0.3);
-                double miss = Math.abs(wrap(targetBearing - yaw)) + Math.abs(targetPitch - pitch) * 0.5;
-                if (aura && !smooth) a.aimError = (float) Math.abs(rnd.nextGaussian() * 0.25);
-                else if (smooth) a.aimError = (float) (miss * 0.5 + Math.abs(rnd.nextGaussian() * 0.6));
-                else a.aimError = (float) (miss + Math.abs(rnd.nextGaussian() * (2.5 - 1.5 * p.aimSkill)));
+                a.cx = tx;
+                a.cy = y + 1.62 + ty;
+                a.cz = tz;
+                // Measured on the server, against where the target is now — for
+                // a module too, which aimed at where it saw the target.
+                double yr = Math.toRadians(yaw), pr = Math.toRadians(pitch);
+                double lx = -Math.sin(yr) * Math.cos(pr), ly = -Math.sin(pr), lz = Math.cos(yr) * Math.cos(pr);
+                double cx = tx - x, cy = ty, cz = tz - z, cl = Math.sqrt(cx * cx + cy * cy + cz * cz);
+                a.aimError = (float) Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, (lx * cx + ly * cy + lz * cz) / cl))));
                 a.yaw = yaw;
                 a.pitch = pitch;
                 a.cooldown = 1f;
                 a.ping = p.pingMs;
                 w.attack(t, a);
-                nextClick = t + clickGap();
             }
             endTick();
         }
     }
 
-    private double gap, gapV;
-    private final double[] gapHistory = new double[64];
-    private int gapIdx;
+    private final double[] histX = new double[64], histZ = new double[64];
+    private int hi;
+
+    /** The yaw from where the player stands now to where the target was {@code ago} ticks ago. */
+    private double seenYaw(int ago) {
+        int j = Math.max(0, hi - ago) % histX.length;
+        return Math.toDegrees(Math.atan2(-(histX[j] - x), histZ[j] - z));
+    }
 
     /** Milliseconds to the next click. */
     private long clickGap() {

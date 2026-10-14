@@ -99,7 +99,7 @@ cd BastionAC        # или BastionAuth / BastionClaims
 
 ## Тесты
 
-В репозитории 337 юнит-тестов: 90 в BastionAuth, 58 в BastionClaims и 189 в
+В репозитории 338 юнит-тестов: 90 в BastionAuth, 58 в BastionClaims и 190 в
 BastionAC. Запуск — `./gradlew test` в папке мода. Проверки античита, кроме того,
 прогонялись вживую тестовым клиентом, который шлёт ровно те пакеты, что и модули
 читов.

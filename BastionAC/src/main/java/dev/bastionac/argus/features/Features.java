@@ -98,6 +98,16 @@ public final class Features {
                 "удары точно в центр хитбокса", "%", 100));
         add(new Spec("cmb.aim_error", Category.COMBAT, Agg.MEDIAN, -1, 9, 4, 2, 40, 15, 0.8, false,
                 "медианный промах прицела при ударе", "°", 1));
+        // Lag-compensated aim and reaction (3.3): against the target's track
+        // as the player could have seen it, not where it is on the server now.
+        add(new Spec("cmb.aim_lc_center", Category.COMBAT, Agg.RATE, 1, 0.03, 0.05, 0.03, 30, 15, 0.6, false,
+                "удары точно в цель, какой игрок её видел (с учётом лага)", "%", 100));
+        add(new Spec("cmb.aim_lc_error", Category.COMBAT, Agg.MEDIAN, -1, 6, 3, 1.5, 30, 15, 0.8, false,
+                "медианный промах с учётом лага", "°", 1));
+        add(new Spec("cmb.track_lag", Category.COMBAT, Agg.MEDIAN, -1, 3.5, 1.0, 0.7, 3, 2, 0.8, false,
+                "реакция прицела на рывки цели (за вычетом пинга)", " т", 1));
+        add(new Spec("cmb.track_instant", Category.COMBAT, Agg.MEDIAN, 1, 0.05, 0.08, 0.05, 3, 2, 0.8, false,
+                "мгновенный ответ прицела на рывки цели (без реакции)", "", 1));
         add(new Spec("cmb.snap", Category.COMBAT, Agg.RATE, 1, 0.03, 0.05, 0.03, 40, 15, 1.0, false,
                 "рывок прицела к цели перед ударом", "%", 100));
         add(new Spec("cmb.rot_const", Category.COMBAT, Agg.RATE, 1, 0.02, 0.03, 0.02, 300, 100, 1.0, false,
@@ -116,8 +126,10 @@ public final class Features {
         // past vanilla's 3 blocks on a low ping is now worth a look by itself.
         add(new Spec("cmb.reach", Category.COMBAT, Agg.P95, 1, 2.85, 0.12, 0.08, 30, 10, 1.6, false,
                 "дистанция удара по игрокам (95-й процентиль)", " бл", 1));
+        add(new Spec("cmb.reach_lc", Category.COMBAT, Agg.P95, 1, 2.9, 0.1, 0.06, 30, 15, 1.2, false,
+                "дистанция удара с учётом лага (95-й процентиль)", " бл", 1));
         add(new Spec("cmb.reach_over", Category.COMBAT, Agg.RATE, 1, 0.01, 0.02, 0.015, 30, 15, 1.4, false,
-                "удары дальше 3,1 блока при низком пинге", "%", 100));
+                "удары дальше 3,1 блока сверх отхода цели (любой пинг)", "%", 100));
         add(new Spec("cmb.blind_hit", Category.COMBAT, Agg.RATE, 1, 0.01, 0.03, 0.02, 40, 15, 1.0, false,
                 "удары по целям вне поля зрения", "%", 100));
         add(new Spec("cmb.yaw_wrap", Category.COMBAT, Agg.PER_HOUR, 1, 0.0, 0.5, 0.5, 0.3, 0.05, 1.4, true,
