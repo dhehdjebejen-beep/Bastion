@@ -29,6 +29,9 @@ import java.util.List;
  */
 public final class CombatChecks {
 
+    /** Ticks either side of the round-trip moment a reach check accepts (jitter + client interpolation). */
+    static final int REACH_BAND_SLACK = 3;
+
     /** At most 4 CPS violations per second, so VL growth stays predictable. */
     private static final long CPS_FLAG_INTERVAL_MS = (long) (1000 / MathUtil.CPS_FLAGS_PER_SECOND);
 
@@ -119,17 +122,16 @@ public final class CombatChecks {
         // ---------------- REACH ----------------
         Vec3d eye = player.getEyePos();
         int ping = dev.bastionac.telemetry.Telemetry.lagCompPing(player);
-        // Lag-compensation backtrack window, bounded to the player's ping. Taking
-        // the closest of ALL historical boxes hands a chaser the victim's oldest
-        // (nearest) position, so the extra reach it grants is victim_speed *
-        // ticksBack. Cap it at ~600ms and trim the free floor (3->2 ticks) to keep
-        // backtrack under ~3 blocks even at high ping, without breaking real lag comp.
-        // 20 ticks of history (one full second) instead of 12: mobile players
-        // on carrier NAT sit at 300–800 ms and were being compensated for 600 ms
-        // only, then banned for reach through the alert ladder.
-        int ticksBack = Math.min(HitboxHistory.DEPTH, Math.max(2, ping / 50 + 2));
+        // Lag compensation: the boxes the target had around the moment the
+        // client saw it — one round trip back, ± REACH_BAND_SLACK ticks for
+        // jitter and the client's interpolation. Twenty ticks of history cover
+        // mobile players at 300–800 ms. Until 3.1.1 the window was every box
+        // from now back to the full ping, and the closest of them won: a player
+        // who delayed all of his traffic chose among up to twenty positions of
+        // the victim — Backtrack by real lag (see HitboxHistory.reachBand).
+        int[] band = HitboxHistory.reachBand(ping, REACH_BAND_SLACK);
         boolean playerTarget = target instanceof ServerPlayerEntity;
-        List<Box> boxes = playerTarget ? HitboxHistory.recent(target.getId(), ticksBack) : List.of();
+        List<Box> boxes = playerTarget ? HitboxHistory.between(target.getId(), band[0], band[1]) : List.of();
         if (boxes.isEmpty()) boxes = List.of(target.getBoundingBox());
 
         double base = player.getAttributeValue(EntityAttributes.ENTITY_INTERACTION_RANGE);

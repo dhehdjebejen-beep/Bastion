@@ -508,6 +508,35 @@ public final class ProtectionService {
         return c != null && (c.arrested || (!c.can(channeler.getUuid(), Claim.Perm.BUILD) && !bypassesProtection(channeler)));
     }
 
+    /**
+     * Whether a fishing rod may not pull this entity: an animal, a villager, an
+     * armour stand or an item lying inside a claim, hooked by someone without
+     * the {@code entities} permission there. Without this a stranger standing
+     * outside reeled the inhabitants of a base out over the wall.
+     */
+    public static boolean fishingPullBlocked(Entity hooked, Entity owner) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.entityProtection || hooked == null) return false;
+        if (hooked instanceof PlayerEntity || hooked instanceof net.minecraft.entity.mob.HostileEntity) return false;
+        Claim c = claimAt(hooked.getEntityWorld(), hooked.getBlockPos());
+        if (c == null) return false;
+        if (!(owner instanceof ServerPlayerEntity p)) return true;
+        return c.arrested || (!c.can(p.getUuid(), Claim.Perm.ENTITIES) && !bypassesProtection(p));
+    }
+
+    /**
+     * Whether sculk spreading from the catalyst at {@code catalyst} may not
+     * convert the block at {@code target}: the block lies in a claim the
+     * catalyst is not part of. A catalyst outside the border, fed by mobs
+     * killed next to it, used to grow sculk and sensors into the base.
+     */
+    public static boolean sculkSpreadBlocked(net.minecraft.world.World world, BlockPos target, BlockPos catalyst) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.blockProtection) return false;
+        Claim c = claimAt(world, target);
+        return c != null && (catalyst == null || !c.contains(catalyst.getX(), catalyst.getY(), catalyst.getZ()));
+    }
+
     // ------------------------------------------------------------------ messaging
 
     /** Sends a message at most once per ~1.5s per player (anti-spam on repeated denials). */

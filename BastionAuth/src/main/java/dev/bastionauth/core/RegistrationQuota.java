@@ -33,6 +33,11 @@ public final class RegistrationQuota {
      * @param stepMs      the waiting step
      * @param hardCap     absolute ceiling, 0 = none
      */
+    /** The login cut-off below which an account is dormant and not counted (0 = count all). */
+    public static long activeSince(long now, int dormantDays) {
+        return dormantDays <= 0 ? 0L : now - dormantDays * 86_400_000L;
+    }
+
     public static long allowedAt(int existing, long lastRegAt, int base, boolean extra, long stepMs, int hardCap) {
         if (existing < base) return 0;
         if (!extra || stepMs <= 0) return NEVER;

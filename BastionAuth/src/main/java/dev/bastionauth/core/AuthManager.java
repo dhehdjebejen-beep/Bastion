@@ -779,10 +779,13 @@ public final class AuthManager {
                     sendLater(player, st, "register.already");
                     return;
                 }
-                int onIp = db.countByRegIp(ipHmac);
                 AuthConfig.BruteForce bf = cfg.bruteForce;
+                // Dormant accounts (nobody logged in for quotaIgnoresDormantDays)
+                // do not count: the quota is shared by everyone behind the IP.
+                long activeSince = RegistrationQuota.activeSince(now, bf.quotaIgnoresDormantDays);
+                int onIp = db.countActiveByRegIp(ipHmac, activeSince);
                 long allowedAt = RegistrationQuota.allowedAt(onIp,
-                        onIp >= bf.maxAccountsPerIp ? db.lastRegistrationByRegIp(ipHmac) : 0L,
+                        onIp >= bf.maxAccountsPerIp ? db.lastRegistrationByRegIp(ipHmac, activeSince) : 0L,
                         bf.maxAccountsPerIp, bf.extraAccountsWithWait,
                         bf.extraAccountWaitDays * 86_400_000L, bf.maxAccountsPerIpHard);
                 if (allowedAt == RegistrationQuota.NEVER) {
