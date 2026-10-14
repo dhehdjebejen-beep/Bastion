@@ -166,7 +166,7 @@ public final class BanManager {
         ACConfig.Punishment cfg = BastionAC.config().punishment;
         if (!cfg.autoTempbanEnabled) return;
         ServerPlayerEntity onlineNow = srv.getPlayerManager().getPlayer(uuid);
-        if (onlineNow != null && isExemptOperator(onlineNow)) {
+        if (isExemptOperator(srv, uuid, name)) {
             BastionAC.LOGGER.warn("[CHAINBAN] {} is staff — chain burned ({}) but no ban (punishment.exemptOperators)",
                     name, kinds);
             return;
@@ -225,7 +225,7 @@ public final class BanManager {
         if (srv == null) return;
         ACConfig.Punishment cfg = BastionAC.config().punishment;
         ServerPlayerEntity onlineNow = srv.getPlayerManager().getPlayer(uuid);
-        if (onlineNow != null && isExemptOperator(onlineNow)) {
+        if (isExemptOperator(srv, uuid, name)) {
             BastionAC.LOGGER.warn("[ARGUSBAN] {} is staff — case #{} not acted on", name, caseId);
             return;
         }
@@ -289,6 +289,25 @@ public final class BanManager {
         if (player == null) return false;
         ACConfig.Punishment cfg = BastionAC.config().punishment;
         return cfg.exemptOperators && Alerts.isAdmin(player);
+    }
+
+    /**
+     * As {@link #isExemptOperator(ServerPlayerEntity)} for a player who may
+     * have left. The ban paths that act later (Argus, a burned chain) only
+     * asked about the online player, so an operator who logged off before the
+     * verdict was simply "not staff" and could be banned out of their own
+     * server. Offline, the ops list decides.
+     */
+    public static boolean isExemptOperator(MinecraftServer srv, UUID uuid, String name) {
+        if (srv == null || uuid == null) return false;
+        ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
+        if (online != null) return isExemptOperator(online);
+        if (!BastionAC.config().punishment.exemptOperators) return false;
+        try {
+            return srv.getPlayerManager().isOperator(new net.minecraft.server.PlayerConfigEntry(uuid, name == null ? "" : name));
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /**

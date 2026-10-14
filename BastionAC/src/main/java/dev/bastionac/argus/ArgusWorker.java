@@ -8,7 +8,8 @@ import java.util.concurrent.atomic.AtomicLong;
 /**
  * The Argus thread. One job at a time, lowest priority, and it steps aside
  * while the server is struggling: the host has two cores and the game comes
- * first — a verdict that arrives a minute later costs nothing.
+ * first. Case jobs go before everything else and wait for a quiet tick only
+ * briefly, since staff are waiting on them.
  */
 final class ArgusWorker {
 
@@ -63,7 +64,9 @@ final class ArgusWorker {
                 if (!running) return;
                 continue;
             }
-            waitForQuietServer();
+            // A case someone is waiting on yields to a lagging server only
+            // briefly; background scans can afford the full two minutes.
+            waitForQuietServer(job.priority() == PRIO_CASE ? 20_000 : 120_000);
             current = job.what();
             try {
                 job.task().run();
@@ -75,9 +78,9 @@ final class ArgusWorker {
         }
     }
 
-    /** Up to two minutes of patience while the average tick is over the configured line. */
-    private void waitForQuietServer() {
-        long until = System.currentTimeMillis() + 120_000;
+    /** Some patience (up to {@code maxMs}) while the average tick is over the configured line. */
+    private void waitForQuietServer(long maxMs) {
+        long until = System.currentTimeMillis() + maxMs;
         while (running && System.currentTimeMillis() < until) {
             var srv = BastionAC.server();
             if (srv == null || srv.getAverageTickTime() <= BastionAC.config().argus.pauseAboveMspt) return;

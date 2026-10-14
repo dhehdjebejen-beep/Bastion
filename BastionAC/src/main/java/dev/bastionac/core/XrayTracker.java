@@ -15,7 +15,8 @@ import net.minecraft.util.math.Direction;
  * cannot hide is the <em>statistical shape</em> of a mining session, so
  * this tracker measures three independent signals over a session and feeds
  * each confirmed one into the attack-chain detector as a PROBE — never a
- * ban, never even an alert on its own (unless the chain already arms):
+ * ban on its own. Staff are told (3.1): every verdict at once, hidden-ore
+ * breaks at most once a minute per player, with the count in between:
  *
  * <ol>
  *   <li><b>Hidden-ore break</b> — a valuable overworld ore broken with no
@@ -247,6 +248,7 @@ public final class XrayTracker {
     }
 
     private static void feed(ServerPlayerEntity player, PlayerData d, String kind, int probes, String where) {
+        tellStaff(player, d, kind, where);
         for (int i = 0; i < probes; i++) {
             AttackChainDetector.probe(new ChainPlayerAdapter(player), "xray",
                     kind + where + " (руд " + d.xrayValuable + ", камень " + d.xrayStoneLike
@@ -255,6 +257,48 @@ public final class XrayTracker {
         // A suspicious mining moment: the analyzer looks at the whole session.
         dev.bastionac.argus.Argus.signal(player, dev.bastionac.argus.Signal.Kind.XRAY_PROBE,
                 kind + where + " — руд " + d.xrayValuable + ", камня " + d.xrayStoneLike + ", скрытых " + d.xrayHidden);
+    }
+
+    /**
+     * The staff side of a finding. It used to have none: the probes reached the
+     * chain and Argus, but no line ever reached chat or the console, so X-ray
+     * was the one detection staff could not see. Verdicts (pure-ore, ratio,
+     * purity drop) fire once per episode and always go out; hidden-ore breaks
+     * fire per block and are throttled, the skipped ones counted into the next.
+     */
+    private static void tellStaff(ServerPlayerEntity player, PlayerData d, String kind, String where) {
+        var cfg = BastionAC.config().general;
+        if (!cfg.xrayAlerts) return;
+        boolean verdict = !KIND_HIDDEN.equals(kind);
+        int batched = verdict ? 1 : hiddenBatch(d, System.currentTimeMillis(), cfg.xrayHiddenAlertSeconds);
+        if (batched == 0) return;
+        String stats = "руд " + d.xrayValuable + ", камня " + d.xrayStoneLike + ", скрытых " + d.xrayHidden;
+        Alerts.sendXray(player, labelOf(kind) + (batched > 1 ? " ×" + batched : ""), where.trim(), stats, verdict);
+    }
+
+    /**
+     * Throttle for hidden-ore alerts: how many hidden breaks the alert due now
+     * reports, or 0 while the player's cooldown is still running (the break is
+     * then counted into the next one).
+     */
+    static int hiddenBatch(PlayerData d, long now, int cooldownSeconds) {
+        d.xrayHiddenSinceAlert++;
+        if (d.xrayLastHiddenAlertMs != 0 && now - d.xrayLastHiddenAlertMs < cooldownSeconds * 1000L) return 0;
+        int n = d.xrayHiddenSinceAlert;
+        d.xrayHiddenSinceAlert = 0;
+        d.xrayLastHiddenAlertMs = now;
+        return n;
+    }
+
+    /** Staff-facing name of a finding. */
+    static String labelOf(String kind) {
+        return switch (kind) {
+            case KIND_HIDDEN -> "скрытая руда";
+            case KIND_PURE -> "чистая руда без камня";
+            case KIND_RATIO -> "слишком много руды на камень";
+            case KIND_DROP -> "резкий скачок руды";
+            default -> kind;
+        };
     }
 
     private static int weightOf(OreFamily fam) {
@@ -316,6 +360,8 @@ public final class XrayTracker {
         d.xrayPrefixFrozen = false;
         d.xrayWindowStone = 0;
         d.xrayWindowOres = 0;
+        d.xrayLastHiddenAlertMs = 0;
+        d.xrayHiddenSinceAlert = 0;
     }
 
     /** Session summary for the player card UI. */

@@ -157,5 +157,35 @@ public final class Alerts {
         }
     }
 
+    /**
+     * X-ray finding: one clickable line (teleport), the evidence on hover.
+     * Always logged to the console as well. A verdict is red, a single hidden
+     * ore yellow — on its own it is a hint, not proof.
+     */
+    public static void sendXray(ServerPlayerEntity suspect, String what, String where, String stats, boolean verdict) {
+        MinecraftServer srv = BastionAC.server();
+        if (srv == null) return;
+        String name = suspect.getGameProfile().name();
+        BastionAC.LOGGER.warn("[XRAY] {}: {}{} ({})", name, what, where.isEmpty() ? "" : " " + where, stats);
+        String alertPrefix = BastionAC.config().messages.alertPrefix;
+        BlockPos pos = suspect.getBlockPos();
+        MutableText line = TextFmt.literal(alertPrefix + " &8[&bX-ray&8] &e" + name + " &7» "
+                + (verdict ? "&c" : "&e") + what + " &8[&bTP&8]");
+        MutableText hover = TextFmt.literal(
+                "&7Игрок: &f" + name + "\n"
+                + "&7Находка: &f" + what + (where.isEmpty() ? "" : " &8(" + where + ")") + "\n"
+                + "&7Сессия: &f" + stats + "\n"
+                + "&7Коорд: &f" + pos.getX() + " " + pos.getY() + " " + pos.getZ() + "\n\n"
+                + (verdict ? "&7Вердикт по форме копания. " : "&7Одна скрытая руда — намёк, не доказательство. ")
+                + "&7Аргус разберёт сессию сам.\n"
+                + "&8Клик — телепорт к игроку");
+        MutableText clickable = (MutableText) line.styled(s -> s
+                .withClickEvent(new ClickEvent.RunCommand("/tp " + name))
+                .withHoverEvent(new HoverEvent.ShowText(hover)));
+        for (ServerPlayerEntity op : srv.getPlayerManager().getPlayerList()) {
+            if (isAdmin(op) && isEnabledFor(op)) op.sendMessage(clickable, false);
+        }
+    }
+
     private Alerts() {}
 }

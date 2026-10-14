@@ -138,6 +138,21 @@ class ACConfigTest {
      * exactly the retuned checks, and only those.
      */
     @Test
+    void v14MovesOnlyTheOldArgusDefaults(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("config.json");
+        Files.writeString(file, """
+                {
+                  "general": { "configVersion": 13 },
+                  "argus": { "collectMinutes": 10, "deadlineMinutes": 45, "reanalyzeMinutes": 15 }
+                }
+                """, StandardCharsets.UTF_8);
+        ACConfig cfg = ACConfig.loadOrCreate(file, w -> {});
+        assertEquals(2, cfg.argus.collectMinutes, "old default moves");
+        assertEquals(45, cfg.argus.deadlineMinutes, "an admin's own deadline stays");
+        assertEquals(3, cfg.argus.reanalyzeMinutes, "old default moves");
+    }
+
+    @Test
     void oldConfigIsMigratedButKeepsUnrelatedTuning(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("config.json");
         Files.writeString(file, """

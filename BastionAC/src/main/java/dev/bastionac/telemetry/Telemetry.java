@@ -73,6 +73,9 @@ public final class Telemetry {
     private static final class Track {
         volatile int pingId;
         volatile long pingSentMs;
+        /** The last three transaction round trips (ms) and when the newest came back; -1 = none yet. */
+        final int[] rtt = {-1, -1, -1};
+        volatile long rttAtMs;
         boolean mounted;
         /** Recently attacked entities: id → last attack tick. */
         final Map<Integer, Long> targets = new LinkedHashMap<>();
@@ -541,7 +544,9 @@ public final class Telemetry {
             a.tvx = (float) tv.x;
             a.tvy = (float) tv.y;
             a.tvz = (float) tv.z;
-            a.ping = p.networkHandler == null ? 0 : p.networkHandler.getLatency();
+            // The ping lag compensation may trust (a spoofed keep-alive does not
+            // inflate it): the reach analysis sets high-ping hits aside by it.
+            a.ping = lagCompPing(p);
             w.attack(arrivalMs, a);
             synchronized (tr.targets) {
                 tr.targets.remove(target.getId());
@@ -565,7 +570,33 @@ public final class Telemetry {
         SessionWriter w = w(p);
         if (tr == null || w == null || id != tr.pingId) return;
         long now = System.currentTimeMillis();
-        w.pong(now, (int) Math.min(60_000, now - tr.pingSentMs));
+        int rtt = (int) Math.min(60_000, now - tr.pingSentMs);
+        w.pong(now, rtt);
+        synchronized (tr.rtt) {
+            tr.rtt[2] = tr.rtt[1];
+            tr.rtt[1] = tr.rtt[0];
+            tr.rtt[0] = rtt;
+        }
+        tr.rttAtMs = now;
+    }
+
+    /**
+     * The ping lag compensation may trust. Vanilla's latency comes from
+     * keep-alives, and keep-alives are exactly what a PingSpoof module holds
+     * back: an honest 40 ms that claims 900 ms buys a near-second-deep reach
+     * window — Backtrack with a licence. Our own transactions are answered in
+     * order with the game packets, so the larger of the last three caps the
+     * keep-alive figure. Only ever lowers the claim; unknown or stale → vanilla.
+     */
+    public static int lagCompPing(ServerPlayerEntity p) {
+        int latency = p.networkHandler == null ? 0 : p.networkHandler.getLatency();
+        Track tr = TRACK.get(p.getUuid());
+        if (tr == null || System.currentTimeMillis() - tr.rttAtMs > 10_000) return latency;
+        int worst = -1;
+        synchronized (tr.rtt) {
+            for (int r : tr.rtt) worst = Math.max(worst, r);
+        }
+        return worst < 0 ? latency : Math.min(latency, worst + 50);
     }
 
     public static void keepAlive(ServerPlayerEntity p, int rttMs) {

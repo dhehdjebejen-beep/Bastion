@@ -60,7 +60,11 @@ public final class AuthManager {
     private static final DateTimeFormatter TIME_FORMAT =
             DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm").withZone(ZoneId.systemDefault());
 
-    public record Session(String ipHmac, long expiresAt) {}
+    /**
+     * A resumable session: the IP it was opened from and the
+     * client profile (brand + client options) — see {@link #sessionMatches}.
+     */
+    public record Session(String ipHmac, long expiresAt, String profile) {}
 
     private record PendingIp(String ip, long atMillis) {}
 
@@ -123,7 +127,7 @@ public final class AuthManager {
         }
         for (Database.SessionRow row : db.loadSessions()) {
             try {
-                sessions.put(UUID.fromString(row.uuid()), new Session(row.ipHmac(), row.expiresAt()));
+                sessions.put(UUID.fromString(row.uuid()), new Session(row.ipHmac(), row.expiresAt(), row.profile()));
             } catch (IllegalArgumentException ignored) {
             }
         }
@@ -137,6 +141,23 @@ public final class AuthManager {
                     t.setDaemon(true);
                     return t;
                 });
+    }
+
+    /**
+     * Whether a stored session may log this connection in without a password.
+     * The IP alone was the whole key — and behind a mobile carrier's NAT, or in
+     * a dormitory, the IP belongs to dozens of strangers, any of whom could
+     * type the name of someone who left in the last six hours and walk into
+     * their account on an offline-mode server. The session now also has to
+     * come from the same client install: the same brand and client options
+     * (language, view distance, skin parts, main hand, chat settings…), kept
+     * as an HMAC. A session saved by an older build has no profile and asks for
+     * the password once.
+     */
+    static boolean sessionMatches(Session session, String ipHmac, String profile, long now) {
+        if (session == null || session.expiresAt() <= now) return false;
+        if (!constantTimeEquals(session.ipHmac(), ipHmac)) return false;
+        return session.profile() != null && DeviceFingerprint.sameDevice(session.profile(), profile);
     }
 
     private static Pattern compileNameRegex(String regex) {
@@ -170,9 +191,9 @@ public final class AuthManager {
             db.clearSessions();
             long expiry = System.currentTimeMillis() + cfg.session.ttlMinutes * 60_000L;
             for (PlayerAuthState st : states.values()) {
-                if (st.authenticated) db.saveSession(st.uuid.toString(), secrets.ipHmac(st.ip), expiry);
+                if (st.authenticated) db.saveSession(st.uuid.toString(), secrets.ipHmac(st.ip), expiry, st.deviceProfile);
             }
-            sessions.forEach((uuid, s) -> db.saveSession(uuid.toString(), s.ipHmac(), s.expiresAt()));
+            sessions.forEach((uuid, s) -> db.saveSession(uuid.toString(), s.ipHmac(), s.expiresAt(), s.profile()));
         }
         db.close();
     }
@@ -367,6 +388,9 @@ public final class AuthManager {
         // the join tick never pays for it. Findings go to the audit log as
         // LINKED_ACCOUNT events — a signal for staff, never an auto-punish.
         recordFingerprintAsync(player, uuid, name, ip);
+        // The brand is bound to the uuid by now (recordFingerprintAsync claims
+        // it on this thread before handing off), so the profile is complete.
+        st.deviceProfile = DeviceFingerprint.computeProfile(player, secrets);
 
         boolean registered = nameCache.containsKey(name.toLowerCase(Locale.ROOT));
         long now = System.currentTimeMillis();
@@ -384,7 +408,7 @@ public final class AuthManager {
                 && st.agreementDone) {
             Session session = sessions.get(uuid);
             if (session != null) {
-                if (session.expiresAt() > now && constantTimeEquals(session.ipHmac(), secrets.ipHmac(ip))) {
+                if (sessionMatches(session, secrets.ipHmac(ip), st.deviceProfile, now)) {
                     sessions.remove(uuid);
                     st.authenticated = true;
                     // Every connection starts in limbo with its state masked;
@@ -604,7 +628,7 @@ public final class AuthManager {
         // relogs to reach their phone should not have to start over.
         if (st.authenticated && cfg.session.enabled) {
             sessions.put(st.uuid, new Session(secrets.ipHmac(st.ip),
-                    System.currentTimeMillis() + cfg.session.ttlMinutes * 60_000L));
+                    System.currentTimeMillis() + cfg.session.ttlMinutes * 60_000L, st.deviceProfile));
         }
     }
 
@@ -755,9 +779,24 @@ public final class AuthManager {
                     sendLater(player, st, "register.already");
                     return;
                 }
-                if (db.countByRegIp(ipHmac) >= cfg.bruteForce.maxAccountsPerIp) {
+                int onIp = db.countByRegIp(ipHmac);
+                AuthConfig.BruteForce bf = cfg.bruteForce;
+                long allowedAt = RegistrationQuota.allowedAt(onIp,
+                        onIp >= bf.maxAccountsPerIp ? db.lastRegistrationByRegIp(ipHmac) : 0L,
+                        bf.maxAccountsPerIp, bf.extraAccountsWithWait,
+                        bf.extraAccountWaitDays * 86_400_000L, bf.maxAccountsPerIpHard);
+                if (allowedAt == RegistrationQuota.NEVER) {
                     db.audit(now, "REGISTER_IP_LIMIT", st.uuid.toString(), st.name, ipMasked, null);
                     sendLater(player, st, "register.ipLimit");
+                    return;
+                }
+                if (allowedAt > now) {
+                    db.audit(now, "REGISTER_IP_WAIT", st.uuid.toString(), st.name, ipMasked,
+                            "accounts=" + onIp + " until=" + allowedAt);
+                    sendLater(player, st, "register.ipWait", onIp,
+                            java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+                                    .format(java.time.Instant.ofEpochMilli(allowedAt).atZone(java.time.ZoneId.systemDefault())),
+                            humanWait(allowedAt - now));
                     return;
                 }
                 String phc = hasher.hash(password);
@@ -2200,6 +2239,15 @@ public final class AuthManager {
     }
 
     /** Sends a message on the server thread if the same connection is still present. */
+    /** "3 д 4 ч" / "5 ч 20 мин" / "12 мин". */
+    static String humanWait(long ms) {
+        long min = Math.max(1, (ms + 59_999) / 60_000);
+        long d = min / 1440, h = (min % 1440) / 60, m = min % 60;
+        if (d > 0) return d + " д" + (h > 0 ? " " + h + " ч" : "");
+        if (h > 0) return h + " ч" + (m > 0 ? " " + m + " мин" : "");
+        return m + " мин";
+    }
+
     private void sendLater(ServerPlayerEntity player, PlayerAuthState st, String key, Object... args) {
         server.execute(() -> {
             if (states.get(st.uuid) != st) return;

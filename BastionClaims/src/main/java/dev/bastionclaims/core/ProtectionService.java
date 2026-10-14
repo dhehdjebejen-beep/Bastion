@@ -102,12 +102,22 @@ public final class ProtectionService {
         if (c == null || bypassesProtection(player)) return null;
         // Sealed by the state: the owner is a stranger here until the tax is paid.
         if (c.arrested) return c;
-        if (c.isTrusted(player.getUuid())) return null;
+        if (c.can(player.getUuid(), Claim.Perm.BUILD)) return null;
         return c;
     }
 
     /** Kind of interaction, used to apply the matching guest flag. */
     public enum Interaction { CONTAINER, DOOR, ENTITY, OTHER }
+
+    /** The role permission an interaction needs. Using any other block (a bed, a lectern, bone meal) counts as building. */
+    public static Claim.Perm permFor(Interaction cat) {
+        return switch (cat) {
+            case CONTAINER -> Claim.Perm.CONTAINERS;
+            case DOOR -> Claim.Perm.DOORS;
+            case ENTITY -> Claim.Perm.ENTITIES;
+            case OTHER -> Claim.Perm.BUILD;
+        };
+    }
 
     /** The claim that would block {@code player} interacting at this block, or null. */
     public static Claim blockingInteract(ServerPlayerEntity player, String dim, int x, int y, int z) {
@@ -121,7 +131,10 @@ public final class ProtectionService {
         Claim c = ClaimManager.claimAt(dim, x, y, z);
         if (c == null || bypassesProtection(player)) return null;
         if (c.arrested) return c;
-        if (c.isTrusted(player.getUuid())) return null;
+        // Owner, full member, or a role that grants this category.
+        if (c.can(player.getUuid(), permFor(cat))) return null;
+        // Otherwise (a stranger, or a member whose role does not cover it) the
+        // guest flags still open what they open to everybody.
         if (cat == Interaction.CONTAINER && c.guestContainers) return null;
         if (cat == Interaction.DOOR && c.guestDoors) return null;
         if (cat == Interaction.ENTITY && c.guestEntities) return null;
@@ -186,22 +199,66 @@ public final class ProtectionService {
                 victim.getBlockX(), victim.getBlockY(), victim.getBlockZ());
         if (c == null) return false;
 
+        // Explosions follow the claim's explosion flags, exactly like the blocks
+        // around the victim — whoever lit the fuse. Before, a player behind the
+        // blast (the igniter of TNT, the shooter of a fireball) was judged by
+        // trust instead, so with the bypass on — or as a member — a blast that
+        // spared every block still flattened the armour stands next to them.
+        if (source != null && source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_EXPLOSION)) {
+            return explosionProtected(cfg.protection, c, source.getSource());
+        }
+        // An anvil or a stalactite dropped in from outside the claim.
+        if (source != null && source.getSource() instanceof net.minecraft.entity.FallingBlockEntity falling) {
+            BlockPos from = falling.getFallingBlockPos();
+            return cfg.protection.blockProtection && (from == null || !c.contains(from.getX(), from.getY(), from.getZ()));
+        }
         // A player behind it (directly, or as the owner of the arrow/potion):
         // trusted players may do as they like, everyone else may not.
         Entity attacker = source == null ? null : source.getAttacker();
         if (attacker instanceof ServerPlayerEntity p) {
-            return !c.isTrusted(p.getUuid()) && !bypassesProtection(p);
+            return !c.can(p.getUuid(), Claim.Perm.ENTITIES) && !bypassesProtection(p);
         }
-        // No player behind it. Explosions still count as griefing and follow the
-        // same flags the block protection uses; anything else (fall damage, a
-        // cactus, another mob) is left to vanilla.
-        if (source != null && source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_EXPLOSION)) {
-            boolean mobCaused = attacker instanceof LivingEntity;
-            return mobCaused
-                    ? cfg.protection.mobGriefProtection && !c.allowMobGriefing
-                    : cfg.protection.explosionProtection && !c.allowExplosions;
-        }
+        // Anything else (fall damage, a cactus, another mob) is left to vanilla.
         return false;
+    }
+
+    /**
+     * Whether an explosion must leave {@code victim} alone entirely — no damage
+     * and no knockback. Called by {@code ExplosionImplMixin} before vanilla even
+     * looks at the entity, which is the only place that covers every entity type
+     * at once: armour stands override {@code damage()} without calling up to
+     * {@code LivingEntity}, so Fabric's damage event never sees them, and the
+     * blast would still have thrown the protected entity out of the claim.
+     */
+    public static boolean explosionSparesEntity(ServerWorld world, Entity explosionSource, Entity victim) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.entityProtection) return false;
+        if (victim == null || victim instanceof PlayerEntity) return false;
+        if (victim instanceof net.minecraft.entity.mob.HostileEntity) return false;
+        Claim c = ClaimManager.claimAt(world.getRegistryKey().getValue().toString(),
+                victim.getBlockX(), victim.getBlockY(), victim.getBlockZ());
+        return c != null && explosionProtected(cfg.protection, c, explosionSource);
+    }
+
+    /**
+     * The one explosion rule for blocks and entities: a mob's blast honours the
+     * mob-grief flags, anything else (TNT, fireballs, beds, wind charges) the
+     * explosion flags.
+     */
+    static boolean explosionProtected(ClaimConfig.Protection p, Claim c, Entity explosionSource) {
+        return explosionProtected(p, c, isMob(explosionSource));
+    }
+
+    /** Pure decision — unit-testable. */
+    static boolean explosionProtected(ClaimConfig.Protection p, Claim c, boolean mobCaused) {
+        if (p == null || c == null) return false;
+        return mobCaused
+                ? p.mobGriefProtection && !c.allowMobGriefing
+                : p.explosionProtection && !c.allowExplosions;
+    }
+
+    private static boolean isMob(Entity e) {
+        return e instanceof LivingEntity && !(e instanceof PlayerEntity);
     }
 
     /** True when the attacker may hit the victim at the given location. */
@@ -224,12 +281,7 @@ public final class ProtectionService {
         if (cfg == null) return false;
         String dim = world.getRegistryKey().getValue().toString();
         Claim c = ClaimManager.claimAt(dim, pos.getX(), pos.getY(), pos.getZ());
-        if (c == null) return false;
-        boolean mobCaused = source instanceof LivingEntity;
-        if (mobCaused) {
-            return cfg.protection.mobGriefProtection && !c.allowMobGriefing;
-        }
-        return cfg.protection.explosionProtection && !c.allowExplosions;
+        return explosionProtected(cfg.protection, c, source);
     }
 
     // ------------------------------------------------------------------ trees
@@ -243,13 +295,16 @@ public final class ProtectionService {
         ClaimConfig cfg = BastionClaims.config();
         if (cfg == null || !cfg.protection.treeProtection) return false;
         String dim = world.getRegistryKey().getValue().toString();
-        if (ClaimManager.claimAt(dim, pos.getX(), pos.getY(), pos.getZ()) != null) return false;
+        Claim home = ClaimManager.claimAt(dim, pos.getX(), pos.getY(), pos.getZ());
 
         int r = Math.max(1, cfg.protection.treeGuardRadius);
         int h = Math.max(1, cfg.protection.treeGuardHeight);
-        return ClaimManager.firstOverlap(dim,
-                pos.getX() - r, pos.getY(), pos.getZ() - r,
-                pos.getX() + r, pos.getY() + h, pos.getZ() + r, null) != null;
+        int x0 = pos.getX() - r, y0 = pos.getY(), z0 = pos.getZ() - r;
+        int x1 = pos.getX() + r, y1 = pos.getY() + h, z1 = pos.getZ() + r;
+        if (home == null) return ClaimManager.firstOverlap(dim, x0, y0, z0, x1, y1, z1, null) != null;
+        // The owner's own sapling may lean over its own border — but not into
+        // the neighbour's claim next door, which the old check never looked at.
+        return ClaimManager.firstForeignOverlap(dim, x0, y0, z0, x1, y1, z1, home.owner) != null;
     }
 
     // ------------------------------------------------------------------ fire
@@ -307,6 +362,19 @@ public final class ProtectionService {
         return hopperBlocked(cfg.protection, container, hx, hy, hz);
     }
 
+    /**
+     * As {@link #hopperBlocked} for a hopper that belongs to nobody, wherever it
+     * stands (a hopper minecart off the rails): any protected claim container is
+     * out of its reach.
+     */
+    public static boolean hopperBlockedForeign(String dim, int cx, int cy, int cz) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null) return false;
+        if (!cfg.protection.hopperProtection) return false;
+        Claim container = ClaimManager.claimAt(dim, cx, cy, cz);
+        return container != null && !container.allowHoppers;
+    }
+
     /** Pure decision — unit-testable. */
     static boolean hopperBlocked(ClaimConfig.Protection p, Claim container, int hx, int hy, int hz) {
         if (p == null || !p.hopperProtection) return false;
@@ -334,6 +402,110 @@ public final class ProtectionService {
         if (p == null || !p.pistonProtection) return false;
         if (cell == null || cell.allowPistons) return false;
         return !cell.contains(px, py, pz); // piston outside the affected claim → block
+    }
+
+    // ------------------------------------------------------------------ dispensers
+
+    /**
+     * Whether a dispenser at {@code (dx,dy,dz)} must not act on the cell at
+     * {@code (cellX,cellY,cellZ)} because that cell lies in a claim the
+     * dispenser is not part of. Follows the block-protection master switch:
+     * whatever a dispenser does there is building or griefing.
+     */
+    public static boolean dispenserBlocked(String dim, int cellX, int cellY, int cellZ, int dx, int dy, int dz) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null) return false;
+        Claim cell = ClaimManager.claimAt(dim, cellX, cellY, cellZ);
+        if (!dispenserBlocked(cfg.protection, cell, dx, dy, dz)) return false;
+        // The owner's machine in their own neighbouring claim is theirs to run.
+        Claim home = ClaimManager.claimAt(dim, dx, dy, dz);
+        return home == null || !home.owner.equalsIgnoreCase(cell.owner);
+    }
+
+    /** Pure decision — unit-testable. */
+    static boolean dispenserBlocked(ClaimConfig.Protection p, Claim cell, int dx, int dy, int dz) {
+        if (p == null || !p.blockProtection) return false;
+        return cell != null && !cell.contains(dx, dy, dz);
+    }
+
+    // ------------------------------------------------------------------ world changes without a player hand
+
+    private static Claim claimAt(net.minecraft.world.World world, BlockPos pos) {
+        return ClaimManager.claimAt(world.getRegistryKey().getValue().toString(), pos.getX(), pos.getY(), pos.getZ());
+    }
+
+    /**
+     * Whether a mob may not change the block at {@code pos}: an enderman lifting
+     * or dropping a block, a wither or a ravager smashing through, a zombie
+     * breaking a door, the dragon eating the island. Governed by the same
+     * mob-grief switches as a creeper's blast.
+     */
+    public static boolean mobGriefBlockedAt(net.minecraft.world.World world, BlockPos pos) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.mobGriefProtection) return false;
+        Claim c = claimAt(world, pos);
+        return c != null && !c.allowMobGriefing;
+    }
+
+    /**
+     * Whether {@code actor} may not alter the block at {@code pos} without a
+     * click — trampling farmland, freezing water with Frost Walker. A player is
+     * held to the build rule (members and the bypass may), anything else to the
+     * mob-grief switches.
+     */
+    public static boolean actorBlockedAt(net.minecraft.world.World world, BlockPos pos, Entity actor) {
+        if (actor instanceof ServerPlayerEntity p) {
+            return blockingBuild(p, world.getRegistryKey().getValue().toString(), pos.getX(), pos.getY(), pos.getZ()) != null;
+        }
+        return mobGriefBlockedAt(world, pos);
+    }
+
+    /**
+     * Whether a projectile may not act on the block it struck: a burning arrow
+     * priming TNT or lighting a campfire or candles, an arrow ringing a bell,
+     * powering a target block, breaking dripstone or a chorus flower, a fire
+     * charge setting the roof alight. Judged by who loosed it — a member's own
+     * shot is theirs to make; a stranger's, a dispenser's (no owner) or a
+     * skeleton's is not.
+     */
+    public static boolean projectileBlockedAt(net.minecraft.world.World world, BlockPos pos, Entity owner) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null) return false;
+        Claim c = claimAt(world, pos);
+        if (c == null) return false;
+        if (owner instanceof ServerPlayerEntity p) {
+            return cfg.protection.blockProtection && (c.arrested || (!c.can(p.getUuid(), Claim.Perm.BUILD) && !bypassesProtection(p)));
+        }
+        if (isMob(owner)) return cfg.protection.mobGriefProtection && !c.allowMobGriefing;
+        return cfg.protection.blockProtection;
+    }
+
+    /**
+     * Whether a falling block (sand, gravel, concrete powder, an anvil, a
+     * stalactite) may not land at {@code landing}: it started outside the claim
+     * it would come to rest in — dropped from above a 3D claim or catapulted
+     * over the border. It then breaks into its item, as vanilla does when there
+     * is no room.
+     */
+    public static boolean fallingBlockBlocked(net.minecraft.world.World world, BlockPos landing, BlockPos origin) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.blockProtection) return false;
+        Claim c = claimAt(world, landing);
+        return c != null && (origin == null || !c.contains(origin.getX(), origin.getY(), origin.getZ()));
+    }
+
+    /**
+     * Whether a lightning bolt called down by Channeling may not touch this
+     * spot — set fire there or strike the creature standing on it (a villager
+     * turning into a witch, a pig into a piglin). Natural lightning (no
+     * channeler) is weather, not griefing, and is left alone.
+     */
+    public static boolean channeledLightningBlockedAt(net.minecraft.world.World world, BlockPos pos, ServerPlayerEntity channeler) {
+        if (channeler == null) return false;
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null) return false;
+        Claim c = claimAt(world, pos);
+        return c != null && (c.arrested || (!c.can(channeler.getUuid(), Claim.Perm.BUILD) && !bypassesProtection(channeler)));
     }
 
     // ------------------------------------------------------------------ messaging

@@ -43,6 +43,44 @@ class ProtectionServiceTest {
         assertFalse(ProtectionService.fluidFlowBlocked(allOn(), c, 11, 65, 5));     // per-claim opt-in
     }
 
+    // ------------------------------------------------------------------ explosions
+
+    @Test
+    void explosionsFollowTheMatchingFlag() {
+        Claim c = cube(0, 60, 0, 10, 70, 10);
+        assertTrue(ProtectionService.explosionProtected(allOn(), c, false));   // TNT, fireball
+        assertTrue(ProtectionService.explosionProtected(allOn(), c, true));    // creeper
+        c.allowExplosions = true;
+        assertFalse(ProtectionService.explosionProtected(allOn(), c, false));
+        assertTrue(ProtectionService.explosionProtected(allOn(), c, true));    // mob flag is separate
+        c.allowMobGriefing = true;
+        assertFalse(ProtectionService.explosionProtected(allOn(), c, true));
+    }
+
+    @Test
+    void explosionProtectionRespectsSwitchesAndUnclaimedLand() {
+        assertFalse(ProtectionService.explosionProtected(allOn(), null, false));
+        Claim c = cube(0, 60, 0, 10, 70, 10);
+        ClaimConfig.Protection off = allOn();
+        off.explosionProtection = false;
+        off.mobGriefProtection = false;
+        assertFalse(ProtectionService.explosionProtected(off, c, false));
+        assertFalse(ProtectionService.explosionProtected(off, c, true));
+    }
+
+    // ------------------------------------------------------------------ dispensers
+
+    @Test
+    void dispenserOutsideCannotActInsideClaim() {
+        Claim c = cube(0, 60, 0, 10, 70, 10);
+        assertTrue(ProtectionService.dispenserBlocked(allOn(), c, 11, 65, 5));   // on the border, facing in
+        assertFalse(ProtectionService.dispenserBlocked(allOn(), c, 9, 65, 5));   // the owner's own
+        assertFalse(ProtectionService.dispenserBlocked(allOn(), null, 11, 65, 5));
+        ClaimConfig.Protection off = allOn();
+        off.blockProtection = false;
+        assertFalse(ProtectionService.dispenserBlocked(off, c, 11, 65, 5));
+    }
+
     // ------------------------------------------------------------------ hoppers
 
     @Test

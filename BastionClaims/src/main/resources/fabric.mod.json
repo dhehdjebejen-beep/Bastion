@@ -3,7 +3,7 @@
   "id": "bastionclaims",
   "version": "${version}",
   "name": "BastionClaims",
-  "description": "Self-hosted land-claim protection for Fabric servers: wooden-axe cuboid selection, per-tier claim limits scaled by play-time, block/interaction/explosion protection, trusted members and per-claim flags. Editable JSON config with hot-reload.",
+  "description": "Self-hosted land-claim protection for Fabric servers: wooden-axe cuboid selection, per-tier claim limits scaled by play-time, protection against players, explosions, fire, fluids, pistons, hoppers, dispensers, projectiles, falling blocks and griefing mobs, members with per-claim roles and per-claim flags. Editable JSON config with hot-reload.",
   "authors": [
     "dhehdjebejen-beep"
   ],

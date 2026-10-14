@@ -602,6 +602,56 @@ public final class ClaimManager {
         return changed;
     }
 
+    // ------------------------------------------------------------------ roles
+
+    /** Most roles one claim may define. */
+    public static final int MAX_ROLES = 10;
+
+    /** Creates an empty role; false when the name is taken or the claim is full. */
+    public static synchronized boolean createRole(Claim c, String name) {
+        if (c == null || name == null || name.isBlank()) return false;
+        if (c.roles == null) c.roles = new java.util.LinkedHashMap<>();
+        if (c.findRole(name) != null || c.roles.size() >= MAX_ROLES) return false;
+        c.roles.put(name, new ArrayList<>());
+        save();
+        return true;
+    }
+
+    /** Deletes a role; its members become full members again. */
+    public static synchronized boolean deleteRole(Claim c, String name) {
+        String r = c == null ? null : c.findRole(name);
+        if (r == null) return false;
+        c.roles.remove(r);
+        if (c.memberRoles != null) c.memberRoles.values().removeIf(r::equals);
+        save();
+        return true;
+    }
+
+    public static synchronized boolean setRolePerm(Claim c, String name, Claim.Perm perm, boolean on) {
+        String r = c == null ? null : c.findRole(name);
+        if (r == null || perm == null) return false;
+        java.util.List<String> perms = c.roles.computeIfAbsent(r, k -> new ArrayList<>());
+        perms.remove(perm.key);
+        if (on) perms.add(perm.key);
+        save();
+        return true;
+    }
+
+    /** Gives a member a role (null = full member). False when not a member or no such role. */
+    public static synchronized boolean setMemberRole(Claim c, UUID member, String role) {
+        if (c == null || member == null || !c.isMember(member)) return false;
+        if (c.memberRoles == null) c.memberRoles = new java.util.LinkedHashMap<>();
+        if (role == null) {
+            c.memberRoles.remove(member.toString());
+        } else {
+            String r = c.findRole(role);
+            if (r == null) return false;
+            c.memberRoles.put(member.toString(), r);
+        }
+        save();
+        return true;
+    }
+
     public static synchronized void setPvp(Claim c, boolean allow) {
         if (c == null) return;
         c.allowPvp = allow;

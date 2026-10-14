@@ -35,6 +35,16 @@ public final class Baselines {
     static final int SELF_CAP = 12;
     static final int MIN_POOL = 12;
     static final int MIN_SELF = 5;
+    /**
+     * At most this many values per player in the population pool. On a server
+     * with three regulars, one of them used to be a third of the pool or more —
+     * a patient closet cheater could become the norm the scorer measures him
+     * against. (The population median is also weighted per player — see
+     * {@link #population}; the cap keeps the pool itself varied.)
+     */
+    static final int PER_PLAYER_CAP = 30;
+    /** The server's own norm replaces the prior only once this many different players are in it. */
+    static final int MIN_PLAYERS = 4;
 
     private static final Gson GSON = new GsonBuilder().create();
 
@@ -63,6 +73,18 @@ public final class Baselines {
             if (!Double.isFinite(v)) return;
             Deque<Entry> d = pop.computeIfAbsent(k, x -> new ArrayDeque<>());
             d.addLast(new Entry(uuid, v));
+            // Over the per-player cap: this player's oldest value makes room.
+            int mine = 0;
+            for (Entry e : d) if (e.uuid.equals(uuid)) mine++;
+            if (mine > PER_PLAYER_CAP) {
+                java.util.Iterator<Entry> it = d.iterator();
+                while (it.hasNext()) {
+                    if (it.next().uuid.equals(uuid)) {
+                        it.remove();
+                        break;
+                    }
+                }
+            }
             while (d.size() > POP_CAP) d.pollFirst();
             Deque<Double> s = self.computeIfAbsent(uuid, x -> new HashMap<>()).computeIfAbsent(k, x -> new ArrayDeque<>());
             s.addLast(v);
@@ -78,13 +100,49 @@ public final class Baselines {
 
     public synchronized Ref population(Features.Spec spec) {
         Deque<Entry> d = pop.get(spec.key());
-        if (d == null || d.size() < MIN_POOL) return new Ref(spec.priorRef(), spec.priorScale(), 0, "норма по умолчанию");
+        if (d == null || d.size() < MIN_POOL || distinctPlayers(d) < MIN_PLAYERS) {
+            return new Ref(spec.priorRef(), spec.priorScale(), 0, "норма по умолчанию");
+        }
+        // One player, one vote: every value is weighted 1/(that player's
+        // values), so a regular with thirty sessions weighs as much as a
+        // newcomer with one. A plain median let whoever played most define
+        // normal — on a small server, possibly a patient closet cheater.
+        Map<String, Integer> per = new HashMap<>();
+        for (Entry e : d) per.merge(e.uuid, 1, Integer::sum);
         double[] v = new double[d.size()];
+        double[] w = new double[d.size()];
         int i = 0;
-        for (Entry e : d) v[i++] = e.v;
-        double med = Stats.median(v);
-        double scale = Math.max(1.4826 * Stats.mad(v), spec.minScale());
-        return new Ref(med, scale, v.length, "норма сервера (" + v.length + " сессий)");
+        for (Entry e : d) {
+            v[i] = e.v;
+            w[i] = 1.0 / per.get(e.uuid);
+            i++;
+        }
+        double med = weightedMedian(v, w);
+        double[] dev = new double[v.length];
+        for (int k = 0; k < v.length; k++) dev[k] = Math.abs(v[k] - med);
+        double scale = Math.max(1.4826 * weightedMedian(dev, w), spec.minScale());
+        return new Ref(med, scale, v.length, "норма сервера (" + v.length + " сессий, " + per.size() + " игроков)");
+    }
+
+    /** The value at half the total weight. */
+    static double weightedMedian(double[] v, double[] w) {
+        Integer[] idx = new Integer[v.length];
+        double total = 0;
+        for (int i = 0; i < v.length; i++) {
+            idx[i] = i;
+            total += w[i];
+        }
+        java.util.Arrays.sort(idx, (a, b) -> Double.compare(v[a], v[b]));
+        double acc = 0;
+        for (int k = 0; k < idx.length; k++) {
+            acc += w[idx[k]];
+            if (acc >= total / 2) {
+                // Exactly on the half between two values: their midpoint, like a plain median.
+                if (Math.abs(acc - total / 2) < 1e-12 && k + 1 < idx.length) return (v[idx[k]] + v[idx[k + 1]]) / 2;
+                return v[idx[k]];
+            }
+        }
+        return v[idx[idx.length - 1]];
     }
 
     /** The player's own norm, or null with too little history. */
@@ -94,6 +152,15 @@ public final class Baselines {
         if (d == null || d.size() < MIN_SELF) return null;
         double[] v = d.stream().mapToDouble(Double::doubleValue).toArray();
         return new Ref(Stats.median(v), Math.max(1.4826 * Stats.mad(v), spec.minScale()), v.length, "своя норма");
+    }
+
+    private static int distinctPlayers(Deque<Entry> d) {
+        java.util.Set<String> who = new java.util.HashSet<>();
+        for (Entry e : d) {
+            who.add(e.uuid);
+            if (who.size() >= MIN_PLAYERS) break;
+        }
+        return who.size();
     }
 
     public synchronized int sessions() {

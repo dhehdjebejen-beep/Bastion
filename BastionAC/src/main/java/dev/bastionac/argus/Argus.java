@@ -33,7 +33,8 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  * telemetry for the window around it, measures thirty-odd features of
  * movement, timing, aim and digging, compares them with what this server's
  * own honest players do, and returns a calibrated score with the reasons.
- * The final word comes within the hour.
+ * The first word comes within minutes; the final one by the deadline, or at
+ * once when it cannot change any more (guilty, or the player has left).
  *
  * <p>What happens then depends on the mode: SHADOW (only the case), ASSIST
  * (staff are told, one click to act) or AUTO (a confident verdict bans by
@@ -129,6 +130,18 @@ public final class Argus {
         if (!ready) return;
         WorldSampler.tick();
         if (tick % 20 != 0) return;
+        if (advance(srv)) store.save();
+        if (tick % (20 * 600) == 0) {
+            ACConfig.ArgusCfg cfg = BastionAC.config().argus;
+            long now = System.currentTimeMillis();
+            int pruned = store.prune(now, cfg.caseRetentionDays);
+            if (pruned > 0) store.save();
+            if (dirtyModel) saveAll();
+        }
+    }
+
+    /** Takes in the signals and moves every open case on. Server thread. Returns whether anything changed. */
+    private static boolean advance(MinecraftServer srv) {
         ACConfig.ArgusCfg cfg = BastionAC.config().argus;
         long now = System.currentTimeMillis();
         Signal s;
@@ -138,41 +151,33 @@ public final class Argus {
             intake(srv, s, now, cfg);
             changed = true;
         }
-        if (cfg.enabled) {
-            for (CaseFile c : store.all()) {
-                if (!c.open()) continue;
-                if (c.status == CaseFile.Status.COLLECTING && now >= c.dueAt) {
+        if (!cfg.enabled) return changed;
+        for (CaseFile c : store.all()) {
+            if (!c.open() || c.inFlight) continue;
+            boolean online = srv.getPlayerManager().getPlayer(UUID.fromString(c.uuid)) != null;
+            boolean wasFinal = c.finalPass;
+            switch (CaseLifecycle.next(c, now, online, cfg)) {
+                case ANALYZE -> {
                     queue(srv, c, cfg);
                     changed = true;
-                } else if (c.status == CaseFile.Status.ANALYZED) {
-                    boolean online = srv.getPlayerManager().getPlayer(UUID.fromString(c.uuid)) != null;
-                    if (c.pendingSignals && now - c.lastAnalyzedAt >= cfg.reanalyzeMinutes * 60_000L
-                            && now <= c.deadlineAt + 30 * 60_000L) {
-                        queue(srv, c, cfg);
-                        changed = true;
-                    } else if (!c.finalPass && now >= c.deadlineAt && (online || c.pendingSignals)) {
-                        c.finalPass = true;
-                        queue(srv, c, cfg);
-                        changed = true;
-                    } else if (c.label == CaseFile.Label.NONE && now > c.deadlineAt + 2 * 3_600_000L
-                            && (c.verdict == CaseFile.Verdict.CLEAN || c.verdict == CaseFile.Verdict.INSUFFICIENT)) {
-                        c.status = CaseFile.Status.CLOSED;
-                        c.closedAt = now;
-                        changed = true;
-                    }
                 }
+                case CLOSE -> {
+                    c.status = CaseFile.Status.CLOSED;
+                    c.closedAt = now;
+                    changed = true;
+                }
+                case NONE -> changed |= wasFinal != c.finalPass;
             }
         }
-        if (changed) store.save();
-        if (tick % (20 * 600) == 0) {
-            int pruned = store.prune(now, cfg.caseRetentionDays);
-            if (pruned > 0) store.save();
-            if (dirtyModel) saveAll();
-        }
+        return changed;
     }
 
     private static void intake(MinecraftServer srv, Signal s, long now, ACConfig.ArgusCfg cfg) {
         CaseFile c = store.openFor(s.uuid().toString());
+        if (c == null && s.kind() == Signal.Kind.SESSION_SCAN
+                && CaseLifecycle.recentlyDecided(store.ofPlayer(s.uuid().toString()), now)) {
+            return;   // the session staff just judged; not a new episode
+        }
         boolean fresh = c == null;
         if (fresh) {
             c = store.create(s.uuid().toString(), s.name(), now);
@@ -185,12 +190,13 @@ public final class Argus {
         }
         c.addSignal(s);
         if (s.kind() == Signal.Kind.CHAIN_BURNED || s.kind() == Signal.Kind.CORRECTION_LOOP) {
-            c.dueAt = Math.min(c.dueAt, now + 2 * 60_000L);
+            c.dueAt = Math.min(c.dueAt, now + 30_000L);
         }
         if (s.kind() == Signal.Kind.MANUAL || s.kind() == Signal.Kind.SESSION_SCAN) {
-            // Asked for now: an already decided case is read again at once, not in a quarter of an hour.
-            c.dueAt = now;
-            if (c.status == CaseFile.Status.ANALYZED) c.status = CaseFile.Status.COLLECTING;
+            // Asked for now: an already decided case is read again at once, not
+            // in a quarter of an hour — and one being read right now is read
+            // again the moment it returns, never a second time beside it.
+            CaseLifecycle.requestNow(c, now);
         }
         if (fresh) {
             AcJournal.write("argus-case", s.name(), s.uuid().toString(), s.kind().name().toLowerCase(Locale.ROOT), 0,
@@ -202,8 +208,8 @@ public final class Argus {
 
     /** Hands a case to the Argus thread; the result comes back on the server thread. */
     private static void queue(MinecraftServer srv, CaseFile c, ACConfig.ArgusCfg cfg) {
-        c.status = CaseFile.Status.QUEUED;
-        c.pendingSignals = false;
+        int gen = CaseLifecycle.begin(c);
+        if (gen < 0) return;   // already on the Argus thread; folded into a re-run
         UUID uuid = UUID.fromString(c.uuid);
         Telemetry.flushNow(uuid);
         Analysis.Input in = new Analysis.Input();
@@ -218,13 +224,28 @@ public final class Argus {
         in.signalEvidence = signalEvidence(c);
         String id = c.id;
         worker.submit(ArgusWorker.PRIO_CASE, "дело #" + id + " (" + c.name + ")", () -> {
+            MinecraftServer s = BastionAC.server();
+            if (s != null) s.execute(() -> {
+                CaseFile live = store.byId(id);
+                if (live != null) CaseLifecycle.started(live, gen);
+            });
             long t0 = System.currentTimeMillis();
-            Analysis.Output out = Analysis.run(in, baselines, calibration);
+            Analysis.Output out;
+            try {
+                out = Analysis.run(in, baselines, calibration);
+            } catch (Throwable t) {
+                // Analysis.run catches its own failures; this is the last line so
+                // the case is never left marked as being analysed forever.
+                out = new Analysis.Output();
+                out.error = t.toString();
+                out.result = Scorer.score(new dev.bastionac.argus.features.FeatureSet(), baselines, in.uuid,
+                        calibration, in.signalEvidence);
+            }
             lastDurationMs = System.currentTimeMillis() - t0;
             lastAnalysisMs = System.currentTimeMillis();
             analysesDone++;
-            MinecraftServer s = BastionAC.server();
-            if (s != null) s.execute(() -> applyResult(id, out));
+            Analysis.Output result = out;
+            if (s != null) s.execute(() -> applyResult(id, gen, result));
         });
     }
 
@@ -245,15 +266,17 @@ public final class Argus {
 
     // ---------------------------------------------------------------- results
 
-    private static void applyResult(String id, Analysis.Output out) {
+    private static void applyResult(String id, int gen, Analysis.Output out) {
         CaseFile c = store.byId(id);
         if (c == null) return;
+        CaseLifecycle.Outcome outcome = CaseLifecycle.arrive(c, gen);
+        if (outcome == CaseLifecycle.Outcome.STALE) return;
         ACConfig.ArgusCfg cfg = BastionAC.config().argus;
         Scorer.Result r = out.result;
         CaseFile.Verdict before = c.verdict;
+        long now = System.currentTimeMillis();
         c.analyses++;
-        c.lastAnalyzedAt = System.currentTimeMillis();
-        c.status = CaseFile.Status.ANALYZED;
+        c.lastAnalyzedAt = now;
         c.score = r.score();
         c.evidence = r.evidence();
         c.signalEvidence = r.signalEvidence();
@@ -283,8 +306,36 @@ public final class Argus {
         AcJournal.write("argus-verdict", c.name, c.uuid, "argus", 0, String.format(Locale.ROOT,
                 "дело #%s: %s, оценка %.3f — %s", c.id, c.verdict.label, c.score,
                 c.findings.isEmpty() ? "" : c.findings.get(0)), null);
+        tellWaitingStaff(c);
+        if (outcome == CaseLifecycle.Outcome.RECORD_ONLY) {
+            // Staff decided while this analysis ran. Their word stands: the
+            // numbers are kept (a labelled case is what the model learns from),
+            // the case stays closed and nobody is alerted again.
+            store.save();
+            if (c.label == CaseFile.Label.CHEATER || c.label == CaseFile.Label.CLEAN) refit();
+            return;
+        }
+        MinecraftServer srv = BastionAC.server();
+        boolean online = srv != null && srv.getPlayerManager().getPlayer(UUID.fromString(c.uuid)) != null;
+        CaseLifecycle.settle(c, online, now);
         act(c, r, before, cfg);
         store.save();
+    }
+
+    /** Whoever pressed "investigate" hears the outcome, clean or not — "итог придёт сюда". */
+    private static void tellWaitingStaff(CaseFile c) {
+        if (c.waitingStaff == null || c.waitingStaff.isEmpty()) return;
+        MinecraftServer srv = BastionAC.server();
+        if (srv != null) {
+            String line = String.format(Locale.ROOT, "&5[Аргус] &7Дело &f#%s &7(&f%s&7): %s%s &8(%.0f%%)%s",
+                    c.id, c.name, c.verdict.colour, c.verdict.label, c.score * 100,
+                    c.findings.isEmpty() ? "" : " &7— " + c.findings.get(0));
+            for (String who : c.waitingStaff) {
+                ServerPlayerEntity staff = srv.getPlayerManager().getPlayer(who);
+                if (staff != null) staff.sendMessage(dev.bastionac.core.TextFmt.literal(line), false);
+            }
+        }
+        c.waitingStaff.clear();
     }
 
     static CaseFile.Verdict verdictOf(Scorer.Result r, ACConfig.ArgusCfg cfg) {
@@ -318,8 +369,7 @@ public final class Argus {
         if (r.score() <= calibration.maxCleanScore + 0.01) return false;
         if (baselines.sessions() < cfg.minBaselineSessions && !r.hardHit()) return false;
         MinecraftServer srv = BastionAC.server();
-        ServerPlayerEntity p = srv == null ? null : srv.getPlayerManager().getPlayer(UUID.fromString(c.uuid));
-        return p == null || !BanManager.isExemptOperator(p);
+        return srv != null && !BanManager.isExemptOperator(srv, UUID.fromString(c.uuid), c.name);
     }
 
     private static void writeReport(CaseFile c, Analysis.Output out, Scorer.Result r) {
@@ -398,9 +448,16 @@ public final class Argus {
         if (!ready) return null;
         signal(uuid, name, Signal.Kind.MANUAL, "запросил " + by);
         MinecraftServer srv = BastionAC.server();
-        if (srv != null) tick(srv, 0);   // take the signal in at once
+        // Take the signal in and queue the case at once. (This used to call the
+        // whole tick with tick=0, which also pruned and rewrote every file.)
+        if (srv != null && advance(srv)) store.save();
         CaseFile c = store.openFor(uuid.toString());
-        return c == null ? null : c.id;
+        if (c == null) return null;
+        if (by != null) {
+            if (c.waitingStaff == null) c.waitingStaff = java.util.concurrent.ConcurrentHashMap.newKeySet();
+            c.waitingStaff.add(by);
+        }
+        return c.id;
     }
 
     public static boolean label(String id, CaseFile.Label label, String by, String note) {
@@ -416,10 +473,16 @@ public final class Argus {
         } else if (label == CaseFile.Label.CLEAN) {
             boolean other = store.ofPlayer(c.uuid).stream().anyMatch(x -> x != c && x.label == CaseFile.Label.CHEATER);
             if (!other) CHEATERS.remove(c.uuid);
-            if (c.open() && c.verdict != CaseFile.Verdict.GUILTY) {
-                c.status = CaseFile.Status.CLOSED;
-                c.closedAt = System.currentTimeMillis();
-            }
+        }
+        if (label == CaseFile.Label.CHEATER || label == CaseFile.Label.CLEAN) {
+            // The owner's call is the verdict. Before, only "not a cheater"
+            // closed the case: one marked "cheater" stayed open and Argus went
+            // on re-reading, re-judging and re-alerting as if nobody had decided.
+            CaseLifecycle.closeByStaff(c, c.labelAt);
+            // Labelled before Argus ever read it: read it once anyway, for the
+            // model only — a label without numbers teaches nothing.
+            MinecraftServer srv = BastionAC.server();
+            if (c.analyses == 0 && !c.inFlight && srv != null) queue(srv, c, BastionAC.config().argus);
         }
         AcJournal.write("argus-label", c.name, c.uuid, "argus", 0, "дело #" + c.id + ": " + label.label + " (" + by + ")", null);
         store.save();
@@ -454,6 +517,9 @@ public final class Argus {
         c.action = CaseFile.Action.BANNED;
         c.actionBy = by;
         c.actionAt = System.currentTimeMillis();
+        // A ban settles the case; the session scan that follows the kick must
+        // not open it again (see CaseLifecycle.recentlyDecided).
+        CaseLifecycle.closeByStaff(c, c.actionAt);
         store.save();
         return true;
     }
@@ -464,21 +530,30 @@ public final class Argus {
         c.action = CaseFile.Action.DISMISSED;
         c.actionBy = by;
         c.actionAt = System.currentTimeMillis();
-        c.status = CaseFile.Status.CLOSED;
-        c.closedAt = c.actionAt;
+        CaseLifecycle.closeByStaff(c, c.actionAt);
         store.save();
         return true;
     }
 
-    /** Re-analyse now (staff button). */
-    public static boolean reanalyze(String id) {
+    /**
+     * Re-analyse now (staff button). On an open case this is "investigate now";
+     * one already being analysed is re-read right after, not twice at once. A
+     * closed case only gets fresh numbers — it is not reopened (the button used
+     * to reopen it, which is how a case closed by staff came back to life).
+     */
+    public static boolean reanalyze(String id, String by) {
         CaseFile c = store == null ? null : store.byId(id);
         MinecraftServer srv = BastionAC.server();
         if (c == null || srv == null) return false;
-        if (!c.open()) {
-            c.status = CaseFile.Status.ANALYZED;
-            c.closedAt = 0;
+        if (by != null) {
+            if (c.waitingStaff == null) c.waitingStaff = java.util.concurrent.ConcurrentHashMap.newKeySet();
+            c.waitingStaff.add(by);
         }
+        if (c.inFlight) {
+            c.rerunRequested = c.open();
+            return true;
+        }
+        if (c.open()) CaseLifecycle.requestNow(c, System.currentTimeMillis());
         queue(srv, c, BastionAC.config().argus);
         store.save();
         return true;

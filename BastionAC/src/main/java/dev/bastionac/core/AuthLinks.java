@@ -71,6 +71,13 @@ public final class AuthLinks {
             setAll = null;
             unreviewed = null;
             uuidOfName = null;
+            // Absent is fine; installed-but-mismatched is a silent desync of
+            // the two mods and must be visible.
+            if (net.fabricmc.loader.api.FabricLoader.getInstance().isModLoaded("bastionauth")) {
+                dev.bastionac.BastionAC.LOGGER.error("BastionAuth is installed but the account-link bridge "
+                        + "does not match it ({}); the link register is unavailable until both mods are updated "
+                        + "together.", t.toString());
+            }
         }
     }
 

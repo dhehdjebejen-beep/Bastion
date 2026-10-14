@@ -134,7 +134,7 @@ public final class ClaimMenu {
 
         if (ProtectionService.isOp(p)) {
             gui.set(53, item(Items.ENDER_EYE, "&c⚙ Все приваты сервера",
-                    "&7Просмотр и телепорт (админ)", "&8➜ клик"), pl -> openAll(pl, 0));
+                    "&7Управление любым приватом (админ)", "&8➜ клик"), pl -> openAll(pl, 0));
         }
 
         gui.fill(filler());
@@ -220,6 +220,12 @@ public final class ClaimMenu {
                     "&f/we stack <раз> &8· &fmove <блоков>",
                     "&f/we undo &8· &fredo",
                     "&8Полный список: &f/we"), null);
+            gui.set(29, item(Items.COMMAND_BLOCK, "&c⚙ Чужие приваты &8(только операторы)",
+                    "&f/claims here &7— управление приватом под ногами",
+                    "&f/claims manage <ник> <название>",
+                    "&f/claims flag <ник> <флаг> on|off <название>",
+                    "&f/claims delete <ник> <название>",
+                    "&7Или: меню → «Все приваты сервера» → клик"), null);
         }
 
         gui.set(49, item(Items.ARROW, "&7← Назад"), ClaimMenu::open);
@@ -238,9 +244,18 @@ public final class ClaimMenu {
     public static void openClaim(ServerPlayerEntity p, String claimId) {
         Claim c = find(p, claimId);
         if (c == null) { open(p); return; }
-        ChestGui gui = new ChestGui(Fmt.text("&2🛡 Приват &8» &7" + c.name), 4);
+        boolean foreign = !c.isOwner(p.getUuid());
+        ChestGui gui = new ChestGui(Fmt.text((foreign ? "&c⚙ Чужой приват &8» &7" : "&2🛡 Приват &8» &7") + c.name), 4);
 
         gui.set(4, claimIcon(c), null);
+        if (foreign) {
+            // An operator managing someone else's land: every button below acts
+            // on the stranger's claim, so the screen says so in plain words.
+            gui.set(0, head(c.owner, "&c⚠ Владелец: &f" + c.owner,
+                    "&7Ты управляешь чужим приватом",
+                    "&7правами оператора: флаги, пользователи,",
+                    "&7передача и удаление действуют на него."), null);
+        }
 
         gui.set(9, item(Items.ENDER_PEARL, "&aТелепорт к привату",
                         "&7Безопасная точка внутри", "&8➜ клик"),
@@ -287,6 +302,14 @@ public final class ClaimMenu {
                         "&8Управлять приватом — только владелец.",
                         "&8➜ клик — выбрать из онлайна"),
                 pl -> openTrust(pl, claimId));
+
+        int roleCount = c.roles == null ? 0 : c.roles.size();
+        gui.set(24, item(Items.NAME_TAG, "&fРоли привата &8(" + roleCount + ")",
+                        "&7Наборы прав для пользователей:",
+                        "&7стройка, сундуки, двери, существа.",
+                        "&8Без роли пользователь может всё.",
+                        "&8➜ клик — роли"),
+                pl -> openRoles(pl, claimId));
 
         // Zones: one claim can be several cuboids, so a base does not have to
         // spend a whole claim slot on every wing.
@@ -414,12 +437,15 @@ public final class ClaimMenu {
         if (c == null) { open(p); return; }
         ChestGui gui = new ChestGui(Fmt.text("&2🛡 Пользователи &8» &7" + c.name), 6);
 
-        // Row 0: current users — click a head to remove.
+        // Row 0: current users — click a head to pick a role or remove.
         int slot = 0;
         for (String m : new ArrayList<>(c.members)) {
             if (slot >= 9) break;
-            gui.set(slot++, head(m, "&a" + m, "&cЛКМ — убрать из пользователей"),
-                    pl -> { ClaimManager.removeMember(c, m); openTrust(pl, claimId); });
+            String role = c.roleOf(Claim.offlineUuid(m));
+            gui.set(slot++, head(m, "&a" + m,
+                            "&7Роль: &f" + (role == null ? "полный пользователь" : role),
+                            "&8ЛКМ — роль или убрать"),
+                    pl -> openMember(pl, claimId, m));
         }
 
         // Rows 1+: online players who are not yet trusted — click to add.
@@ -440,6 +466,101 @@ public final class ClaimMenu {
         gui.open(p);
     }
 
+    // ------------------------------------------------------------------ roles
+
+    private static void openMember(ServerPlayerEntity p, String claimId, String member) {
+        Claim c = find(p, claimId);
+        if (c == null) { open(p); return; }
+        java.util.UUID uuid = Claim.offlineUuid(member);
+        String current = c.roleOf(uuid);
+        ChestGui gui = new ChestGui(Fmt.text("&2🛡 " + member + " &8» &7" + c.name), 3);
+        gui.set(4, head(member, "&f" + member, "&7Роль: &f" + (current == null ? "полный пользователь" : current)), null);
+        gui.set(9, item(current == null ? Items.NETHER_STAR : Items.EMERALD, "&aПолный пользователь",
+                        "&7Может всё, что и владелец,", "&7кроме управления приватом.",
+                        current == null ? "&a✔ выбрано" : "&8➜ клик"),
+                pl -> { ClaimManager.setMemberRole(c, uuid, null); openMember(pl, claimId, member); });
+        int slot = 10;
+        if (c.roles != null) {
+            for (var e : c.roles.entrySet()) {
+                if (slot > 17) break;
+                String r = e.getKey();
+                boolean on = r.equals(current);
+                gui.set(slot++, item(on ? Items.NETHER_STAR : Items.NAME_TAG, "&f" + r,
+                                Fmt.strip(ClaimCommands.permsText(e.getValue())), on ? "&a✔ выбрано" : "&8➜ клик — выдать"),
+                        pl -> { ClaimManager.setMemberRole(c, uuid, r); openMember(pl, claimId, member); });
+            }
+        }
+        gui.set(22, item(Items.BARRIER, "&cУбрать из пользователей", "&8➜ клик"),
+                pl -> { ClaimManager.removeMember(c, member); openTrust(pl, claimId); });
+        gui.set(18, item(Items.ARROW, "&7← Назад"), pl -> openTrust(pl, claimId));
+        gui.fill(filler());
+        gui.open(p);
+    }
+
+    private static void openRoles(ServerPlayerEntity p, String claimId) {
+        Claim c = find(p, claimId);
+        if (c == null) { open(p); return; }
+        ChestGui gui = new ChestGui(Fmt.text("&2🛡 Роли &8» &7" + c.name), 4);
+        gui.set(4, item(Items.WRITABLE_BOOK, "&aКак работают роли",
+                "&7Роль — набор прав внутри привата.",
+                "&7Пользователь с ролью может только то,",
+                "&7что она разрешает (и что гостям).",
+                "&7Без роли — полный пользователь.",
+                "&8/claim add <ник> <роль>"), null);
+        int slot = 9;
+        if (c.roles != null) {
+            for (var e : c.roles.entrySet()) {
+                if (slot > 26) break;
+                String r = e.getKey();
+                long holders = c.memberRoles == null ? 0 : c.memberRoles.values().stream().filter(r::equals).count();
+                gui.set(slot++, item(Items.NAME_TAG, "&f" + r,
+                                Fmt.strip(ClaimCommands.permsText(e.getValue())),
+                                "&7Пользователей: &f" + holders, "&8➜ клик — настроить"),
+                        pl -> openRole(pl, claimId, r));
+            }
+        }
+        boolean full = c.roles != null && c.roles.size() >= ClaimManager.MAX_ROLES;
+        gui.set(31, item(full ? Items.GRAY_DYE : Items.EMERALD_BLOCK, full ? "&7Ролей максимум" : "&a➕ Создать роль",
+                        full ? "&8Удали лишнюю" : "&8➜ клик — ввести название"),
+                full ? null : pl -> AnvilGui.open(pl, "&2Название роли", "", name -> {
+                    String clean = ClaimCommands.cleanRoleNamePublic(name);
+                    Claim fresh = find(pl, claimId);
+                    if (fresh == null) { open(pl); return; }
+                    if (clean == null || !ClaimManager.createRole(fresh, clean)) {
+                        pl.sendMessage(Fmt.text("&cНе вышло: 1–16 символов (буквы, цифры, _ -), без повторов, не больше "
+                                + ClaimManager.MAX_ROLES + " ролей."), false);
+                        openRoles(pl, claimId);
+                        return;
+                    }
+                    openRole(pl, claimId, clean);
+                }));
+        gui.set(27, item(Items.ARROW, "&7← Назад"), pl -> openClaim(pl, claimId));
+        gui.fill(filler());
+        gui.open(p);
+    }
+
+    private static void openRole(ServerPlayerEntity p, String claimId, String role) {
+        Claim c = find(p, claimId);
+        String r = c == null ? null : c.findRole(role);
+        if (r == null) { if (c != null) openRoles(p, claimId); else open(p); return; }
+        List<String> perms = c.roleGrants(r);
+        ChestGui gui = new ChestGui(Fmt.text("&2🛡 Роль &8» &f" + r), 3);
+        int slot = 10;
+        Item[] icons = {Items.IRON_PICKAXE, Items.CHEST, Items.OAK_DOOR, Items.LEAD};
+        int i = 0;
+        for (Claim.Perm perm : Claim.Perm.values()) {
+            boolean on = perms != null && perms.contains(perm.key);
+            gui.set(slot, flagIcon(icons[i++], perm.label, on),
+                    pl -> { ClaimManager.setRolePerm(c, r, perm, !on); openRole(pl, claimId, r); });
+            slot += 2;
+        }
+        gui.set(22, item(Items.BARRIER, "&cУдалить роль", "&7Её пользователи снова станут полными", "&8➜ клик"),
+                pl -> { ClaimManager.deleteRole(c, r); openRoles(pl, claimId); });
+        gui.set(18, item(Items.ARROW, "&7← К ролям"), pl -> openRoles(pl, claimId));
+        gui.fill(filler());
+        gui.open(p);
+    }
+
     // ------------------------------------------------------------------ admin: all claims
 
     private static void openAll(ServerPlayerEntity p, int page) {
@@ -454,20 +575,15 @@ public final class ClaimMenu {
         int start = page * perPage;
         for (int i = 0; i < perPage && start + i < all.size(); i++) {
             Claim c = all.get(start + i);
-            gui.set(i, item(Items.GRASS_BLOCK, "&a" + c.name + " &8· &f" + c.owner,
+            // The admin browser used to be teleport-only: an operator could
+            // look at every claim on the server but change none of them from
+            // here. A click now opens the same management screen the owner
+            // gets (flags, users, transfer, delete); teleport is its first button.
+            gui.set(i, item(c.arrested ? Items.IRON_BARS : Items.GRASS_BLOCK, "&a" + c.name + " &8· &f" + c.owner,
                             "&7" + (c.fullHeight ? "площадь " + c.area() + " (2D)" : "объём " + c.volume() + " (3D)"),
                             "&7" + c.minX + " " + c.minY + " " + c.minZ + " &8(" + c.dim.replace("minecraft:", "") + ")",
-                            "&8➜ клик — телепорт"),
-                    pl -> {
-                        pl.closeHandledScreen();
-                        ServerWorld w = resolve(pl, c.dim);
-                        if (w == null) return;
-                        if (Teleports.toClaimSafely(pl, w, c)) {
-                            pl.sendMessage(Fmt.text("&aТелепорт к привату &f" + c.name + " &7(&f" + c.owner + "&7)"), false);
-                        } else {
-                            pl.sendMessage(Fmt.text("&cВнутри привата &f" + c.name + "&c негде встать."), false);
-                        }
-                    });
+                            "&8➜ клик — управление (флаги, удаление, телепорт)"),
+                    pl -> openClaim(pl, c.id));
         }
         int prev = page - 1, next = page + 1;
         if (page > 0) gui.set(45, item(Items.ARROW, "&7← Пред. страница"), pl -> openAll(pl, prev));

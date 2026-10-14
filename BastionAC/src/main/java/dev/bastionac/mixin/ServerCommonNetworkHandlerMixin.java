@@ -53,6 +53,20 @@ public abstract class ServerCommonNetworkHandlerMixin {
         }
     }
 
+    /**
+     * Every brand payload, in both phases (the configuration handler is a
+     * ServerCommonNetworkHandler too): BrandSpoof judges how many arrived and
+     * whether they agree, not only the last string.
+     */
+    @Inject(method = "onCustomPayload", at = @At("HEAD"))
+    private void bastionac$onCustomPayload(net.minecraft.network.packet.c2s.common.CustomPayloadC2SPacket packet,
+                                           CallbackInfo ci) {
+        if (packet.payload() instanceof net.minecraft.network.packet.BrandCustomPayload brand) {
+            dev.bastionac.core.BrandLedger.note(((CommonNetworkHandlerAccessor) this).bastionac$connection(),
+                    brand.brand());
+        }
+    }
+
     @Inject(method = "onPong", at = @At("HEAD"))
     private void bastionac$onPong(CommonPongC2SPacket packet, CallbackInfo ci) {
         if (!((Object) this instanceof ServerPlayNetworkHandler handler)) return;

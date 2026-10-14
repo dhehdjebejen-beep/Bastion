@@ -78,13 +78,19 @@ public final class ClaimCommands {
                 // deliberately NOT "delete" — that already deletes the claim.
                 .then(literal("add")
                         .then(argument("игрок", word()).suggests(onlinePlayers())
-                                .executes(ClaimCommands::trust)))
+                                .executes(ClaimCommands::trust)
+                                .then(argument("роль", word()).suggests(roleNames())
+                                        .executes(ClaimCommands::trust))))
                 .then(literal("remove")
                         .then(argument("игрок", word()).suggests(members())
                                 .executes(ClaimCommands::untrust)))
                 .then(literal("trust")
                         .then(argument("игрок", word()).suggests(onlinePlayers())
-                                .executes(ClaimCommands::trust)))
+                                .executes(ClaimCommands::trust)
+                                .then(argument("роль", word()).suggests(roleNames())
+                                        .executes(ClaimCommands::trust))))
+                .then(roleTree("role"))
+                .then(roleTree("роль"))
                 .then(literal("untrust")
                         .then(argument("игрок", word()).suggests(members())
                                 .executes(ClaimCommands::untrust)))
@@ -209,6 +215,9 @@ public final class ClaimCommands {
                 onOff(c.allowFluidFlow), onOff(c.allowPistons), onOff(c.allowHoppers))), false);
         p.sendMessage(Fmt.text(cfg().message("info.guest",
                 onOff(c.guestContainers), onOff(c.guestDoors), onOff(c.guestEntities))), false);
+        if (c.roles != null && !c.roles.isEmpty()) {
+            p.sendMessage(Fmt.text("&7Роли: " + roleList(c) + " &8(/claim role)"), false);
+        }
         return 1;
     }
 
@@ -241,8 +250,21 @@ public final class ClaimCommands {
         ServerPlayerEntity onlineTarget = ctx.getSource().getServer().getPlayerManager().getPlayer(target);
         // The UUID mirror is what protection checks go through; the name is
         // display-only. When the player is online their exact UUID is used.
+        // Optional role: checked before anything changes, so a typo adds nobody.
+        String role = optionalArg(ctx, "роль");
+        String roleName = null;
+        if (role != null && !role.equalsIgnoreCase("none") && !role.equalsIgnoreCase("нет")) {
+            roleName = c.findRole(role);
+            if (roleName == null) {
+                p.sendMessage(Fmt.text("&cВ привате нет роли &f" + role + "&c. Роли: " + roleList(c)), false);
+                return 0;
+            }
+        }
+        java.util.UUID targetUuid = onlineTarget != null ? onlineTarget.getUuid() : Claim.offlineUuid(target);
         ClaimManager.addMember(c, target, onlineTarget != null ? onlineTarget.getUuid() : null);
-        p.sendMessage(Fmt.text(cfg().message("trust.added", target, c.name)), false);
+        ClaimManager.setMemberRole(c, targetUuid, roleName);
+        p.sendMessage(Fmt.text(cfg().message("trust.added", target, c.name)
+                + (roleName != null ? " &7— роль &f" + roleName : "")), false);
 
         ServerPlayerEntity online = onlineTarget;
         if (online != null) {
@@ -276,7 +298,14 @@ public final class ClaimCommands {
         if (c == null) return 0;
         String flag = getString(ctx, "флаг").toLowerCase(Locale.ROOT);
         boolean on = parseOnOff(getString(ctx, "значение"));
-        switch (flag) {
+        if (!applyFlag(c, flag, on)) return fail(p, "flag.unknown");
+        p.sendMessage(Fmt.text(cfg().message("flag.set", flag, c.name, on ? "&aВКЛ" : "&cВЫКЛ")), false);
+        return 1;
+    }
+
+    /** Sets one claim flag by its command name; {@code false} when the name is unknown. Shared with {@code /claims flag}. */
+    public static boolean applyFlag(Claim c, String flag, boolean on) {
+        switch (flag.toLowerCase(Locale.ROOT)) {
             case "pvp" -> ClaimManager.setPvp(c, on);
             case "mobs", "mobgrief" -> ClaimManager.setMobGriefing(c, on);
             case "mobdmg", "mobdamage" -> ClaimManager.setMobDamage(c, on);
@@ -289,11 +318,174 @@ public final class ClaimCommands {
             case "doors", "buttons" -> ClaimManager.setGuestDoors(c, on);
             case "entities", "mobs2", "существа" -> ClaimManager.setGuestEntities(c, on);
             default -> {
-                return fail(p, "flag.unknown");
+                return false;
             }
         }
-        p.sendMessage(Fmt.text(cfg().message("flag.set", flag, c.name, on ? "&aВКЛ" : "&cВЫКЛ")), false);
+        return true;
+    }
+
+    // ------------------------------------------------------------------ roles
+
+    /**
+     * {@code /claim role …}: roles are named sets of permissions inside one
+     * claim. A member given a role may do only what it grants; a member
+     * without one is a full member, as before.
+     */
+    private static com.mojang.brigadier.builder.LiteralArgumentBuilder<ServerCommandSource> roleTree(String word) {
+        return literal(word)
+                .executes(ClaimCommands::roleList)
+                .then(literal("list").executes(ClaimCommands::roleList))
+                .then(literal("create")
+                        .then(argument("роль", word()).executes(ClaimCommands::roleCreate)))
+                .then(literal("delete")
+                        .then(argument("роль", word()).suggests(roleNames()).executes(ClaimCommands::roleDelete)))
+                .then(literal("perm")
+                        .then(argument("роль", word()).suggests(roleNames())
+                                .then(argument("право", word()).suggests(permNames())
+                                        .then(argument("значение", word()).suggests(onOff())
+                                                .executes(ClaimCommands::rolePerm)))))
+                .then(literal("give")
+                        .then(argument("игрок", word()).suggests(members())
+                                .then(argument("роль", word()).suggests(roleNamesOrNone())
+                                        .executes(ClaimCommands::roleGive))));
+    }
+
+    private static int roleList(CommandContext<ServerCommandSource> ctx) throws CommandSyntaxException {
+        ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
+        Claim c = claimAtFeet(p);
+        if (c == null) {
+            p.sendMessage(Fmt.text("&7Здесь нет привата."), false);
+            return 0;
+        }
+        p.sendMessage(Fmt.text("&6▎ Роли привата &f" + c.name), false);
+        if (c.roles == null || c.roles.isEmpty()) {
+            p.sendMessage(Fmt.text("&7Ролей нет — все пользователи полные. Создать: &f/claim role create <имя>"), false);
+        } else {
+            for (var e : c.roles.entrySet()) {
+                p.sendMessage(Fmt.text("&f" + e.getKey() + " &7— " + permsText(e.getValue())), false);
+            }
+        }
+        for (String uuid : c.memberUuids == null ? List.<String>of() : c.memberUuids) {
+            String role = c.memberRoles == null ? null : c.memberRoles.get(uuid);
+            if (role != null && c.roles != null && c.roles.containsKey(role)) {
+                p.sendMessage(Fmt.text("&8  " + nameOfMember(c, uuid) + " → " + role), false);
+            }
+        }
+        p.sendMessage(Fmt.text("&8Права: build, containers, doors, entities · /claim role perm <роль> <право> on|off"), false);
         return 1;
+    }
+
+    private static int roleCreate(CommandContext<ServerCommandSource> ctx) throws CommandSyntaxException {
+        ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
+        Claim c = ownClaimAtFeet(p);
+        if (c == null) return 0;
+        String name = cleanRoleName(getString(ctx, "роль"));
+        if (name == null) {
+            p.sendMessage(Fmt.text("&cИмя роли: 1–16 символов, буквы, цифры, _ и -."), false);
+            return 0;
+        }
+        if (!ClaimManager.createRole(c, name)) {
+            p.sendMessage(Fmt.text(c.findRole(name) != null ? "&cТакая роль уже есть."
+                    : "&cНе больше " + ClaimManager.MAX_ROLES + " ролей в привате."), false);
+            return 0;
+        }
+        p.sendMessage(Fmt.text("&aРоль &f" + name + "&a создана — пока без прав. Добавь: &f/claim role perm "
+                + name + " <build|containers|doors|entities> on"), false);
+        return 1;
+    }
+
+    private static int roleDelete(CommandContext<ServerCommandSource> ctx) throws CommandSyntaxException {
+        ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
+        Claim c = ownClaimAtFeet(p);
+        if (c == null) return 0;
+        String name = getString(ctx, "роль");
+        if (!ClaimManager.deleteRole(c, name)) {
+            p.sendMessage(Fmt.text("&cНет роли &f" + name + "&c."), false);
+            return 0;
+        }
+        p.sendMessage(Fmt.text("&aРоль &f" + name + "&a удалена; её пользователи снова полные."), false);
+        return 1;
+    }
+
+    private static int rolePerm(CommandContext<ServerCommandSource> ctx) throws CommandSyntaxException {
+        ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
+        Claim c = ownClaimAtFeet(p);
+        if (c == null) return 0;
+        String role = c.findRole(getString(ctx, "роль"));
+        Claim.Perm perm = Claim.Perm.parse(getString(ctx, "право"));
+        if (role == null) return failRaw(p, "&cНет такой роли. Роли: " + roleList(c));
+        if (perm == null) return failRaw(p, "&cПраво: build, containers, doors или entities.");
+        boolean on = parseOnOff(getString(ctx, "значение"));
+        ClaimManager.setRolePerm(c, role, perm, on);
+        p.sendMessage(Fmt.text("&aРоль &f" + role + "&a: " + perm.label + " " + onOff(on)), false);
+        return 1;
+    }
+
+    private static int roleGive(CommandContext<ServerCommandSource> ctx) throws CommandSyntaxException {
+        ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
+        Claim c = ownClaimAtFeet(p);
+        if (c == null) return 0;
+        String target = getString(ctx, "игрок");
+        String role = getString(ctx, "роль");
+        ServerPlayerEntity online = ctx.getSource().getServer().getPlayerManager().getPlayer(target);
+        java.util.UUID uuid = online != null ? online.getUuid() : Claim.offlineUuid(target);
+        if (!c.isMember(uuid)) return failRaw(p, "&f" + target + "&c не пользователь этого привата. Сначала &f/claim add " + target);
+        boolean none = role.equalsIgnoreCase("none") || role.equalsIgnoreCase("нет");
+        if (!ClaimManager.setMemberRole(c, uuid, none ? null : role)) {
+            return failRaw(p, "&cНет роли &f" + role + "&c. Роли: " + roleList(c));
+        }
+        p.sendMessage(Fmt.text(none ? "&f" + target + "&a теперь полный пользователь."
+                : "&f" + target + "&a получил роль &f" + c.findRole(role)), false);
+        return 1;
+    }
+
+    /** "сундуки и станки, двери…" or "без прав". */
+    public static String permsText(List<String> perms) {
+        if (perms == null || perms.isEmpty()) return "&8без прав (как гость)";
+        List<String> out = new java.util.ArrayList<>();
+        for (Claim.Perm perm : Claim.Perm.values()) if (perms.contains(perm.key)) out.add(perm.label);
+        return "&f" + String.join("&7, &f", out);
+    }
+
+    private static String roleList(Claim c) {
+        return c.roles == null || c.roles.isEmpty() ? "&8нет" : "&f" + String.join("&7, &f", c.roles.keySet());
+    }
+
+    /** Display name of a member by UUID: the name list mirror, else the UUID itself. */
+    public static String nameOfMember(Claim c, String uuid) {
+        for (String n : c.members) if (Claim.offlineUuid(n).toString().equals(uuid)) return n;
+        return uuid.substring(0, 8);
+    }
+
+    /** For the GUI: the same rule as the command. */
+    public static String cleanRoleNamePublic(String raw) {
+        return cleanRoleName(raw);
+    }
+
+    /** A role name that is safe to store and show, or null. */
+    static String cleanRoleName(String raw) {
+        if (raw == null) return null;
+        String s = raw.trim();
+        if (s.isEmpty() || s.length() > 16) return null;
+        for (int i = 0; i < s.length(); i++) {
+            char ch = s.charAt(i);
+            if (!Character.isLetterOrDigit(ch) && ch != '_' && ch != '-') return null;
+        }
+        if (s.equalsIgnoreCase("none") || s.equalsIgnoreCase("нет")) return null;
+        return s;
+    }
+
+    private static String optionalArg(CommandContext<ServerCommandSource> ctx, String name) {
+        try {
+            return getString(ctx, name);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    private static int failRaw(ServerPlayerEntity p, String text) {
+        p.sendMessage(Fmt.text(text), false);
+        return 0;
     }
 
     // ------------------------------------------------------------------ zones
@@ -365,8 +557,11 @@ public final class ClaimCommands {
         String me = p.getGameProfile().name();
         p.sendMessage(Fmt.text("&7Приват: &f" + c.name + " &8(владелец " + c.owner
                 + ", зон " + c.zoneCount() + ")"), false);
+        String myRole = c.roleOf(p.getUuid());
         p.sendMessage(Fmt.text("&7Ты здесь: " + (c.isOwner(p.getUuid()) ? "&aвладелец"
-                : c.isMember(p.getUuid()) ? "&aпользователь" : "&cгость")), false);
+                : c.isMember(p.getUuid()) ? (myRole == null ? "&aпользователь"
+                        : "&eпользователь с ролью &f" + myRole + " &7(" + permsText(c.roleGrants(myRole)) + "&7)")
+                : "&cгость")), false);
         String bypassWhy = ProtectionService.bypassReason(p);
         if (bypassWhy != null) {
             p.sendMessage(Fmt.text("&e⚠ У тебя активен обход защиты — ты видишь НЕ то, "
@@ -597,7 +792,7 @@ public final class ClaimCommands {
         return 0;
     }
 
-    private static boolean parseOnOff(String s) {
+    public static boolean parseOnOff(String s) {
         String v = s.toLowerCase(Locale.ROOT);
         return v.equals("on") || v.equals("вкл") || v.equals("true") || v.equals("да") || v.equals("1");
     }
@@ -625,13 +820,41 @@ public final class ClaimCommands {
         };
     }
 
-    private static SuggestionProvider<ServerCommandSource> flagNames() {
+    private static SuggestionProvider<ServerCommandSource> roleNames() {
+        return (ctx, b) -> {
+            try {
+                Claim c = claimAtFeet(ctx.getSource().getPlayerOrThrow());
+                return c != null && c.roles != null ? CommandSource.suggestMatching(c.roles.keySet(), b) : b.buildFuture();
+            } catch (Exception e) {
+                return b.buildFuture();
+            }
+        };
+    }
+
+    private static SuggestionProvider<ServerCommandSource> roleNamesOrNone() {
+        return (ctx, b) -> {
+            try {
+                Claim c = claimAtFeet(ctx.getSource().getPlayerOrThrow());
+                List<String> names = new java.util.ArrayList<>(List.of("none"));
+                if (c != null && c.roles != null) names.addAll(c.roles.keySet());
+                return CommandSource.suggestMatching(names, b);
+            } catch (Exception e) {
+                return b.buildFuture();
+            }
+        };
+    }
+
+    private static SuggestionProvider<ServerCommandSource> permNames() {
+        return (ctx, b) -> CommandSource.suggestMatching(List.of("build", "containers", "doors", "entities"), b);
+    }
+
+    public static SuggestionProvider<ServerCommandSource> flagNames() {
         return (ctx, b) -> CommandSource.suggestMatching(
                 List.of("pvp", "mobs", "mobdmg", "explosions", "fluids", "pistons", "hoppers",
                         "containers", "doors", "entities", "fire"), b);
     }
 
-    private static SuggestionProvider<ServerCommandSource> onOff() {
+    public static SuggestionProvider<ServerCommandSource> onOff() {
         return (ctx, b) -> CommandSource.suggestMatching(List.of("on", "off"), b);
     }
 

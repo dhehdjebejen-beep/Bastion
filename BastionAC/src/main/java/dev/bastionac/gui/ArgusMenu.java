@@ -59,8 +59,9 @@ public final class ArgusMenu {
         List<String> st = new ArrayList<>(Argus.status());
         st.add("");
         st.add("&8Аргус не банит за одиночный флаг: он читает");
-        st.add("&8всю телеметрию игрока вокруг события и даёт");
-        st.add("&8вердикт в течение часа.");
+        st.add("&8всю телеметрию игрока вокруг события: первый");
+        st.add("&8вердикт — через несколько минут, итог — сразу");
+        st.add("&8при «виновен» или уходе игрока, иначе к сроку.");
         gui.button(45, GuiItems.item(Items.ENDER_EYE, "&5Аргус — расследования", st), () -> {});
         gui.button(46, modeButton(), () -> chooseMode(admin));
         gui.button(47, modelButton(), () -> {});
@@ -158,9 +159,14 @@ public final class ArgusMenu {
         gui.button(23, GuiItems.item(Items.COMPARATOR, "&bВсе признаки", rows), () -> {});
 
         gui.button(25, GuiItems.item(Items.RECOVERY_COMPASS, "&aРазобрать заново",
-                "&7Прочитать телеметрию сейчас", "&8клик"), () -> {
-            Argus.reanalyze(c.id);
-            admin.sendMessage(TextFmt.literal("&5[Аргус] &7Дело #" + c.id + " поставлено в очередь"), false);
+                "&7Прочитать телеметрию сейчас",
+                c.open() ? "&8клик" : "&8клик — дело не откроется, только цифры"), () -> {
+            boolean busy = c.inFlight;
+            Argus.reanalyze(c.id, admin.getGameProfile().name());
+            admin.sendMessage(TextFmt.literal("&5[Аргус] &7Дело #" + c.id + (busy
+                    ? " уже разбирается — перечитаю сразу после, итог придёт сюда"
+                    : c.open() ? " поставлено в очередь, итог придёт сюда"
+                    : " закрыто — обновлю цифры, решение останется твоим")), false);
             openCase(admin, c.id);
         });
 
@@ -300,9 +306,9 @@ public final class ArgusMenu {
                     + GuiItems.ago(Math.max(0, c.dueAt - System.currentTimeMillis()));
             case QUEUED -> "в очереди на разбор";
             case ANALYZING -> "разбирается";
-            case ANALYZED -> c.finalPass ? "разобрано (итог)" : "разобрано, итог до "
-                    + GuiItems.stamp(c.deadlineAt);
-            case CLOSED -> "закрыто";
+            case ANALYZED -> (c.finalPass ? "разобрано (итог)" : "разобрано, итог до "
+                    + GuiItems.stamp(c.deadlineAt)) + (c.rerunRequested ? ", повтор запрошен" : "");
+            case CLOSED -> c.inFlight ? "закрыто (дочитываю цифры)" : "закрыто";
         };
     }
 

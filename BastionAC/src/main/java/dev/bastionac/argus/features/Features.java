@@ -108,7 +108,9 @@ public final class Features {
                 "ровность кликов (вариация интервалов)", "", 1));
         add(new Spec("cmb.click_kurt", Category.COMBAT, Agg.KURTOSIS, -1, 2.0, 1.5, 1.0, 60, 30, 0.6, false,
                 "форма распределения кликов (эксцесс)", "", 1));
-        add(new Spec("cmb.reach", Category.COMBAT, Agg.P95, 1, 2.85, 0.12, 0.08, 30, 10, 1.2, false,
+        // Weight 1.6 (was 1.2) since high-ping hits are set aside: a p95 well
+        // past vanilla's 3 blocks on a low ping is now worth a look by itself.
+        add(new Spec("cmb.reach", Category.COMBAT, Agg.P95, 1, 2.85, 0.12, 0.08, 30, 10, 1.6, false,
                 "дистанция удара по игрокам (95-й процентиль)", " бл", 1));
         add(new Spec("cmb.blind_hit", Category.COMBAT, Agg.RATE, 1, 0.01, 0.03, 0.02, 40, 15, 1.0, false,
                 "удары по целям вне поля зрения", "%", 100));

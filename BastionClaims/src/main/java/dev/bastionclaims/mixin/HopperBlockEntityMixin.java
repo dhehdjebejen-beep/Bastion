@@ -1,10 +1,12 @@
 package dev.bastionclaims.mixin;
 
 import dev.bastionclaims.core.ProtectionService;
+import net.minecraft.block.AbstractRailBlock;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.HopperBlock;
 import net.minecraft.block.entity.Hopper;
 import net.minecraft.block.entity.HopperBlockEntity;
+import net.minecraft.entity.vehicle.HopperMinecartEntity;
 import net.minecraft.inventory.Inventory;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
@@ -30,8 +32,16 @@ public abstract class HopperBlockEntityMixin {
                                                  CallbackInfoReturnable<Inventory> cir) {
         if (world.isClient()) return;
         BlockPos hopperPos = BlockPos.ofFloored(hopper.getHopperX(), hopper.getHopperY(), hopper.getHopperZ());
-        if (ProtectionService.hopperBlocked(dim(world), pos.getX(), pos.getY(), pos.getZ(),
-                hopperPos.getX(), hopperPos.getY(), hopperPos.getZ())) {
+        // A hopper minecart is a free-moving entity: anyone may walk into a claim
+        // and shove one (placed outside) under a chest, where "it is inside the
+        // claim" would wrongly make it the owner's automation. A cart only counts
+        // as the owner's when it rides a rail — and strangers cannot lay rails in
+        // someone's claim.
+        boolean looseCart = hopper instanceof HopperMinecartEntity cart
+                && !(world.getBlockState(cart.getBlockPos()).getBlock() instanceof AbstractRailBlock);
+        if (looseCart ? ProtectionService.hopperBlockedForeign(dim(world), pos.getX(), pos.getY(), pos.getZ())
+                : ProtectionService.hopperBlocked(dim(world), pos.getX(), pos.getY(), pos.getZ(),
+                        hopperPos.getX(), hopperPos.getY(), hopperPos.getZ())) {
             cir.setReturnValue(null);
         }
     }

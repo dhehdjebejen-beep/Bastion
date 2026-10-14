@@ -31,7 +31,10 @@ prove who is who, and until it has, the connection must not be able to do anythi
 **Brute force and flood**
 - Limits on failed logins per connection, per account (a lock that survives
   restarts) and per IP (sliding window).
-- Limits on joins per IP per minute and on accounts per IP.
+- A limit on joins per IP per minute.
+- **A growing per-IP account quota.** The first accounts register at once; each
+  further one opens a week after the previous, then two weeks, three… A household
+  or a shared NAT can still grow over time; a farm of alts cannot be made in an evening.
 - Argon2 runs in a bounded pool, so a crowd of bots cannot eat the tick.
 
 **Account security**
@@ -42,7 +45,9 @@ prove who is who, and until it has, the connection must not be able to do anythi
 - **Account history, panic lock and new-device warnings.**
 - **Name protection.** A strict regex; no case-variant squatting (`steve` vs
   `Steve`); a second connection from another IP is refused while the owner is online.
-- **Session resume** bound to the last IP.
+- **Session resume** only from the same IP *and* the same client (an HMAC of the
+  brand and client options): a stranger behind the same carrier NAT cannot walk into
+  someone else's account.
 - **Agreement gate.** Server rules are handed out as books with an accept button. A
   separate timeout gives time to read them.
 
@@ -111,7 +116,7 @@ sequenceDiagram
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionauth-<version>.jar
-./gradlew test    # 80 unit tests
+./gradlew test    # 87 unit tests
 ```
 
 The mod bundles BouncyCastle, sqlite-jdbc and ZXing. Fabric API is required on the

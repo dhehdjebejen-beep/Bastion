@@ -42,11 +42,12 @@ public final class ClaimEvents {
         AttackEntityCallback.EVENT.register(ClaimEvents::onAttackEntity);
         ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
             if (!(entity instanceof ServerPlayerEntity p)) {
-                // Animals, armour stands, villagers standing in someone's claim.
-                // The attack event only ever sees a melee swing, so without this
-                // an arrow, a splash potion or a TNT charge from outside the
-                // border killed them anyway. Non-living valuables (item frames,
-                // paintings, minecarts) go through EntityDamageMixin.
+                // Animals and villagers standing in someone's claim. The attack
+                // event only ever sees a melee swing, so without this an arrow,
+                // a splash potion or a TNT charge from outside the border killed
+                // them anyway. Armour stands never reach this event (their
+                // damage() skips LivingEntity's) and, like item frames,
+                // paintings and minecarts, go through EntityDamageMixin.
                 return !ProtectionService.entityDamageBlocked(entity, source);
             }
             // Hostile-mob damage inside a mob-damage-off claim.

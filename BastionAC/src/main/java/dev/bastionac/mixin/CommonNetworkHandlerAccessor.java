@@ -16,4 +16,8 @@ public interface CommonNetworkHandlerAccessor {
 
     @Accessor("waitingForKeepAlive")
     boolean bastionac$waitingForKeepAlive();
+
+    /** The connection: one object per client from configuration to the last play packet. */
+    @Accessor("connection")
+    net.minecraft.network.ClientConnection bastionac$connection();
 }

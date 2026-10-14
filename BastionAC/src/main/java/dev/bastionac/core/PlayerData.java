@@ -163,6 +163,10 @@ public final class PlayerData {
     /** Tick at which the brand/channel consistency check should run (once, a few seconds after join). */
     public long brandCheckTick = -1;
     public boolean brandChecked;
+    /** Movement packets handled while this client has not sent a single ClientTickEnd. */
+    public int movesWithoutTickEnd;
+    /** The "1.21.2+ client without tick ends" verdict was given (once per session). */
+    public boolean tickEndAbsenceFlagged;
 
     // ------------------------------------------------------------------
     // 3.0: exact teleport handshake, timer by balance, telemetry context
@@ -784,6 +788,10 @@ public final class PlayerData {
     public int xrayWindowStone;
     /** Valuable ores inside the purity-drop window (since the freeze). */
     public int xrayWindowOres;
+    /** When staff were last told about a hidden-ore break (throttle; verdicts are never throttled). */
+    public long xrayLastHiddenAlertMs;
+    /** Hidden-ore breaks since that alert, reported together in the next one. */
+    public int xrayHiddenSinceAlert;
 
     /** Session summary for the player card UI. */
     public int xrayDiamonds() {

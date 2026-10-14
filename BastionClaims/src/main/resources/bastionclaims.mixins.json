@@ -5,13 +5,27 @@
   "compatibilityLevel": "JAVA_21",
   "mixins": [
     "BucketItemMixin",
+    "DispenserBlockMixin",
     "EntityDamageMixin",
     "ExplosionImplMixin",
+    "FallingBlockMixin",
+    "FarmlandMixin",
     "FireBlockMixin",
     "FlowableFluidMixin",
+    "FrostWalkerMixin",
     "HopperBlockEntityMixin",
+    "LightningMixin",
+    "MobGriefMixins$BreakDoor",
+    "MobGriefMixins$Dragon",
+    "MobGriefMixins$EndermanPickUp",
+    "MobGriefMixins$EndermanPlace",
+    "MobGriefMixins$Ravager",
+    "MobGriefMixins$StepAndDestroy",
+    "MobGriefMixins$Wither",
     "PistonHandlerMixin",
-    "SaplingGrowthMixin"
+    "ProjectileBlockHitMixin",
+    "SaplingGrowthMixin",
+    "SmallFireballMixin"
   ],
   "injectors": {
     "defaultRequire": 1

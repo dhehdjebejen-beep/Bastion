@@ -3,7 +3,7 @@
   "id": "bastionauth",
   "version": "${version}",
   "name": "BastionAuth",
-  "description": "Hardened self-hosted authentication for offline-mode Fabric servers: Argon2id password hashing with pepper, SQLite storage, packet-level freeze of unauthenticated players, brute-force protection and IP-bound session resume.",
+  "description": "Hardened self-hosted authentication for offline-mode Fabric servers: Argon2id password hashing with pepper, SQLite storage, packet-level freeze of unauthenticated players, brute-force protection, a growing per-IP account quota and session resume bound to the IP and the client profile.",
   "authors": [
     "dhehdjebejen-beep"
   ],

@@ -26,6 +26,18 @@ import java.util.Set;
  * contradiction. An honest modded client (Sodium, Lithium) reports its real
  * brand and is never touched by this rule.
  *
+ * <p>A spoofer that also hides its channels gets through that rule, so the
+ * brand is judged on facts it has a harder time keeping straight (3.1):
+ * <ul>
+ *   <li>the brand changed during the session — vanilla sends it once;</li>
+ *   <li>a doctored string — "Vanilla", "vanilla ", colour codes, control
+ *       characters, absurd length;</li>
+ *   <li>no brand at all — vanilla always sends one (weak, half weight);</li>
+ *   <li>a 1.21.2+ client that moves but never closes a tick with
+ *       {@code ClientTickEnd}: not a vanilla packet stack, whatever it calls
+ *       itself (judged on the move-packet path below).</li>
+ * </ul>
+ *
  * <h2>PacketOrder</h2>
  * Since 1.21.2 the client closes every one of its ticks with
  * {@code ClientTickEnd}. Between two of those, a vanilla client sends at most
@@ -62,15 +74,82 @@ public final class ClientChecks {
         d.brandChecked = true;
         if (!BastionAC.config().check(CheckType.BRANDSPOOF.key).enabled) return;
 
-        String brand = d.brand;
-        if (brand == null || !VANILLA_BRANDS.contains(brand)) return; // honest modded client, or brand not seen
+        java.util.List<String> seen = java.util.List.of();
+        try {
+            seen = dev.bastionac.core.BrandLedger.seen(
+                    ((dev.bastionac.mixin.CommonNetworkHandlerAccessor) player.networkHandler).bastionac$connection());
+        } catch (Throwable ignored) {
+        }
+        String brand = d.brand != null ? d.brand : seen.isEmpty() ? null : seen.get(seen.size() - 1);
+        Set<String> channels = brand != null && VANILLA_BRANDS.contains(brand) ? sendableChannels(player) : Set.of();
+        for (Finding f : brandFindings(seen, brand, channels)) {
+            BastionAC.flag(player, d, CheckType.BRANDSPOOF, f.text(), f.weight());
+        }
+    }
 
-        Set<String> channels = sendableChannels(player);
-        if (channels.isEmpty()) return;   // a genuine vanilla client: no channels at all
+    /** One BrandSpoof finding and how much it is worth. */
+    record Finding(String text, double weight) {}
 
-        BastionAC.flag(player, d, CheckType.BRANDSPOOF, String.format(
-                "бренд «%s» при %d модовых каналах (%s)",
-                brand, channels.size(), preview(channels)));
+    /** Pure: what is wrong with what this client said about itself. */
+    static java.util.List<Finding> brandFindings(java.util.List<String> seen, String brand, Set<String> modChannels) {
+        java.util.List<Finding> out = new java.util.ArrayList<>();
+        java.util.LinkedHashSet<String> distinct = new java.util.LinkedHashSet<>(seen);
+        if (distinct.size() >= 2) {
+            out.add(new Finding("бренд сменился за сессию: " + String.join(" → ", quoted(distinct)), 1.0));
+        }
+        if (brand == null) {
+            out.add(new Finding("клиент не прислал бренд (ванильный присылает всегда)", 0.5));
+            return out;
+        }
+        if (doctored(brand)) {
+            out.add(new Finding("подделанная строка бренда «" + printable(brand) + "»", 1.0));
+        }
+        if (VANILLA_BRANDS.contains(brand) && !modChannels.isEmpty()) {
+            out.add(new Finding(String.format("бренд «%s» при %d модовых каналах (%s)",
+                    brand, modChannels.size(), preview(modChannels)), 1.0));
+        }
+        return out;
+    }
+
+    /**
+     * A brand no real launcher produces: "vanilla" in the wrong case or with
+     * padding, colour codes, control characters, or a novel's length. Real
+     * clients send a short plain word ("vanilla", "fabric", "forge", "lunarclient:…").
+     */
+    static boolean doctored(String b) {
+        if (b.isEmpty() || b.length() > 64 || !b.equals(b.strip())) return true;
+        if (b.equalsIgnoreCase("vanilla") && !b.equals("vanilla")) return true;
+        for (int i = 0; i < b.length(); i++) {
+            char c = b.charAt(i);
+            if (c < 0x20 || c == 0x7f || c == '§') return true;
+        }
+        return false;
+    }
+
+    private static java.util.List<String> quoted(java.util.Collection<String> l) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        for (String s : l) out.add("«" + printable(s) + "»");
+        return out;
+    }
+
+    private static String printable(String s) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < s.length() && sb.length() < 40; i++) {
+            char c = s.charAt(i);
+            sb.append(c < 0x20 || c == 0x7f ? '?' : c == '§' ? '&' : c);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * A movement packet from a client that has never ended a tick. Every
+     * 1.21.2+ client closes each tick with ClientTickEnd (and ViaVersion makes
+     * them up for older ones), so a hundred moves without one is a hand-made
+     * packet stack — a bot, a proxy-side cheat — whatever its brand says.
+     */
+    static boolean tickEndsMissing(int movesWithoutTickEnd, boolean viaPresent, int protocol) {
+        if (movesWithoutTickEnd < 100) return false;
+        return !viaPresent || protocol > 0;
     }
 
     /** Plugin channels the client declared it can receive, minus vanilla's own. */
@@ -105,7 +184,18 @@ public final class ClientChecks {
 
     /** Called on every movement packet that carries a position or rotation. */
     public static void onMovePacket(ServerPlayerEntity player, PlayerData d) {
-        if (!d.sendsTickEnd) return;   // pre-1.21.2 client, or none seen yet: no invariant to test
+        if (!d.sendsTickEnd) {
+            d.movesWithoutTickEnd++;
+            if (!d.tickEndAbsenceFlagged && tickEndsMissing(d.movesWithoutTickEnd,
+                    dev.bastionac.core.ClientVersion.viaPresent(),
+                    dev.bastionac.core.ClientVersion.protocolOf(player.getUuid()))) {
+                d.tickEndAbsenceFlagged = true;
+                BastionAC.flag(player, d, CheckType.BRANDSPOOF, d.movesWithoutTickEnd
+                        + " пакетов движения без единого ClientTickEnd — не ванильный клиент (бренд «"
+                        + (d.brand == null ? "?" : printable(d.brand)) + "»)");
+            }
+            return;   // no tick ends seen: no per-tick invariant to test
+        }
         d.movesThisClientTick++;
     }
 

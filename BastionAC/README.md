@@ -7,6 +7,23 @@ mod. It started as a targeted answer to **Meteor** and its forks and grew into a
 general engine; version 2.24 added a full pass over **Wurst 7**, built from that
 client's own source and defaults.
 
+## New in 3.1
+
+- **Argus obeys staff and answers in minutes.** A cheater / not a cheater / ban /
+  close decision is final; a case is never analysed twice at once; the first
+  verdict comes in a couple of minutes, the final one at once on guilty or when
+  the player leaves.
+- **Argus is sharper.** A bug that let computed aim (rotations off the mouse
+  sensitivity grid) go uncounted is fixed; reach ignores high-ping hits. End-to-end
+  scenarios in the tests: honest — clean, KillAura — guilty, reach — suspect,
+  Speed+Timer — guilty. The server norms cannot be poisoned by one player.
+- **X-ray is visible to staff** — an `[X-ray]` alert in chat and `[XRAY]` in the console.
+- **BrandSpoof** catches a changed or doctored brand, a missing one and a 1.21.2+
+  client without `ClientTickEnd`.
+- **Backtrack via PingSpoof closed:** the lag-compensation window is capped by
+  the server's own transactions.
+- Offline operators are exempt from delayed bans.
+
 ## New in 3.0 — telemetry and Argus
 
 - **Session telemetry.** Every session is recorded to its own compact binary file
@@ -27,7 +44,9 @@ client's own source and defaults.
   through the same rock would reveal (read from a sample of the world). Every
   feature is compared with this server's own honest players (median/MAD) and the
   player's own history; the result is a calibrated score and a plain-language
-  report, within the hour.
+  report: a first verdict within minutes, the final one at once when it is guilty
+  or the player has left, otherwise after 15 minutes. A staff decision (cheater /
+  not a cheater / ban / close) closes the case for good.
 - **Modes**: shadow (cases only), assist (staff get the verdict and a button,
   default), auto (a confident verdict with independent evidence bans by itself).
   The owner's "cheater / not a cheater" labels retrain the weights.
@@ -56,7 +75,7 @@ client's own source and defaults.
 |---|---|
 | Movement | Speed · Fly · HighJump · BigMove · Timer (balance on arrival time) · Blink · NoSlow · NoWeb · GroundSpoof · AntiHunger · NoFall (by packet *and* by outcome) · FastFall (vanilla gravity curve) · Spider · FastLadder · Jesus · Step · PacketOrder |
 | Combat | Reach (lag-compensated against the victim's hitbox history) · Angle · Aim (exact hitbox-centre lock, flick-and-return) · Walls · MultiTarget · UseAttack · NoSwing · Criticals · Velocity · CPS · AutoTotem · EntityPredict (an attack on an entity the client was never sent — CrystalAura id prediction) |
-| World | FastBreak · FastPlace · Nuker · PacketMine · Scaffold · AirPlace · AutoPlace (computed face-centre clicks) · XRay (statistical, observe-only) |
+| World | FastBreak · FastPlace · Nuker · PacketMine · Scaffold · AirPlace · AutoPlace (computed face-centre clicks) · XRay (statistical, staff alerts, never bans) |
 | Rhythm | AutoClick · AutoAction — machine-even timing at human-plausible rates |
 | Client & transport | Vehicle (BoatFly) · InvMove · BrandSpoof · GCD (aim grid) · BadRotation |
 | Protocol guard | Packet flood · book/NBT bombs · creative-slot smuggling |
@@ -122,7 +141,7 @@ flowchart LR
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test    # 110 unit tests
+./gradlew test    # 165 unit tests
 ```
 
 The config is `config/bastionac/config.json`. It has per-check weight, alert,

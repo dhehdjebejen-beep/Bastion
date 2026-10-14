@@ -17,31 +17,50 @@ packets past the usual path still hits it.
   and re-creating it.
 - **Limits grow with play time**, read from the vanilla `play_time` statistic.
   Tiers are configurable.
-- Transfer to another player with confirmation. Trusted members. A chest GUI for
-  everything.
+- Transfer to another player with confirmation. A chest GUI for everything.
+
+## Members and roles
+
+- **Members** (`/claim add <name>`) build and use everything like the owner, but
+  cannot manage the claim.
+- **Roles** are permission sets inside a claim: `build`, `containers` (chests and
+  workstations), `doors` (doors, buttons, levers), `entities` (animals, frames). A
+  member with a role may do only what it grants — say, a "guest" role with doors
+  only. A member without a role has full rights.
+- `/claim role create <role>`, `/claim role perm <role> <perm> on|off`,
+  `/claim add <name> <role>`, or the Roles button in the claim menu.
 
 ## What is protected
 
 | Threat | How it is closed |
 |---|---|
 | Breaking, placing, containers, doors, interactions, PvP | Server-side callbacks and access checks |
-| Explosions (TNT, creepers) | Mixin on the explosion; blocks inside a claim survive |
+| Explosions (TNT, creepers, fireballs) | Blocks inside survive, entities take neither damage nor knockback, no explosion fire |
 | Item frames, paintings, armor stands, minecarts, animals | Protected from *any* source, including arrows and TNT from outside the border |
 | Buckets: pouring and scooping inside someone else's claim | Mixin on `BucketItem`, which also catches item-use packets that skip `UseBlockCallback` |
 | Water and lava flowing in from outside | Mixin on `FlowableFluid.flow`; the owner's own fluids flow as usual |
 | Pistons pushing blocks across the border | Mixin on `PistonHandler.calculatePush` |
 | Hoppers and hopper minecarts pulling from chests inside | Mixin on `HopperBlockEntity` |
-| Trees next to a claim | Tree guard with a configurable radius and height |
+| Trees next to a claim | Tree guard with a configurable radius and height; a sapling in a neighbouring claim cannot grow into yours either |
+| Fire | Fire does not spread inside a claim, and fire outside cannot burn or ignite blocks inside |
+| Dispensers on the border | A dispenser outside cannot pour, ignite or place anything in the cell inside |
+| Projectiles | Fire arrows do not prime TNT or light campfires and candles; strangers' arrows do not ring bells, power targets or break dripstone; fire charges do not ignite |
+| Channeling lightning | No fire and no struck creatures in someone else's claim |
+| Falling blocks | Sand, gravel or anvils that started outside break into items |
+| Mobs | Endermen, the wither, ravagers, the dragon, door-breaking zombies — under the `mobs` flag |
+| Farmland and Frost Walker | Strangers do not trample crops or freeze water |
 
 **Flags** relax protection on purpose. All are off by default:
-`pvp`, `mobs`, `mobdmg`, `explosions`, `fluids`, `pistons`, `hoppers`,
-`containers`, `doors`. Workstations (crafting table, anvil and similar) can stay
+`pvp`, `mobs`, `mobdmg`, `explosions`, `fluids`, `pistons`, `hoppers`, `fire`,
+`containers`, `doors`, `entities`. Workstations (crafting table, anvil and similar) can stay
 usable for guests.
 
 ## Explainable decisions
 
 - `/claim why` — why you can or cannot act here: whose claim it is, which flag
-  applies, whether you are trusted.
+  applies, what you are here and which role you have.
+- Operators manage any claim: the server-wide claim list in the menu,
+  `/claims here`, `/claims manage`, `/claims flag`.
 - `/claim trace` — prints PASS/FAIL for every click and break attempt.
 - `/claim borders` — shows the claim edges with particles.
 
@@ -76,17 +95,17 @@ their own claim.
 | Player — `/claim` (alias `/приват`) |
 |---|
 | `wand` · `pos1` · `pos2` · `create <name>` · `create2d` · `create3d` · `list` · `info` · `rename` |
-| `trust` · `untrust` · `transfer` · `flag <flag> <on\|off>` · `addzone` · `zones` · `delzone` · `borders` · `why` · `trace` · `delete` |
+| `trust` · `untrust` · `add <name> [role]` · `role` (roles: `create`, `perm`, `give`, `delete`) · `transfer` · `flag <flag> <on\|off>` · `addzone` · `zones` · `delzone` · `borders` · `why` · `trace` · `delete` |
 
 | Staff — `/claims` |
 |---|
-| `reload` · `bypass` · `list <name>` · `delete <name> <claim>` · `/we …` |
+| `reload` · `bypass` · `list <name>` · `delete <name> <claim>` · `here` · `manage <name> <claim>` · `flag <name> <flag> on\|off <claim>` · `/we …` |
 
 ## Build
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionclaims-<version>.jar
-./gradlew test    # 46 unit tests
+./gradlew test    # 58 unit tests
 ```
 
 The config lives in `config/bastionclaims/config.json` (hot-reload) and the claims
