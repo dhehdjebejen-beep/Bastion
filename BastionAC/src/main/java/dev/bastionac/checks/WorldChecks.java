@@ -71,6 +71,12 @@ public final class WorldChecks {
                 return Action.NONE;
             }
 
+            // InteractWalls: the face being broken must be in view (3.3.1).
+            if (breakWalls(player, d, packet)) {
+                d.clearMining();
+                return Action.CANCEL;
+            }
+
             // Nuker runs BEFORE the insta-mine exit: grass, torches and crops are
             // insta-mined, carry no timing signal, and are exactly what a nuker
             // sweeps. Rate and aim are the only things left to measure on them.
@@ -348,14 +354,75 @@ public final class WorldChecks {
         BlockPos target = hit.getBlockPos();
         Vec3d point = hit.getPos();
         World world = player.getEntityWorld();
-        Vec3d eye = player.getEyePos();
         // Farther than any interaction: the server refuses it anyway, and reach is not this check's business.
-        if (eye.squaredDistanceTo(point) > 7.0 * 7.0) return false;
+        if (player.getEyePos().squaredDistanceTo(point) > 7.0 * 7.0) return false;
+        Boolean seen = seenFromSomewhere(player, d, eye -> seesClick(world, player, eye, point, target));
+        if (seen == null) return false;
+        if (seen) {
+            interactWallsClean(d);
+            return false;
+        }
+        resync(player, packet);
+        interactWallsViolation(player, d, String.format("клик сквозь блок по %s на %d %d %d",
+                world.getBlockState(target).getBlock().getName().getString(),
+                target.getX(), target.getY(), target.getZ()));
+        return true;
+    }
+
+    /**
+     * Break-through-walls: a block whose breaking starts behind another one
+     * (3.3.1). The client starts breaking the block its outline ray hits
+     * first, so some point of the face it reports must be in plain view: the
+     * centre or a point near one of its corners. Runs on a dig start only.
+     */
+    private static boolean breakWalls(ServerPlayerEntity player, PlayerData d, PlayerActionC2SPacket packet) {
+        if (!BastionAC.config().check(CheckType.INTERACTWALLS.key).enabled) return false;
+        BlockPos pos = packet.getPos();
+        net.minecraft.util.math.Direction face = packet.getDirection();
+        World world = player.getEntityWorld();
+        Vec3d[] points = facePoints(pos, face);
+        Boolean seen = seenFromSomewhere(player, d, eye -> {
+            for (Vec3d p : points) if (seesClick(world, player, eye, p, pos)) return true;
+            return false;
+        });
+        if (seen == null) return false;
+        if (seen) {
+            interactWallsClean(d);
+            return false;
+        }
+        player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket(pos, world.getBlockState(pos)));
+        player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket(packet.getSequence()));
+        interactWallsViolation(player, d, String.format("ломание сквозь блок: %s на %d %d %d",
+                world.getBlockState(pos).getBlock().getName().getString(), pos.getX(), pos.getY(), pos.getZ()));
+        return true;
+    }
+
+    /** The centre of a block face and four points near its corners, a hair outside the face. */
+    static Vec3d[] facePoints(BlockPos pos, net.minecraft.util.math.Direction face) {
+        Vec3d c = Vec3d.ofCenter(pos).add(face.getOffsetX() * 0.5, face.getOffsetY() * 0.5, face.getOffsetZ() * 0.5);
+        double[][] uv = {{0, 0}, {0.35, 0.35}, {0.35, -0.35}, {-0.35, 0.35}, {-0.35, -0.35}};
+        Vec3d[] out = new Vec3d[uv.length];
+        for (int i = 0; i < uv.length; i++) {
+            double a = uv[i][0], b = uv[i][1];
+            out[i] = switch (face.getAxis()) {
+                case X -> c.add(0, a, b);
+                case Y -> c.add(a, 0, b);
+                case Z -> c.add(a, b, 0);
+            };
+        }
+        return out;
+    }
+
+    /**
+     * Whether the target was in view from where the eyes are now — or, when
+     * not, from where they were a move ago or will be after this tick's move,
+     * standing or sneaking (the interact packet arrives before the tick's
+     * move). Null when the world could not be read: never convict on missing
+     * data. One test in the honest case; the rest only when it fails.
+     */
+    static Boolean seenFromSomewhere(ServerPlayerEntity player, PlayerData d, java.util.function.Predicate<Vec3d> sees) {
         try {
-            if (seesClick(world, player, eye, point, target)) {
-                d.interactWallsBuffer = Math.max(0, d.interactWallsBuffer - 0.5);
-                return false;
-            }
+            if (sees.test(player.getEyePos())) return true;
             double eyeH = player.getEyeY() - player.getY();
             double px = player.getX(), py = player.getY(), pz = player.getZ();
             double[][] feet = {
@@ -366,24 +433,29 @@ public final class WorldChecks {
                 // Only a step away: before the first accepted move the previous position is not known.
                 double sx = f[0] - px, sy = f[1] - py, sz = f[2] - pz;
                 if (sx * sx + sy * sy + sz * sz > 4.0) continue;
-                if (seesClick(world, player, new Vec3d(f[0], f[1] + eyeH, f[2]), point, target)) return false;
+                if (sees.test(new Vec3d(f[0], f[1] + eyeH, f[2]))) return true;
             }
             for (float h : new float[]{1.62f, 1.27f}) {
-                if (Math.abs(h - eyeH) > 0.01 && seesClick(world, player, new Vec3d(px, py + h, pz), point, target)) return false;
+                if (Math.abs(h - eyeH) > 0.01 && sees.test(new Vec3d(px, py + h, pz))) return true;
             }
+            return false;
         } catch (RuntimeException e) {
-            return false;   // unloaded chunk or odd shape — never convict on missing data
+            return null;   // unloaded chunk or odd shape
         }
-        resync(player, packet);
+    }
+
+    /** One interaction through a wall: refused by the caller; a streak raises the flag. */
+    public static void interactWallsViolation(ServerPlayerEntity player, PlayerData d, String detail) {
         d.interactWallsBuffer += 1;
         if (d.interactWallsBuffer >= 3) {
             d.interactWallsBuffer = 1;
-            BastionAC.flag(player, d, CheckType.INTERACTWALLS, String.format(
-                    "клик сквозь блок по %s на %d %d %d",
-                    world.getBlockState(target).getBlock().getName().getString(),
-                    target.getX(), target.getY(), target.getZ()));
+            BastionAC.flag(player, d, CheckType.INTERACTWALLS, detail);
         }
-        return true;
+    }
+
+    /** A clean interaction: the streak cools down. */
+    public static void interactWallsClean(PlayerData d) {
+        d.interactWallsBuffer = Math.max(0, d.interactWallsBuffer - 0.5);
     }
 
     /**

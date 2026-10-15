@@ -201,6 +201,14 @@ public final class ACConfig {
          * from the death screen (3.3.1).
          */
         public boolean ignoreDeadPlayerActions = true;
+        /**
+         * Chunk radius a player in the Nether is sent at most: its fog ends at
+         * 96 blocks — 6 chunks; vanilla still sends one ring beyond for the
+         * client to build the edge, so nothing visible is lost. Nothing past
+         * the fog — terrain, players, mobs — reaches a fog-less client or an
+         * ESP. Lowers load. 0 = off (3.3.1).
+         */
+        public int netherViewDistance = 6;
     }
 
     /** Current schema revision — see {@link General#configVersion}. */
@@ -658,6 +666,7 @@ public final class ACConfig {
                 general.hideOtherPlayersEquipmentDetails = true;
                 general.hideSoundOrigins = true;
                 general.ignoreDeadPlayerActions = true;
+                if (general.netherViewDistance == 0) general.netherViewDistance = 6;
             }
             if (general.configVersion < 14) {
                 // v14: X-ray alerts are new; switch them on for existing configs.
@@ -747,6 +756,7 @@ public final class ACConfig {
 
     void clamp() {
         general.alertCooldownSeconds = clampInt(general.alertCooldownSeconds, 1, 300);
+        if (general.netherViewDistance != 0) general.netherViewDistance = clampInt(general.netherViewDistance, 2, 32);
         general.xrayHiddenAlertSeconds = clampInt(general.xrayHiddenAlertSeconds <= 0 ? 60 : general.xrayHiddenAlertSeconds, 5, 3600);
         general.setbackMinIntervalTicks = clampInt(general.setbackMinIntervalTicks, 1, 100);
         general.joinGraceTicks = clampInt(general.joinGraceTicks, 20, 1200);

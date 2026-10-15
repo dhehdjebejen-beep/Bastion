@@ -168,6 +168,7 @@ class ACConfigTest {
         assertTrue(cfg.general.hideOtherPlayersEquipmentDetails);
         assertTrue(cfg.general.hideSoundOrigins);
         assertTrue(cfg.general.ignoreDeadPlayerActions);
+        assertEquals(6, cfg.general.netherViewDistance, "Nether chunks end at the fog: 96 blocks");
         assertTrue(cfg.check("interactwalls").enabled);
         assertTrue(cfg.punishment.banExcludedChecks.contains("interactwalls"), "new and unproven: no auto-ban yet");
         assertTrue(cfg.punishment.banExcludedChecks.contains("bigmove"), "an admin's exclusions stay");

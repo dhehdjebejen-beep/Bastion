@@ -26,8 +26,12 @@ reopened.
     without enchantments, durability, names or contents.
   - Global sounds (dragon, Wither, End portal) and far horns arrive from a
     point towards the source instead of its coordinates.
-- **InteractWalls:** a block clicked through another one is refused. It is
-  light: one ray, only on a right-click.
+- **InteractWalls:** clicking a block, breaking one or right-clicking an entity
+  through a wall is refused (hits through walls were already Walls). It is
+  light: one ray, only on the action itself.
+- **The Nether only up to its fog:** players there are sent chunks out to the
+  fog at 96 blocks (6 chunks), not the full view distance. That is fewer
+  chunks, so less load.
 - **A dead player's actions are dropped** (death-screen dupes and ghost hits).
 
 ## New in 3.3

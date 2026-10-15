@@ -11,7 +11,8 @@
     "PlayNetworkHandlerAccessor",
     "CommonNetworkHandlerAccessor",
     "TrackedHealthAccessor",
-    "TrackedAbsorptionAccessor"
+    "TrackedAbsorptionAccessor",
+    "NetherViewDistanceMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -310,6 +310,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
         long arrivedAt = bastionac$arrival(d, packet);
 
         boolean[] isAttack = {false};
+        Vec3d[] clickedAt = {null};
         packet.handle(new PlayerInteractEntityC2SPacket.Handler() {
             @Override
             public void attack() {
@@ -322,9 +323,17 @@ public abstract class ServerPlayNetworkHandlerMixin {
 
             @Override
             public void interactAt(Hand hand, Vec3d pos) {
+                clickedAt[0] = pos;
             }
         });
-        if (!isAttack[0]) return;
+        if (!isAttack[0]) {
+            // A right-click on an entity through a wall (InteractWalls, 3.3.1).
+            Entity used = packet.getEntity(player.getEntityWorld());
+            if (used != null && used != player && CombatChecks.interactWalls(player, d, used, clickedAt[0])) {
+                ci.cancel();
+            }
+            return;
+        }
 
         if (dev.bastionac.core.FreezeManager.blocksActions(player)) {
             ci.cancel();
