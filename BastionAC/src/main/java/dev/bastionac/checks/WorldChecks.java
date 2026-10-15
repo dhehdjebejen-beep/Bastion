@@ -274,6 +274,11 @@ public final class WorldChecks {
         // all. Vanilla can emit two packets for one right-click (main hand result
         // not accepted, then off hand), so de-duplicate per tick instead — a
         // vanilla client can never produce two distinct right-clicks in one tick.
+        // INTERACTWALLS: every right-click on a block — opening, flicking,
+        // placing against. One ray, only on a click; ahead of the per-tick
+        // de-duplication below, or a harmless first click in the tick would
+        // wave a second one through the wall.
+        if (interactWalls(player, d, packet)) return Action.CANCEL;
         if (tick == d.lastInteractTick) return Action.NONE;
         d.lastInteractTick = tick;
 
@@ -316,6 +321,101 @@ public final class WorldChecks {
         }
         rhythm(player, d, now);
         return action;
+    }
+
+    /**
+     * InteractWalls: a block clicked through another one (3.3.1).
+     *
+     * <p>A vanilla client picks the block under its crosshair with a ray that
+     * stops at the first block with an outline — it cannot click a chest,
+     * lever or door behind a wall. So the server casts the same ray, from the
+     * eyes to the point the packet says was clicked; if another block stands
+     * in the way, the client did not look at what it clicked.
+     *
+     * <p>Light by design: it runs only on a right-click on a block (not every
+     * tick), costs one ray, and casts more only when that one is blocked —
+     * the interact packet arrives before the tick's move, so the eyes may be
+     * a step behind or ahead (previous and next position, standing and
+     * sneaking height). The click is refused every time (and the client's
+     * view put back); a flag needs a streak, because a block changing in the
+     * milliseconds between the client's ray and the server's is not the
+     * sender's fault.
+     */
+    private static boolean interactWalls(ServerPlayerEntity player, PlayerData d, PlayerInteractBlockC2SPacket packet) {
+        if (!BastionAC.config().check(CheckType.INTERACTWALLS.key).enabled) return false;
+        BlockHitResult hit = packet.getBlockHitResult();
+        if (hit == null) return false;
+        BlockPos target = hit.getBlockPos();
+        Vec3d point = hit.getPos();
+        World world = player.getEntityWorld();
+        Vec3d eye = player.getEyePos();
+        // Farther than any interaction: the server refuses it anyway, and reach is not this check's business.
+        if (eye.squaredDistanceTo(point) > 7.0 * 7.0) return false;
+        try {
+            if (seesClick(world, player, eye, point, target)) {
+                d.interactWallsBuffer = Math.max(0, d.interactWallsBuffer - 0.5);
+                return false;
+            }
+            double eyeH = player.getEyeY() - player.getY();
+            double px = player.getX(), py = player.getY(), pz = player.getZ();
+            double[][] feet = {
+                    {d.prevMoveX, d.prevMoveY, d.prevMoveZ},
+                    {px + (px - d.prevMoveX), py + (py - d.prevMoveY), pz + (pz - d.prevMoveZ)},
+            };
+            for (double[] f : feet) {
+                // Only a step away: before the first accepted move the previous position is not known.
+                double sx = f[0] - px, sy = f[1] - py, sz = f[2] - pz;
+                if (sx * sx + sy * sy + sz * sz > 4.0) continue;
+                if (seesClick(world, player, new Vec3d(f[0], f[1] + eyeH, f[2]), point, target)) return false;
+            }
+            for (float h : new float[]{1.62f, 1.27f}) {
+                if (Math.abs(h - eyeH) > 0.01 && seesClick(world, player, new Vec3d(px, py + h, pz), point, target)) return false;
+            }
+        } catch (RuntimeException e) {
+            return false;   // unloaded chunk or odd shape — never convict on missing data
+        }
+        resync(player, packet);
+        d.interactWallsBuffer += 1;
+        if (d.interactWallsBuffer >= 3) {
+            d.interactWallsBuffer = 1;
+            BastionAC.flag(player, d, CheckType.INTERACTWALLS, String.format(
+                    "клик сквозь блок по %s на %d %d %d",
+                    world.getBlockState(target).getBlock().getName().getString(),
+                    target.getX(), target.getY(), target.getZ()));
+        }
+        return true;
+    }
+
+    /**
+     * Whether nothing stands between the eyes and the clicked point: the
+     * client's own ray (block outlines, fluids ignored), run a hair past the
+     * point into the clicked block.
+     */
+    static boolean seesClick(World world, ServerPlayerEntity player, Vec3d eye, Vec3d point, BlockPos target) {
+        Vec3d dir = point.subtract(eye);
+        double len = dir.length();
+        if (len < 1.0e-3) return true;
+        Vec3d end = point.add(dir.multiply(0.02 / len));
+        BlockHitResult r = world.raycast(new net.minecraft.world.RaycastContext(eye, end,
+                net.minecraft.world.RaycastContext.ShapeType.OUTLINE, net.minecraft.world.RaycastContext.FluidHandling.NONE,
+                player));
+        if (r.getType() == net.minecraft.util.hit.HitResult.Type.MISS) return true;
+        if (r.getBlockPos().equals(target)) return true;
+        // The eyes inside a block (crawling, a slab overhead): the client's ray starts there too.
+        if (r.getPos().squaredDistanceTo(eye) < 1.0e-4) return true;
+        // Grazing an edge the clicked block shares with its neighbour.
+        return r.getPos().squaredDistanceTo(point) < 0.05 * 0.05;
+    }
+
+    /** Puts back what the client predicted for a refused click: the two blocks, and the sequence it waits for. */
+    private static void resync(ServerPlayerEntity player, PlayerInteractBlockC2SPacket packet) {
+        BlockHitResult hit = packet.getBlockHitResult();
+        World world = player.getEntityWorld();
+        BlockPos pos = hit.getBlockPos();
+        BlockPos side = pos.offset(hit.getSide());
+        player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket(pos, world.getBlockState(pos)));
+        player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket(side, world.getBlockState(side)));
+        player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket(packet.getSequence()));
     }
 
     /**

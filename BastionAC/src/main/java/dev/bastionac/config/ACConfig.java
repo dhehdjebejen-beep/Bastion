@@ -177,10 +177,34 @@ public final class ACConfig {
         public boolean enforceMovementScanBudget = false;
         /** Per-player move-packet count in a tick that warrants a shadow pressure note. */
         public int shadowPerPlayerMoveWarn = 12;
+        /**
+         * Other players' health goes out as "alive at full health" (0 still
+         * plays the death animation); absorption as none. The vanilla client
+         * never shows it; health ESP reads it (3.3.1).
+         */
+        public boolean hideOtherPlayersHealth = true;
+        /**
+         * What other players wear and hold goes out with its looks only (model,
+         * trim, dye, banner, head, glint): no enchantments, durability, names or
+         * contents (3.3.1).
+         */
+        public boolean hideOtherPlayersEquipmentDetails = true;
+        /**
+         * Global events (Wither, dragon, End portal) and far loud sounds
+         * (horns) are moved towards each listener along the same
+         * line: the direction is kept, the source's coordinates are not (3.3.1).
+         */
+        public boolean hideSoundOrigins = true;
+        /**
+         * A dead player (before respawning) cannot click blocks or entities,
+         * use items, dig or move items: a vanilla client sends none of that
+         * from the death screen (3.3.1).
+         */
+        public boolean ignoreDeadPlayerActions = true;
     }
 
     /** Current schema revision — see {@link General#configVersion}. */
-    public static final int CONFIG_VERSION = 14;
+    public static final int CONFIG_VERSION = 15;
 
     /** Telemetry v2: the per-session recording the analyzer and the owner read. */
     public static final class TelemetryCfg {
@@ -320,7 +344,10 @@ public final class ACConfig {
             // terrain here yet, so it stays out of the auto-ban for now.
             "fastfall",
             // v13 arrival: attacks on never-sent entity ids.
-            "entitypredict");
+            "entitypredict",
+            // v15 arrival: interacting through walls. Mitigates (the click is
+            // dropped) and alerts; earns the ban once it stays quiet here.
+            "interactwalls");
 
     /** Observe-only heuristics: v7 forces them back to mitigate/kick = -1, as the README promises. */
     static final java.util.List<String> OBSERVE_ONLY = java.util.List.of(
@@ -478,6 +505,9 @@ public final class ACConfig {
         // Protocol-level, and the buffer already absorbs the one case that is
         // not the sender's fault (someone else broke the block mid-flight).
         m.put("airplace",      new CheckCfg(3.0, 3, 4, 10, 0.5));
+        // InteractWalls: a block clicked through another one. The click is
+        // dropped on the spot; a flag needs a streak (see WorldChecks).
+        m.put("interactwalls", new CheckCfg(2.0, 3, 4, 12, 0.5));
         // InvMove: vanilla zeroes movement input while a screen is open.
         // Sprint-with-screen is unambiguous; plain walking needs the streak.
         m.put("invmove",       new CheckCfg(1.5, 4, 6, 14, 0.5));
@@ -619,6 +649,15 @@ public final class ACConfig {
                 if (!punishment.banExcludedChecks.contains(key)) {
                     punishment.banExcludedChecks.add(key);
                 }
+            }
+            if (general.configVersion < 15) {
+                // v15 (3.3.1): the info shield and the dead-player guard are on
+                // for existing configs too; InteractWalls joins (the loop above
+                // added its default and its ban exclusion).
+                general.hideOtherPlayersHealth = true;
+                general.hideOtherPlayersEquipmentDetails = true;
+                general.hideSoundOrigins = true;
+                general.ignoreDeadPlayerActions = true;
             }
             if (general.configVersion < 14) {
                 // v14: X-ray alerts are new; switch them on for existing configs.

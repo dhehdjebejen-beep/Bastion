@@ -18,6 +18,18 @@ the final pass. Every stage's time is kept for the last run. The case list updat
 the cases that are moving. Only the changed slot is sent; the window is never
 reopened.
 
+## New in 3.3.1
+
+- **Info shield.**
+  - Other players' health goes out as "alive at full health" and their
+    absorption as none; what they wear and hold goes out with its looks only,
+    without enchantments, durability, names or contents.
+  - Global sounds (dragon, Wither, End portal) and far horns arrive from a
+    point towards the source instead of its coordinates.
+- **InteractWalls:** a block clicked through another one is refused. It is
+  light: one ray, only on a right-click.
+- **A dead player's actions are dropped** (death-screen dupes and ghost hits).
+
 ## New in 3.3
 
 - **Argus is trained.** Argus Lab generates synthetic sessions in the real
@@ -189,7 +201,7 @@ flowchart LR
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test    # 190 unit tests
+./gradlew test    # 193 unit tests
 ```
 
 The config is `config/bastionac/config.json`. It has per-check weight, alert,

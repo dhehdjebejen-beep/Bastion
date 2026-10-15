@@ -67,7 +67,9 @@ public enum CheckType {
     /** Descending faster than vanilla free-fall gravity allows for the fall's duration (FastFall). */
     FASTFALL,
     /** An attack on an entity the client was never sent — a predicted id (CrystalAura "predict"). */
-    ENTITYPREDICT;
+    ENTITYPREDICT,
+    /** A block clicked (opened, flicked, placed against) through another block the client's own ray would have stopped at. */
+    INTERACTWALLS;
 
     public final String key = name().toLowerCase(Locale.ROOT);
 }

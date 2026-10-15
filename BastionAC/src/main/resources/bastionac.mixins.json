@@ -9,7 +9,9 @@
     "BlockItemPlacementOutcomeMixin",
     "GameModeChangeMixin",
     "PlayNetworkHandlerAccessor",
-    "CommonNetworkHandlerAccessor"
+    "CommonNetworkHandlerAccessor",
+    "TrackedHealthAccessor",
+    "TrackedAbsorptionAccessor"
   ],
   "injectors": {
     "defaultRequire": 1

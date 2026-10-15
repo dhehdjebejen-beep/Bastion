@@ -11,6 +11,7 @@ import net.minecraft.server.network.ServerPlayerEntity;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyVariable;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -20,6 +21,18 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  */
 @Mixin(ServerCommonNetworkHandler.class)
 public abstract class ServerCommonNetworkHandlerMixin {
+
+    /**
+     * The info shield (3.3.1): every outgoing packet passes here once, and what
+     * a client may know of others is trimmed before it leaves — see
+     * {@link dev.bastionac.core.InfoShield}.
+     */
+    @ModifyVariable(method = "send(Lnet/minecraft/network/packet/Packet;Lio/netty/channel/ChannelFutureListener;)V",
+            at = @At("HEAD"), argsOnly = true)
+    private Packet<?> bastionac$shield(Packet<?> packet) {
+        if (!((Object) this instanceof ServerPlayNetworkHandler handler) || handler.player == null) return packet;
+        return dev.bastionac.core.InfoShield.rewrite(handler.player, packet);
+    }
 
     @Inject(method = "sendPacket", at = @At("HEAD"))
     private void bastionac$onSendPacket(Packet<?> packet, CallbackInfo ci) {

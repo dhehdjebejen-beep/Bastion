@@ -152,6 +152,32 @@ class ACConfigTest {
         assertEquals(3, cfg.argus.reanalyzeMinutes, "old default moves");
     }
 
+    /** v15 (3.3.1): the info shield and the dead-player guard reach existing configs; InteractWalls joins, out of the ban. */
+    @Test
+    void v15TurnsOnTheShieldAndAddsInteractWalls(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("config.json");
+        Files.writeString(file, """
+                {
+                  "general": { "configVersion": 14, "hideOtherPlayersHealth": false, "hideSoundOrigins": false },
+                  "punishment": { "banExcludedChecks": ["bigmove"] }
+                }
+                """, StandardCharsets.UTF_8);
+        ACConfig cfg = ACConfig.loadOrCreate(file, w -> {});
+        assertEquals(15, cfg.general.configVersion);
+        assertTrue(cfg.general.hideOtherPlayersHealth);
+        assertTrue(cfg.general.hideOtherPlayersEquipmentDetails);
+        assertTrue(cfg.general.hideSoundOrigins);
+        assertTrue(cfg.general.ignoreDeadPlayerActions);
+        assertTrue(cfg.check("interactwalls").enabled);
+        assertTrue(cfg.punishment.banExcludedChecks.contains("interactwalls"), "new and unproven: no auto-ban yet");
+        assertTrue(cfg.punishment.banExcludedChecks.contains("bigmove"), "an admin's exclusions stay");
+
+        // An admin who switches a shield off after the migration keeps it off.
+        Files.writeString(file, Files.readString(file, StandardCharsets.UTF_8)
+                .replace("\"hideSoundOrigins\": true", "\"hideSoundOrigins\": false"), StandardCharsets.UTF_8);
+        assertFalse(ACConfig.loadOrCreate(file, w -> {}).general.hideSoundOrigins);
+    }
+
     @Test
     void oldConfigIsMigratedButKeepsUnrelatedTuning(@TempDir Path dir) throws Exception {
         Path file = dir.resolve("config.json");
