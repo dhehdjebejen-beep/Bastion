@@ -44,9 +44,16 @@ server — players join with an unmodified client and install nothing.
 | [**BastionAC**](BastionAC) | 3.4.0 | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within minutes. Since 3.3 its model is trained in Argus Lab on synthetic honest and cheating sessions; 3.3.1 stops telling clients other players' health, gear details and where far sounds come from; 3.4 catches ClickTP on foot and lets Argus see teleports. |
 
 Each mod works on its own. When they run together, they talk through soft
-reflection bridges: BastionAC reads BastionAuth's account-link ledger, and
-BastionClaims honours a build mode provided by another mod. No mod has a hard
-dependency on another.
+reflection bridges, and no mod has a hard dependency on another:
+
+| From → to | What crosses |
+|---|---|
+| BastionAuth → BastionAC | graded account links (`noteLinkedAccount`); a warning before a player leaves limbo (`expectServerMove`), so the move is not a teleport |
+| BastionAC → BastionAuth | whether a player is still held before login (checks stand down); the client brand captured at configuration; the link ledger, read and given verdicts from the `/bac` network tab |
+| BastionClaims → BastionAuth | the code word, required before a claim is transferred or deleted; a broken bridge fails closed |
+| BastionClaims ↔ MaxCore | Claims reads MaxCore's build mode (builders get WorldEdit under its creative block rules); MaxCore reads the sidebar line (`ClaimApi.statusLine`) and arrests claims for unpaid land tax (`taxRoll`, `setArrested`) |
+
+A missing mod simply leaves its bridge off.
 
 ## How they fit together
 
@@ -101,9 +108,14 @@ To install, put the jar into the server's `mods/` folder next to
 ## Tests
 
 The repository has 350 unit tests: 90 in BastionAuth, 58 in BastionClaims and 202
-in BastionAC. Run them with `./gradlew test` in a module folder. The anti-cheat
-checks were also tested live with a raw-protocol client that sends the exact
-packets of the cheat modules they target.
+in BastionAC. Run them with `./gradlew test` in a module folder. Gradle's
+forked test worker cannot run from a path with non-ASCII characters, and on such
+a path the `test` task is skipped; either build from an ASCII path or run
+`./gradlew dumpTestClasspath` and start the JUnit ConsoleLauncher with
+`build/test-classpath.txt`. The anti-cheat checks were also tested live with a
+raw-protocol client that sends the exact packets of the cheat modules they
+target, and Argus with the Argus Lab bench (`./gradlew argusLab` in
+`BastionAC`).
 
 ## Documentation
 

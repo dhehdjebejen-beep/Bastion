@@ -220,18 +220,40 @@ flowchart LR
     V -->|alertVl| AL[Алерт персоналу]
     V -->|mitigateVl| MI[Сетбек / отмена действия]
     V -->|kickVl| KI[Кик]
-    AL -->|N алертов в окне| TB[Лестница временных банов<br/>1 ч → 6 ч → 24 ч → 7 дней]
-    AL --> CH{Цепочка:<br/>разные проверки за час}
+    AL -->|2 алерта банящих проверок<br/>за 50 мин| TB[Лестница временных банов<br/>2 ч → 12 ч → 48 ч → 14 дн → 30 дн]
+    AL --> CH{Цепочка:<br/>разные проверки за 60 мин}
     CH -->|2| WA[Под наблюдение]
     CH -->|3 и больше, из банящих| TB
-    PG[Защита протокола:<br/>краш / флуд / контрабанда] --> PB[Вечный бан]
+    AR[Вердикт Аргуса в режиме AUTO] --> TB
+    PG[Защита протокола:<br/>краш / флуд / NBT-бомба] --> PB[Вечный бан]
 ```
 
-- Эвристические проверки вроде GCD, AutoClick и XRay **только наблюдают**: они
-  шлют алерт персоналу и сами никогда не банят.
-- Операторов автобан не трогает.
-- Цепочка считает *разные* проверки, а не очки. Один модуль чита не может
-  довести игрока до бана через цепочку.
+- **VL.** Каждый флаг добавляет к VL проверки её `weight`, VL затухает на
+  `decayPerSecond` в секунду. `alertVl` — алерт персоналу, `mitigateVl` — откат
+  или отмена действия, `kickVl` — кик. `-1` выключает ступень.
+- **Временный бан.** `alertsToBan` (2) алерта банящих проверок за
+  `alertWindowMinutes` (50) дают бан через ванильный бан-лист. Срок зависит от
+  того, сколько банов у игрока уже было за `banHistoryHours` (336 ч = 14 дней):
+  `banStepsHours` = 2 → 12 → 48 → 336 → 720 часов.
+- **Сами не банят** (`banExcludedChecks`, 21 проверка): bigmove, timer,
+  groundspoof, noswing, autoclick, autoaction, velocity, gcd, xray, vehicle,
+  airplace, invmove, brandspoof, packetorder, aim, autoplace, jesus, autototem,
+  fastfall, entitypredict, interactwalls. Они шлют алерты, противодействуют и
+  идут в цепочку, а решение за персоналом.
+- **Только наблюдают** (без отката и кика): autoclick, autoaction, noswing,
+  groundspoof, multitarget, gcd, xray, brandspoof, autototem. BadRotation не
+  откатывает, но кикает на VL 15.
+- **Цепочка** (`AttackChainDetector`): за `chainWindowMinutes` (60) 2 разные
+  проверки на уровне алерта ставят игрока под наблюдение, 3 разные банящие —
+  бан по той же лестнице. Считаются *разные* проверки, а не очки, поэтому один
+  модуль чита не доведёт до бана через цепочку. Разведка и уклонение (выход
+  перед киком, перезаходы) — контекст, сами не банят.
+- **Катастрофические фильтры** (краш-эксплойты, флуд пакетами, NBT- и
+  книги-бомбы) сразу банят навсегда (`catastrophicPermabanEnabled`; если
+  выключено — на самую длинную ступень лестницы).
+- **Персонал** (оператор уровня 3+) не банится автоматически ни лестницей, ни
+  цепочкой, ни Аргусом, ни катастрофическими фильтрами. Алерты и кик для него
+  работают как для всех.
 
 ## Команды
 
@@ -264,16 +286,142 @@ flowchart LR
 - **Теневая телеметрия.** Меряет нагрузку пакетами и стоимость проверок, но
   никогда ничего не делает сама.
 
+## Технический справочник
+
+### Пороги по умолчанию
+
+Значения `checks.<имя>` в `config.json` на чистой установке. «—» в столбцах
+противодействия и кика — это `-1` (ступень выключена); «Банит» — идут ли алерты
+проверки во временный бан и в цепочку.
+
+| Проверка | Вес | Алерт VL | Противодействие VL | Кик VL | Затухание /с | Банит |
+|---|---|---|---|---|---|---|
+| `speed` | 1.0 | 6 | 8 | 20 | 0.75 | ✓ |
+| `fly` | 1.0 | 5 | 7 | 20 | 0.75 | ✓ |
+| `spider` | 3.0 | 3 | 4 | 8 | 0.5 | ✓ |
+| `timer` | 1.0 | 4 | 6 | 16 | 0.1 | — |
+| `bigmove` | 5.0 | 5 | 5 | 20 | 0.5 | — |
+| `groundspoof` | 1.0 | 5 | — | — | 0.5 | — |
+| `nofall` | 2.0 | 3 | 5 | 12 | 0.4 | ✓ |
+| `reach` | 1.0 | 3 | 5 | 7 | 0.5 | ✓ |
+| `angle` | 1.0 | 4 | 7 | 10 | 0.75 | ✓ |
+| `walls` | 1.0 | 3 | 6 | 8 | 0.5 | ✓ |
+| `multitarget` | 1.0 | 4 | — | — | 0.75 | ✓ |
+| `useattack` | 1.0 | 2 | 3 | 10 | 0.5 | ✓ |
+| `noswing` | 1.0 | 4 | — | — | 0.75 | — |
+| `cps` | 1.0 | 4 | 6 | 15 | 1.0 | ✓ |
+| `fastbreak` | 1.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `nuker` | 1.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `fastplace` | 1.0 | 4 | 6 | 15 | 1.0 | ✓ |
+| `autoclick` | 1.0 | 3 | — | — | 0.05 | — |
+| `autoaction` | 1.0 | 3 | — | — | 0.05 | — |
+| `velocity` | 2.0 | 3 | 5 | 12 | 0.5 | — |
+| `packetmine` | 2.0 | 4 | 6 | 12 | 0.5 | ✓ |
+| `criticals` | 1.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `blink` | 2.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `noslow` | 1.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `scaffold` | 2.0 | 4 | 6 | 12 | 0.5 | ✓ |
+| `gcd` | 2.0 | 3 | — | — | 0.05 | — |
+| `xray` | 2.0 | 3 | — | — | 0.05 | — |
+| `vehicle` | 2.0 | 4 | 6 | 14 | 0.5 | — |
+| `airplace` | 3.0 | 3 | 4 | 10 | 0.5 | — |
+| `interactwalls` | 2.0 | 3 | 4 | 12 | 0.5 | — |
+| `invmove` | 1.5 | 4 | 6 | 14 | 0.5 | — |
+| `brandspoof` | 6.0 | 5 | — | — | 0.02 | — |
+| `packetorder` | 2.0 | 4 | 6 | 14 | 0.4 | — |
+| `aim` | 2.0 | 4 | 6 | 12 | 0.1 | — |
+| `autoplace` | 2.0 | 4 | 6 | 12 | 0.2 | — |
+| `jesus` | 1.5 | 4 | 5 | 12 | 0.5 | — |
+| `step` | 3.0 | 3 | 6 | 12 | 0.3 | ✓ |
+| `autototem` | 3.0 | 3 | — | — | 0.02 | — |
+| `badrotation` | 5.0 | 5 | — | 15 | 0.2 | ✓ |
+| `fastfall` | 2.0 | 4 | 6 | 12 | 0.5 | — |
+| `entitypredict` | 3.0 | 3 | 3 | 12 | 0.2 | — |
+
+Некоторые ключи `general`: `maxCps` 14 (удары сверх лимита отменяются),
+`joinGraceTicks` 60, `setbackMinIntervalTicks` 10, `timerMaxAheadMs` 400,
+`timerLagBankMs` 3000, `velocityVerifyTicks` 4, `velocityMinRatio` 0,6,
+`velocityConfirmStreak` 3, `blinkMaxIatStdMs` 1,0, `noSlowMaxFactor` 0,35. Щит
+информации: `hideOtherPlayersHealth`, `hideOtherPlayersEquipmentDetails`,
+`hideSoundOrigins`, `ignoreDeadPlayerActions` (всё включено),
+`netherViewDistance` 6 (0 — выкл.).
+
+### Аргус
+
+| Ключ | По умолчанию | Смысл |
+|---|---|---|
+| `argus.mode` | `ASSIST` | `SHADOW` — только дела · `ASSIST` — вердикт и кнопка персоналу · `AUTO` — банит сам |
+| `collectMinutes` | 2 | сбор данных после первого сигнала до первого разбора |
+| `reanalyzeMinutes` | 3 | дело с новыми сигналами перечитывается не чаще |
+| `deadlineMinutes` | 15 | итоговый вердикт не позже (раньше при «виновен» или уходе игрока) |
+| `windowMinutes` | 60 | сколько телеметрии до сигнала читается |
+| `suspectScore` / `guiltyScore` | 0,60 / 0,95 | пороги вердикта |
+| `autoBanScore` | 0,97 | AUTO банит только с этой оценки и при независимых уликах |
+| `autoBanMinMinutes` | 10 | AUTO нужно столько минут телеметрии, если нет физически невозможного факта |
+| `minBaselineSessions` | 20 | AUTO нужно столько честных сессий в нормах сервера |
+| `pauseAboveMspt` | 45 | разбор ставится на паузу, пока тик сервера медленнее |
+| `caseRetentionDays` | 60 | сколько хранятся закрытые дела |
+| `worldSampleBlocksPerTick` | 6000 | с какой скоростью тест X-ray читает мир |
+
+Признаки (40, `Features.ALL`) по группам:
+- **Движение** — `move.air_gain`, `air_turn`, `ground_gain`, `rise`, `fall_fast`,
+  `jump_nokey`, `move_nokey`, `input_dir`, `sprint_noforward`, `teleport`.
+- **Пакеты** — `pkt.tick_rate`, `extra_moves`, `timer_episodes`, `blind_stall`,
+  `phase_loops`, `ping_gap`.
+- **Бой** — `cmb.reach`, `reach_lc`, `reach_over`, `aim_error`, `aim_lc_error`,
+  `aim_center`, `aim_lc_center`, `track_lag`, `track_instant`, `snap`, `rot_const`,
+  `gcd_off`, `yaw_grid`, `yaw_wrap`, `click_rhythm`, `rhythm_kurt`, `blind_hit`.
+- **Клиент** — `cli.brand_spoof`, `cheat_channel`.
+- **Добыча** — `mine.reveal_z`, `diamond_reveal_z`, `discovery_rate`,
+  `diamond_discovery`, `wall_breaks`.
+
+Шесть из них *жёсткие* — обычный клиент их не даёт вообще, поэтому они могут
+решать сами: `move.jump_nokey`, `move.teleport`, `pkt.tick_rate`, `cmb.yaw_wrap`,
+`mine.wall_breaks`, `cli.cheat_channel`.
+
+Каждый признак сравнивается с медианой и MAD честных игроков этого сервера и с
+историей игрока, затем всё сводит логистическая модель. Её начальные веса лежат
+в `bastionac/argus-prior.json`, метки персонала их дообучают.
+
+### Телеметрия
+
+`telemetry.enabled` (вкл.), `retentionDays` 30, `maxTotalMb` 3072, `maxSessionMb`
+200 (у сессии-«беглеца» перестаёт записываться движение), `pingIntervalTicks` 40,
+`recordTargets` и `recordOreContext` включены. Файлы —
+`logs/bastionac/sessions/<дата>/<uuid>__<ник>__<старт>.btl.gz`, пишутся в потоке
+с низким приоритетом; `tools/btl_dump.py` выводит файл текстом.
+
+### Файлы
+
+| Путь | Что |
+|---|---|
+| `config/bastionac/config.json` | настройки; схема версии 15, при старте мигрирует, не затирая правки админа |
+| `config/bastionac/bans.json` · `history.json` · `networks.json` · `frozen.json` | баны и их история, история алертов и наказаний, карта связей, замороженные |
+| `config/bastionac/argus/cases.json` · `baselines.json` · `model.json` | дела Аргуса, нормы сервера, обученные веса |
+| `logs/bastionac/sessions/` | телеметрия сессий |
+| `logs/bastionac/argus/` | отчёты Аргуса |
+| `logs/bastionac/dumps/` | дампы буфера контекста (`.dump.gz`) с первых алертов |
+
+### Вместе с BastionAuth
+
+Через рефлексию, без жёсткой зависимости: пока BastionAuth держит игрока до
+входа, проверки его не разбирают; возврат из лимбо объявляется заранее
+(`expectServerMove`) и не читается как телепорт; бренд клиента, пойманный
+BastionAuth в фазе конфигурации, идёт в BrandSpoof; связи аккаунтов приходят
+через `noteLinkedAccount`, а вкладка «Сеть» читает и ставит решения в реестре
+связей BastionAuth.
+
 ## Сборка
 
 ```bash
-./gradlew build   # JDK 21 → build/libs/bastionac-<версия>.jar
-./gradlew test    # 202 юнит-теста
+./gradlew build      # JDK 21 → build/libs/bastionac-<версия>.jar
+./gradlew test       # 202 юнит-теста
+./gradlew argusLab   # стенд Argus Lab; --args="500 12 --write" переобучает модель
 ```
 
-Конфиг — `config/bastionac/config.json`. В нём у каждой проверки свой вес, пороги
-алерта, противодействия и кика и скорость затухания. Конфиг сам переходит между
-версиями схемы и никогда не затирает собственную настройку админа.
+Отдельный воркер тестов Gradle не запускается из пути с не-ASCII символами
+(например, с русскими буквами): на таком пути `./gradlew test` тесты
+пропускает, поэтому собирайте из пути на латинице.
 
 Полная документация и история версий: [`DETAILS.ru.md`](DETAILS.ru.md).
 Отчёт стенда Argus Lab: [`ARGUS-LAB.ru.md`](ARGUS-LAB.ru.md).
