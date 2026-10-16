@@ -116,14 +116,9 @@ To install, put the jar into the server's `mods/` folder next to
 ## Tests
 
 The repository has 350 unit tests: 90 in BastionAuth, 58 in BastionClaims and 202
-in BastionAC. Run them with `./gradlew test` in a module folder. Gradle's
-forked test worker cannot run from a path with non-ASCII characters, and on such
-a path the `test` task is skipped; either build from an ASCII path or run
-`./gradlew dumpTestClasspath` and start the JUnit ConsoleLauncher with
-`build/test-classpath.txt`. The anti-cheat checks were also tested live with a
-raw-protocol client that sends the exact packets of the cheat modules they
-target, and Argus with the Argus Lab bench (`./gradlew argusLab` in
-`BastionAC`).
+in BastionAC. Run them with `./gradlew test` in a module folder.
+The Argus model is trained and measured on the Argus Lab bench
+(`./gradlew argusLab` in `BastionAC`).
 
 ## Documentation
 

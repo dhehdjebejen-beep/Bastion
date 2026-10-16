@@ -117,13 +117,9 @@ cd BastionAC        # или BastionAuth / BastionClaims
 ## Тесты
 
 В репозитории 350 юнит-тестов: 90 в BastionAuth, 58 в BastionClaims и 202 в
-BastionAC. Запуск — `./gradlew test` в папке мода. Отдельный
-воркер тестов Gradle не работает из пути с не-ASCII символами, и на таком пути
-задача `test` пропускается: соберите из пути на латинице или выполните
-`./gradlew dumpTestClasspath` и запустите JUnit ConsoleLauncher с
-`build/test-classpath.txt`. Проверки античита, кроме того, прогонялись вживую
-тестовым клиентом, который шлёт ровно те пакеты, что и модули читов, а Аргус —
-на стенде Argus Lab (`./gradlew argusLab` в `BastionAC`).
+BastionAC. Запуск — `./gradlew test` в папке мода. Модель
+Аргуса обучается и оценивается на стенде Argus Lab (`./gradlew argusLab` в
+`BastionAC`).
 
 ## Документация
 

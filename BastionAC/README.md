@@ -204,10 +204,6 @@ can never produce need no statistics:
 | an attack on an entity the client was never sent (`EntityPredict`) | flagged, attack dropped |
 | with BastionAuth: any packet before login except the handful needed to log in | dropped before its handler |
 
-Not covered yet: players behind walls are still sent to the client, so a plain
-player ESP works, and ore blocks are sent as they are — X-ray is caught by
-statistics and an alert to staff, not hidden.
-
 ## Checks (41)
 
 | Area | Checks |
@@ -445,9 +441,6 @@ and sets verdicts in BastionAuth's link ledger.
 ./gradlew test       # 202 unit tests
 ./gradlew argusLab   # Argus Lab bench; --args="500 12 --write" retrains the prior
 ```
-
-Gradle's forked test worker cannot run from a path with non-ASCII characters;
-on such a path `./gradlew test` skips the tests, so build from an ASCII path.
 
 Full Russian documentation and version history: [`DETAILS.ru.md`](DETAILS.ru.md).
 Argus Lab report (Russian): [`ARGUS-LAB.ru.md`](ARGUS-LAB.ru.md).
