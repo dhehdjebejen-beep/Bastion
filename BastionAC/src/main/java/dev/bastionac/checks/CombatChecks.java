@@ -407,6 +407,51 @@ public final class CombatChecks {
         if (d.samples < d.sampleX.length) d.samples++;
     }
 
+    /**
+     * InteractWalls for entities (3.3.1): a right-click on an entity — a
+     * villager to trade with, an item frame, an armour stand, a boat or a
+     * horse to mount — through a wall. The client picks the entity only when
+     * no block outline is nearer along its ray, and it says where on the
+     * entity it clicked ({@code at}, relative to the entity's position): one
+     * ray to that point. Without it, the centre, the nearest point and the
+     * head. Outlines, as the client sees them: trading over a fence or a slab
+     * through a one-block gap stays legal. Returns whether to refuse it.
+     */
+    public static boolean interactWalls(ServerPlayerEntity player, PlayerData d, Entity target, Vec3d at) {
+        if (!BastionAC.config().check(CheckType.INTERACTWALLS.key).enabled) return false;
+        if (player.isCreative() || player.isSpectator()) return false;
+        long tick = BastionAC.serverTick();
+        if (d.isFullyExempt(tick) || BastionAC.isServerLagging(tick)) return false;
+        Box box = target.getBoundingBox();
+        Vec3d eye = player.getEyePos();
+        double dist = Math.sqrt(box.squaredMagnitude(eye));
+        // Point-blank (a boat being boarded, a horse alongside) and out of range are not this check's business.
+        if (dist <= 1.5 || dist > 7.0) return false;
+        Vec3d[] points = at != null
+                ? new Vec3d[]{target.getEntityPos().add(at)}
+                : new Vec3d[]{box.getCenter(), closestPoint(eye, box.expand(0.05)),
+                        new Vec3d(box.getCenter().x, box.maxY - 0.1, box.getCenter().z)};
+        Boolean seen = WorldChecks.seenFromSomewhere(player, d, from -> {
+            for (Vec3d p : points) if (!outlineBlocked(player, from, p)) return true;
+            return false;
+        });
+        if (seen == null) return false;
+        if (seen) {
+            WorldChecks.interactWallsClean(d);
+            return false;
+        }
+        WorldChecks.interactWallsViolation(player, d, String.format("взаимодействие сквозь блок с %s",
+                net.minecraft.registry.Registries.ENTITY_TYPE.getId(target.getType()).getPath()));
+        return true;
+    }
+
+    /** A block outline (what the client's crosshair stops at) between the two points. */
+    private static boolean outlineBlocked(ServerPlayerEntity player, Vec3d from, Vec3d to) {
+        HitResult hit = player.getEntityWorld().raycast(new RaycastContext(
+                from, to, RaycastContext.ShapeType.OUTLINE, RaycastContext.FluidHandling.NONE, player));
+        return hit.getType() == HitResult.Type.BLOCK && hit.getPos().squaredDistanceTo(from) > 1.0e-4;
+    }
+
     private static Vec3d closestPoint(Vec3d from, Box box) {
         return new Vec3d(
                 Math.max(box.minX, Math.min(from.x, box.maxX)),

@@ -66,6 +66,22 @@ public abstract class ServerPlayNetworkHandlerMixin {
         return d;
     }
 
+    /**
+     * A dead player — on the death screen, not yet respawned — clicking blocks
+     * or entities, using items, digging or moving items. A vanilla client sends
+     * none of it from there; a hacked one keeps playing "from beyond", which is
+     * where the death-time dupes and ghost hits come from (3.3.1). Dropped
+     * silently, on the server thread.
+     */
+    @Unique
+    private boolean bastionac$deadAction(CallbackInfo ci) {
+        if (player == null || player.isAlive()) return false;
+        if (!player.getEntityWorld().getServer().isOnThread()) return false;
+        if (BastionAC.config() == null || !BastionAC.config().general.ignoreDeadPlayerActions) return false;
+        ci.cancel();
+        return true;
+    }
+
     /** Server-thread pass: the arrival stamp of this packet (now, when it was never stamped). */
     @Unique
     private static long bastionac$arrival(PlayerData d, Object packet) {
@@ -264,6 +280,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
     @Inject(method = "onClickSlot", at = @At("HEAD"), cancellable = true)
     private void bastionac$onClickSlot(ClickSlotC2SPacket packet, CallbackInfo ci) {
         if (bastionac$netty(packet) != null) return;
+        if (bastionac$deadAction(ci)) return;
         if (!bastionac$ready()) return;
         dev.bastionac.checks.PacketGuard.onAnyPacket(player);
         PlayerData d = BastionAC.data(player);
@@ -286,12 +303,14 @@ public abstract class ServerPlayNetworkHandlerMixin {
     @Inject(method = "onPlayerInteractEntity", at = @At("HEAD"), cancellable = true)
     private void bastionac$onPlayerInteractEntity(PlayerInteractEntityC2SPacket packet, CallbackInfo ci) {
         if (bastionac$netty(packet) != null) return;
+        if (bastionac$deadAction(ci)) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
         long arrivedAt = bastionac$arrival(d, packet);
 
         boolean[] isAttack = {false};
+        Vec3d[] clickedAt = {null};
         packet.handle(new PlayerInteractEntityC2SPacket.Handler() {
             @Override
             public void attack() {
@@ -304,9 +323,17 @@ public abstract class ServerPlayNetworkHandlerMixin {
 
             @Override
             public void interactAt(Hand hand, Vec3d pos) {
+                clickedAt[0] = pos;
             }
         });
-        if (!isAttack[0]) return;
+        if (!isAttack[0]) {
+            // A right-click on an entity through a wall (InteractWalls, 3.3.1).
+            Entity used = packet.getEntity(player.getEntityWorld());
+            if (used != null && used != player && CombatChecks.interactWalls(player, d, used, clickedAt[0])) {
+                ci.cancel();
+            }
+            return;
+        }
 
         if (dev.bastionac.core.FreezeManager.blocksActions(player)) {
             ci.cancel();
@@ -347,6 +374,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
     @Inject(method = "onPlayerAction", at = @At("HEAD"), cancellable = true)
     private void bastionac$onPlayerAction(PlayerActionC2SPacket packet, CallbackInfo ci) {
         if (bastionac$netty(packet) != null) return;
+        if (bastionac$deadAction(ci)) return;
         if (!bastionac$ready()) return;
         dev.bastionac.checks.PacketGuard.onAnyPacket(player);
         PlayerData d = BastionAC.data(player);
@@ -366,6 +394,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
     @Inject(method = "onPlayerInteractBlock", at = @At("HEAD"), cancellable = true)
     private void bastionac$onPlayerInteractBlock(PlayerInteractBlockC2SPacket packet, CallbackInfo ci) {
         if (bastionac$netty(packet) != null) return;
+        if (bastionac$deadAction(ci)) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
@@ -391,6 +420,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
             return;
         }
         if (bastionac$netty(packet) != null) return;
+        if (bastionac$deadAction(ci)) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
         if (d != null) dev.bastionac.telemetry.Telemetry.useItem(player, packet, bastionac$arrival(d, packet));

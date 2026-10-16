@@ -1139,6 +1139,9 @@ public final class MovementChecks {
     }
 
     private static void update(PlayerData d, double x, double y, double z, double dy, Env env) {
+        d.prevMoveX = d.lastX;
+        d.prevMoveY = d.lastY;
+        d.prevMoveZ = d.lastZ;
         d.lastX = x;
         d.lastY = y;
         d.lastZ = z;

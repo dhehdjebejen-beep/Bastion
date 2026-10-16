@@ -88,6 +88,8 @@ public final class PlayerData {
 
     // ---------------- air place ----------------
     public double airPlaceBuffer;
+    /** Clicks through a wall, decaying on every clean one (InteractWalls). */
+    public double interactWallsBuffer;
 
     // ---------------- inventory move ----------------
     /** Server tick of the last inventory click. */
@@ -371,6 +373,8 @@ public final class PlayerData {
     // ------------------------------------------------------------------
     public boolean moveInitialized;
     public double lastX, lastY, lastZ;
+    /** The accepted position before {@link #lastX}: where the eyes were a move ago (InteractWalls). */
+    public double prevMoveX, prevMoveY, prevMoveZ;
     public double lastDy;
     public boolean lastSupport = true;
     public int airTicks;
