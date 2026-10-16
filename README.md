@@ -92,8 +92,7 @@ flowchart LR
   `/bac` panel say *why* something was allowed, refused or flagged.
 - **Light by design.** Live checks are cheap per packet; the heavy analysis (a
   physics replay of the whole session, combat statistics, the X-ray world test)
-  runs once per case on its own thread and pauses when the server is busy. On a
-  2 vCPU / 4 GB server the suite stays nearly idle.
+  runs once per case on its own thread and pauses when the server is busy.
 - **Proactive, not only reactive.** What a cheat could read is not sent (other
   players' health and gear details, far sound origins, the Nether past its fog,
   the account before login); what a vanilla client could never send (book and

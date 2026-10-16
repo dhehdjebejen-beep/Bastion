@@ -172,11 +172,6 @@ reopened.
    price is a small window for subtle combat tweaks that Argus then catches from
    the session statistics, not on the first hit.
 
-   On the author's server (2 vCPU, 4 GB RAM, up to 5 players online) BastionAC
-   keeps the load low. With Grim, a prediction-engine anti-cheat, on the same
-   hardware and with the same 4 active accounts, the CPU stayed above 120 % (of
-   200 %). This is one server's observation, not a benchmark.
-
 ## Information and exploit protection
 
 An anti-cheat that only reads packets reacts after the fact. BastionAC also
