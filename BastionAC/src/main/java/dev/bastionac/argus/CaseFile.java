@@ -137,6 +137,47 @@ public final class CaseFile {
         public double evidence;
         /** "baseline", "prior", "self" … */
         public String source;
+        /** When it happened: a few of the moments (epoch ms), and how many there were (3.4). */
+        public List<Long> moments;
+        public int momentCount;
+
+        /** "14:17:38, 14:19:56, 14:22:21" or "14:08:12 … 14:15:40 (3569 раз)"; null when unknown. */
+        public String when() {
+            return CaseFile.when(moments, momentCount);
+        }
+    }
+
+    private static final java.time.format.DateTimeFormatter HMS =
+            java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss").withZone(java.time.ZoneId.systemDefault());
+    private static final java.time.format.DateTimeFormatter DHMS =
+            java.time.format.DateTimeFormatter.ofPattern("dd.MM HH:mm:ss").withZone(java.time.ZoneId.systemDefault());
+
+    /** The moments of a feature for people: all of a few, or the first and last of many. */
+    public static String when(List<Long> moments, int count) {
+        if (moments == null || moments.isEmpty()) return null;
+        long first = moments.get(0), last = moments.get(moments.size() - 1);
+        boolean days = first / 86_400_000L != last / 86_400_000L;
+        java.time.format.DateTimeFormatter f = days ? DHMS : HMS;
+        int total = Math.max(count, moments.size());
+        if (total <= 4) {
+            List<String> s = new ArrayList<>();
+            for (long t : moments) s.add(f.format(java.time.Instant.ofEpochMilli(t)));
+            return String.join(", ", s);
+        }
+        return f.format(java.time.Instant.ofEpochMilli(first)) + " … " + f.format(java.time.Instant.ofEpochMilli(last))
+                + " (" + total + " раз)";
+    }
+
+    /** First, last and a few spread between: what a row keeps of a feature's moments. */
+    public static List<Long> sampleMoments(long[] all, int n) {
+        List<Long> out = new ArrayList<>();
+        if (n <= 0) return out;
+        int keep = Math.min(n, 6);
+        for (int i = 0; i < keep; i++) {
+            int idx = keep == 1 ? 0 : (int) Math.round((double) i * (n - 1) / (keep - 1));
+            out.add(all[idx]);
+        }
+        return out;
     }
 
     public boolean open() {

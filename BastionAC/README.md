@@ -18,6 +18,21 @@ the final pass. Every stage's time is kept for the last run. The case list updat
 the cases that are moving. Only the changed slot is sent; the window is never
 reopened.
 
+## New in 3.4
+
+- **ClickTP closed.** One packet carrying a player on foot more than 2 blocks
+  sideways (scaled by the speed attribute) is a teleport: BigMove flags it and
+  sets the player back. A client sends one position per tick whatever its ping,
+  and honest play peaks near 0.6 blocks a tick; elytra, riptide, vehicles,
+  server-granted flight and knockback have their own allowances. Before, only
+  jumps past 6 blocks — 7.8 while sprinting — were caught.
+- **Argus sees teleports** (`move.teleport`, a physically impossible fact) and no
+  longer reads hovering in creative as flying against gravity.
+- **When it happened:** every feature in a case and in its report lists the times
+  of its events.
+- Building into someone's claim no longer looks like HighJump: a jump off a block
+  the server just refused counts from that block's top.
+
 ## New in 3.3.2 (hotfix)
 
 - **Argus for players who left.** An investigation of an offline player reads

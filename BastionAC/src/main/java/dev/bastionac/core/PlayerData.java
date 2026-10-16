@@ -90,6 +90,10 @@ public final class PlayerData {
     public double airPlaceBuffer;
     /** Clicks through a wall, decaying on every clean one (InteractWalls). */
     public double interactWallsBuffer;
+    /** A refused block placement under the player (3.4): the top the client may stand on for a moment. */
+    public double ghostTopY = Double.NEGATIVE_INFINITY;
+    public int ghostX, ghostZ;
+    public long ghostSupportUntil = -1;
     /**
      * The point of the last interact-at on an entity (3.3.2): a vanilla
      * right-click sends INTERACT_AT with the point and then a plain INTERACT

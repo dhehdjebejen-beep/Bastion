@@ -16,6 +16,20 @@ public final class FeatureSet {
     public static final class Acc {
         public double num, den;
         public final Prim.Doubles samples = new Prim.Doubles();
+        /** When the feature's suspicious events happened (epoch ms; the first {@link #MOMENTS_KEPT}). */
+        public final Prim.Longs moments = new Prim.Longs();
+        /** How many there were in all. */
+        public int momentTotal;
+    }
+
+    /** Moments kept per feature: plenty for "when", bounded for a long session. */
+    public static final int MOMENTS_KEPT = 4000;
+
+    /** A suspicious event of this feature happened at {@code t} (3.4: the staff see when). */
+    public void moment(String key, long t) {
+        Acc a = acc(key);
+        a.momentTotal++;
+        if (a.moments.n < MOMENTS_KEPT) a.moments.add(t);
     }
 
     /**
@@ -75,6 +89,8 @@ public final class FeatureSet {
             a.num += v.num;
             a.den += v.den;
             for (int i = 0; i < v.samples.n; i++) a.samples.add(v.samples.a[i]);
+            for (int i = 0; i < v.moments.n && a.moments.n < MOMENTS_KEPT; i++) a.moments.add(v.moments.a[i]);
+            a.momentTotal += v.momentTotal;
         });
     }
 

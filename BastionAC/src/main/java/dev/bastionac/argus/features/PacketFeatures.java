@@ -24,7 +24,12 @@ public final class PacketFeatures {
         // A second in which the client overdrew its lag credit by 350 ms or more.
         // With a 3-second credit an honest connection never gets there; a timer does it again and again.
         int episodes = 0;
-        for (SessionData.State st : s.states) if (st.timerWorst <= -350) episodes++;
+        for (SessionData.State st : s.states) {
+            if (st.timerWorst <= -350) {
+                episodes++;
+                out.moment("pkt.timer_episodes", st.t);
+            }
+        }
         out.perHour("pkt.timer_episodes", episodes, hours);
         if (tickClock) extraMoves(s, out);
         // Old clients go quiet whenever they stand still: only a real tick clock can show a held-back stream.
@@ -69,6 +74,7 @@ public final class PacketFeatures {
             ticks++;
             if (pos >= 2 && !anyIn(s.tpConfT, t0 - 120, t1 + 120) && !anyIn(s.tpSentT, t0 - 2000, t1 + 50)) {
                 extra++;
+                out.moment("pkt.extra_moves", t0);
             }
         }
         out.rate("pkt.extra_moves", extra, ticks);
@@ -87,7 +93,10 @@ public final class PacketFeatures {
             long a = t[i - 1], b = t[i];
             if (b - a < 600) continue;
             if (anyIn(quiet, a - 10_000, b + 500)) continue;   // respawn, teleport, world change: loading screens
-            if (anyIn(s.pongT, a + 100, b - 50)) count++;
+            if (anyIn(s.pongT, a + 100, b - 50)) {
+                count++;
+                out.moment("pkt.blind_stall", a);
+            }
         }
         out.perHour("pkt.blind_stall", count, hours);
     }
@@ -119,7 +128,10 @@ public final class PacketFeatures {
                  j < s.corrT.n && s.corrT.a[j] <= t + 6000; j++) {
                 if (s.corrReason.a[j] == CORR_COLLIDE) after++;
             }
-            if (after >= 6) episodes++;
+            if (after >= 6) {
+                episodes++;
+                out.moment("pkt.phase_loops", t);
+            }
         }
         out.perHour("pkt.phase_loops", episodes, hours);
     }

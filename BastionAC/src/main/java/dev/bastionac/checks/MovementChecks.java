@@ -41,6 +41,12 @@ import net.minecraft.world.World;
  */
 public final class MovementChecks {
 
+    /**
+     * Blocks a player on foot can cover sideways in one tick at sprint speed,
+     * with a wide margin (3.4): see the FOOT TELEPORT note in the move check.
+     */
+    static final double FOOT_TELEPORT_H = 2.0;
+
     /** Environment of the claimed position, from real collision shapes. */
     private static final class Env {
         boolean support;
@@ -406,7 +412,10 @@ public final class MovementChecks {
         // used to kick admins testing effects — 65 of 135 kicks in the logs.
         double bigMoveLimit = 6.0;
         double speedAttr = player.getAttributeValue(EntityAttributes.MOVEMENT_SPEED);
-        if (speedAttr > 0.13) bigMoveLimit = Math.max(bigMoveLimit, 6.0 * (speedAttr / 0.1));
+        // Above plain sprinting (0.13): a Speed effect. Plain sprinting used to
+        // pass too — 0.13 > 0.13 in floating point — and raised the limit to
+        // 7.8 blocks for anyone running (3.4).
+        if (speedAttr > 0.135) bigMoveLimit = Math.max(bigMoveLimit, 6.0 * (speedAttr / 0.1));
         StatusEffectInstance jumpBoost = player.getStatusEffect(StatusEffects.JUMP_BOOST);
         if (jumpBoost != null) {
             bigMoveLimit = Math.max(bigMoveLimit, 6.0 + (jumpBoost.getAmplifier() + 1) * 1.2);
@@ -421,7 +430,19 @@ public final class MovementChecks {
         // nothing launches a player like that without a velocity packet.
         long moveGap = d.lastMoveTick <= 0 ? 1 : Math.max(1, tick - d.lastMoveTick);
         double descentAllow = Math.max(bigMoveLimit, 4.0 * Math.min(moveGap, 20) + 4.0);
-        if (hDist > bigMoveLimit || dy > bigMoveLimit || -dy > descentAllow) {
+        // FOOT TELEPORT (3.4): a client sends one position per tick, so one
+        // packet is one tick of movement, however laggy the network. On foot a
+        // tick tops out near 0.6 blocks sprint-jumping and ~1.2 on blue ice;
+        // honest sessions on the server peak at 0.62. A ClickTP of 2..7.8
+        // blocks sat under BigMove's six-block teleport limit and the Speed
+        // average diluted it — the hole. Gliding, riptide, vehicles, flight the
+        // server granted and knockback (the velocity allowance below) are not
+        // "on foot"; a Speed effect raises the limit with the attribute.
+        boolean onFoot = !movementExempt && !player.isGliding() && !player.isUsingRiptide()
+                && !player.hasVehicle() && !player.getAbilities().allowFlying;
+        double footLimit = FOOT_TELEPORT_H * Math.max(1.0, speedAttr / 0.13);
+        boolean footTeleport = onFoot && hDist > footLimit;
+        if (hDist > bigMoveLimit || dy > bigMoveLimit || -dy > descentAllow || footTeleport) {
             if (general.shadowTelemetryEnabled) {
                 ShadowTelemetry.recordBigMoveCandidate();
                 d.setShadowDetail(String.format(java.util.Locale.ROOT,
@@ -437,9 +458,15 @@ public final class MovementChecks {
             double sdx = player.getX() - d.lastX;
             double sdy = player.getY() - d.lastY;
             double sdz = player.getZ() - d.lastZ;
+            double serverMovedSq = sdx * sdx + sdy * sdy + sdz * sdz;
+            // A shorter server move counts too when the client lands where the
+            // server put it (a short dismount, a nudge by another mod): the
+            // foot limit is far below the six blocks this test used to need.
+            double cx = newX - player.getX(), cy = newY - player.getY(), cz = newZ - player.getZ();
+            boolean claimAtServer = cx * cx + cy * cy + cz * cz <= footLimit * footLimit;
             // A move another mod announced (the duel arena): same treatment
             // as a server reposition — re-anchor on the server, no flag.
-            if (sdx * sdx + sdy * sdy + sdz * sdz > 36 || tick < d.serverMoveGraceUntil) {
+            if (serverMovedSq > 36 || (serverMovedSq > 1.0 && claimAtServer) || tick < d.serverMoveGraceUntil) {
                 // Re-anchor on the SERVER's position, never the claimed one: the
                 // server moving is what earned the resync, so the client's number
                 // has no authority here and accepting it would hand out one free
@@ -468,10 +495,13 @@ public final class MovementChecks {
             // jump and straight back — a fall the mace bills in full, or a
             // bow shot from 22 blocks behind. The padding is the signature.
             boolean padded = d.zeroMovesThisClientTick >= 3;
-            BastionAC.flag(player, d, CheckType.BIGMOVE, String.format(
-                    "%.1f бл за пакет (гор. %.1f/%.1f, верт. %.1f, пауза %d т)%s",
-                    Math.sqrt(distSq), hDist, bigMoveLimit, dy, moveGap,
-                    padded ? " после " + d.zeroMovesThisClientTick + " пустых пакетов — MaceDMG/ArrowDMG" : ""),
+            boolean onlyFoot = footTeleport && !(hDist > bigMoveLimit || dy > bigMoveLimit || -dy > descentAllow);
+            BastionAC.flag(player, d, CheckType.BIGMOVE, onlyFoot
+                    ? String.format("телепорт пешком: %.1f бл по горизонтали за тик (предел %.1f, верт. %.1f)",
+                            hDist, footLimit, dy)
+                    : String.format("%.1f бл за пакет (гор. %.1f/%.1f, верт. %.1f, пауза %d т)%s",
+                            Math.sqrt(distSq), hDist, bigMoveLimit, dy, moveGap,
+                            padded ? " после " + d.zeroMovesThisClientTick + " пустых пакетов — MaceDMG/ArrowDMG" : ""),
                     padded ? 2.0 : 1.0);
             // Never accept the jump as the new position.
             return finish(player, d, Action.SETBACK, tick);
@@ -882,7 +912,17 @@ public final class MovementChecks {
             double maxGain = 1.35;
             StatusEffectInstance jb = player.getStatusEffect(StatusEffects.JUMP_BOOST);
             if (jb != null) maxGain += (jb.getAmplifier() + 1) * 2.0;
-            double gain = newY - d.climbBaseY;
+            double base = d.climbBaseY;
+            // Towering into a refused cell (someone's claim, a spawn guard):
+            // the client stands on its own block for a moment and jumps off
+            // it before the server's correction lands. The jump counts from
+            // that block's top (3.4) — a stranger building in a claim was
+            // flagged HighJump five times in four seconds.
+            if (tick < d.ghostSupportUntil && d.ghostTopY > base && d.ghostTopY <= newY
+                    && Math.abs(newX - (d.ghostX + 0.5)) < 0.9 && Math.abs(newZ - (d.ghostZ + 0.5)) < 0.9) {
+                base = d.ghostTopY;
+            }
+            double gain = newY - base;
             boolean exempt = player.hasStatusEffect(StatusEffects.LEVITATION)
                     || tick < d.bounceGraceUntil || velocityActive;
             if (gain > maxGain + 0.35 && !exempt && d.highJumpBase != d.climbBaseY) {

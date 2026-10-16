@@ -94,6 +94,66 @@ public final class MovementFeatures {
         boolean tickMode = s.tickEndT.n > 20 && (s.protocol < 0 || s.protocol >= 768);
         Ticks tk = tickMode ? byClientTick(s, bad) : byPacket(s, bad);
         judge(s, tk, out, blocks);
+        teleports(s, out);
+    }
+
+    /** One position packet carrying a player on foot farther sideways than this (× speed attribute / sprint) is a teleport. */
+    static final double TELEPORT_H = 2.0;
+
+    /**
+     * Teleports on foot — ClickTP and friends (3.4): one position packet more
+     * than {@link #TELEPORT_H} blocks sideways from the previous one, with
+     * nothing around it that moves a player (velocity, an explosion, a vehicle,
+     * elytra, riptide, flight, creative, a respawn). The server's own
+     * teleports only excuse what comes after them: the physics replay sets
+     * aside the moves just before a setback too, and that hid exactly the
+     * jump that earned the setback.
+     */
+    static void teleports(SessionData s, FeatureSet out) {
+        int n = s.moveT.n;
+        long[] t = s.moveT.a;
+        boolean[] skip = new boolean[n];
+        markAround(skip, t, n, s.velT, 100, 1500);
+        for (int i = 0; i < s.velT.n; i++) {
+            if (s.velExplosion.a[i] != 0) markRange(skip, t, n, s.velT.a[i] - 100, s.velT.a[i] + 3500);
+        }
+        markAround(skip, t, n, s.tpSentT, 0, 1500);
+        markAround(skip, t, n, s.tpConfT, 0, 500);
+        markAround(skip, t, n, s.lifeT, 200, 5000);
+        markAround(skip, t, n, s.vehicleT, 200, 1500);
+        int si = 0;
+        for (int i = 0; i < n; i++) {
+            if (!s.states.isEmpty()) {
+                while (si + 1 < s.states.size() && s.states.get(si + 1).t <= t[i]) si++;
+                SessionData.State st = s.states.get(si);
+                if (st.gameMode == 1 || st.gameMode == 3 || st.has(ST_FLYING) || st.has(ST_VEHICLE)
+                        || st.has(ST_GLIDING) || st.has(ST_SLEEPING)) {
+                    skip[i] = true;
+                }
+            }
+            int env = s.moveEnv.a[i];
+            if ((env & (ENV_FLYING | ENV_VEHICLE)) != 0) skip[i] = true;
+            // Elytra and riptide carry on for a while after the flag drops.
+            if ((env & (ENV_GLIDING | ENV_RIPTIDE)) != 0) markRange(skip, t, n, t[i], t[i] + 1500);
+        }
+        int count = 0;
+        boolean have = false;
+        double px = 0, pz = 0;
+        for (int i = 0; i < n; i++) {
+            if ((s.moveFlags.a[i] & MV_POS) == 0) continue;
+            double x = s.moveX.a[i], z = s.moveZ.a[i];
+            if (have && !skip[i]) {
+                double limit = TELEPORT_H * Math.max(1.0, s.moveSpeed.a[i] / 0.13);
+                if (Math.hypot(x - px, z - pz) > limit) {
+                    count++;
+                    out.moment("move.teleport", t[i]);
+                }
+            }
+            px = x;
+            pz = z;
+            have = true;
+        }
+        out.perHour("move.teleport", count, Math.max(1e-6, s.durationMs() / 3_600_000.0));
     }
 
     // ---------------------------------------------------------------- exclusions
@@ -173,6 +233,7 @@ public final class MovementFeatures {
         float speed = s.moveSpeed.a[0];
         float yaw = firstYaw(s);
         int mi = 0;
+        boolean lastBad = false;
         for (int k = 0; k < len; k++) {
             int tick = first + k;
             boolean hc = false;
@@ -194,8 +255,14 @@ public final class MovementFeatures {
                 if ((f & MV_LOOK) != 0) yaw = s.moveYaw.a[mi];
                 tt = s.moveT.a[mi];
                 if (bad[mi]) tickBad[k] = true;
+                lastBad = bad[mi];
                 mi++;
             }
+            // A tick without a packet is the last packet's state carried on:
+            // hovering in creative flight sends nothing, and those silent ticks
+            // were judged as a survival player defying gravity (3.4 — an
+            // operator flying in creative read as 65% "rise").
+            if (posCount[k] == 0 && lastBad) tickBad[k] = true;
             tk.x[k] = px;
             tk.y[k] = py;
             tk.z[k] = pz;
@@ -292,6 +359,7 @@ public final class MovementFeatures {
                     groundJudged++;
                     if (gain > TOL_GAIN) {
                         groundGain++;
+                        out.moment("move.ground_gain", tk.t[c]);
                         dbg(tk, c, "ground_gain", gain);
                     }
                 }
@@ -300,6 +368,7 @@ public final class MovementFeatures {
                     airJudged++;
                     if (gain > TOL_GAIN) {
                         airGain++;
+                        out.moment("move.air_gain", tk.t[c]);
                         dbg(tk, c, "air_gain", gain);
                     }
                 }
@@ -307,7 +376,10 @@ public final class MovementFeatures {
                 if (!gb && !gc && d2h > 0.08) {
                     turnJudged++;
                     double turn = Math.hypot(d2x - vx, d2z - vz) - accel;
-                    if (turn > TOL_TURN) airTurn++;
+                    if (turn > TOL_TURN) {
+                        airTurn++;
+                        out.moment("move.air_turn", tk.t[c]);
+                    }
                 }
             }
 
@@ -320,11 +392,15 @@ public final class MovementFeatures {
                     vertJudged++;
                     if (r > TOL_VERT) {
                         rise++;
+                        out.moment("move.rise", tk.t[c]);
                         dbg(tk, c, "rise", r);
                     }
                     if (d1y <= 0) {
                         fallJudged++;
-                        if (r < -TOL_VERT) fallFast++;
+                        if (r < -TOL_VERT) {
+                            fallFast++;
+                            out.moment("move.fall_fast", tk.t[c]);
+                        }
                     }
                 }
             }
@@ -334,15 +410,24 @@ public final class MovementFeatures {
                 int in = tk.input[c];
                 if (jumpTick) {
                     jumps++;
-                    if ((in & IN_JUMP) == 0) jumpNoKey++;
+                    if ((in & IN_JUMP) == 0) {
+                        jumpNoKey++;
+                        out.moment("move.jump_nokey", tk.t[c]);
+                    }
                 }
                 if (gb && gc && (in & INPUT_MOVE) == 0 && (d2h > 0.005 || vh > 0.005)) {
                     noKeyJudged++;
-                    if (d2h > vh + 0.01) noKeyGain++;
+                    if (d2h > vh + 0.01) {
+                        noKeyGain++;
+                        out.moment("move.move_nokey", tk.t[c]);
+                    }
                 }
                 if (gb && (in & IN_SPRINT) != 0) {
                     sprintJudged++;
-                    if ((in & IN_FORWARD) == 0 && d2h > 0.2 && d2h > vh + TOL_GAIN) sprintNoFwd++;
+                    if ((in & IN_FORWARD) == 0 && d2h > 0.2 && d2h > vh + TOL_GAIN) {
+                        sprintNoFwd++;
+                        out.moment("move.sprint_noforward", tk.t[c]);
+                    }
                 }
                 // ---- the push of this tick must point where the keys point (Strafe / Bhop)
                 if (gb && gc && !jumpTick && (in & INPUT_MOVE) != 0) {
@@ -352,7 +437,10 @@ public final class MovementFeatures {
                     if (am > 0.03 && want != null) {
                         dirJudged++;
                         double cos = (ax * want[0] + az * want[1]) / am;
-                        if (cos < 0.64) dirOff++;   // more than ~50° off what the keys ask for
+                        if (cos < 0.64) {   // more than ~50° off what the keys ask for
+                            dirOff++;
+                            out.moment("move.input_dir", tk.t[c]);
+                        }
                     }
                 }
             }

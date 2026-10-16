@@ -78,6 +78,9 @@ public final class Features {
                 "бег без клавиши «вперёд»", "%", 100));
         add(new Spec("move.input_dir", Category.MOVEMENT, Agg.RATE, 1, 0.005, 0.01, 0.006, 400, 120, 1.2, false,
                 "разгон не в сторону нажатых клавиш (strafe)", "%", 100));
+        // 3.4: a single packet farther sideways than any foot covers in a tick — ClickTP.
+        add(new Spec("move.teleport", Category.MOVEMENT, Agg.PER_HOUR, 1, 0.0, 0.5, 0.5, 0.3, 0.05, 1.5, true,
+                "телепорт пешком (больше 2 бл за тик)", "/ч", 1));
 
         // ---------------------------------------------------------- packets & timing
         add(new Spec("pkt.tick_rate", Category.PACKETS, Agg.MEDIAN, 1, 20.0, 0.12, 0.08, 20, 6, 1.6, true,

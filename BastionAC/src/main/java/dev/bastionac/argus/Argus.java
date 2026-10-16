@@ -344,6 +344,11 @@ public final class Argus {
             f.z = row.z();
             f.evidence = row.evidence();
             f.source = row.source();
+            dev.bastionac.argus.features.FeatureSet.Acc acc = out.features.raw().get(row.spec().key());
+            if (acc != null && acc.moments.n > 0) {
+                f.moments = CaseFile.sampleMoments(acc.moments.a, acc.moments.n);
+                f.momentCount = acc.momentTotal;
+            }
             c.features.add(f);
         }
         c.findings = Report.findings(r, out);

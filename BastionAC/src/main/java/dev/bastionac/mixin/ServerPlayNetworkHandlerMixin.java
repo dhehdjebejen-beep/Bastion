@@ -399,6 +399,32 @@ public abstract class ServerPlayNetworkHandlerMixin {
         }
     }
 
+    /**
+     * After the server handled a right-click with a block: a cell right under
+     * the player that stayed empty is a placement the server refused (a claim,
+     * a spawn guard). The client may already stand on its own copy of the
+     * block; HighJump counts from its top for a moment (3.4).
+     */
+    @Inject(method = "onPlayerInteractBlock", at = @At("TAIL"))
+    private void bastionac$afterInteractBlock(PlayerInteractBlockC2SPacket packet, CallbackInfo ci) {
+        if (player == null || !bastionac$ready()) return;
+        if (!player.getEntityWorld().getServer().isOnThread()) return;
+        PlayerData d = BastionAC.data(player);
+        if (d == null) return;
+        net.minecraft.item.ItemStack held = player.getStackInHand(packet.getHand());
+        if (!(held.getItem() instanceof net.minecraft.item.BlockItem)) return;
+        net.minecraft.util.hit.BlockHitResult hit = packet.getBlockHitResult();
+        net.minecraft.util.math.BlockPos cell = hit.getBlockPos().offset(hit.getSide());
+        double px = player.getX(), py = player.getY(), pz = player.getZ();
+        if (Math.abs(cell.getX() + 0.5 - px) > 0.9 || Math.abs(cell.getZ() + 0.5 - pz) > 0.9) return;
+        if (cell.getY() + 1 > py + 0.6 || cell.getY() + 1 < py - 2.5) return;
+        if (!player.getEntityWorld().getBlockState(cell).isReplaceable()) return;   // it was placed
+        d.ghostTopY = cell.getY() + 1;
+        d.ghostX = cell.getX();
+        d.ghostZ = cell.getZ();
+        d.ghostSupportUntil = BastionAC.serverTick() + 30;
+    }
+
     @Inject(method = "onPlayerInteractBlock", at = @At("HEAD"), cancellable = true)
     private void bastionac$onPlayerInteractBlock(PlayerInteractBlockC2SPacket packet, CallbackInfo ci) {
         if (bastionac$netty(packet) != null) return;

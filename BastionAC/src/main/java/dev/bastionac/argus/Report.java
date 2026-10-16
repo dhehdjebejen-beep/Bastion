@@ -24,7 +24,8 @@ final class Report {
         List<String> out = new ArrayList<>();
         for (Scorer.Row row : r.rows()) {
             if (row.evidence() <= 0.05) continue;
-            out.add(line(row));
+            String when = when(o.features, row.spec().key());
+            out.add(line(row) + (when == null ? "" : " [" + when + "]"));
             if (out.size() >= 10) break;
         }
         if (o.cheatChannel != null) out.add(0, "клиент объявил канал «" + o.cheatChannel + "»");
@@ -38,6 +39,13 @@ final class Report {
         }
         if (out.isEmpty()) out.add(r.enoughData() ? "ничего необычного" : "данных слишком мало для вывода");
         return out;
+    }
+
+    /** When a feature's suspicious events happened, from the accumulated moments (3.4). */
+    static String when(FeatureSet fs, String key) {
+        FeatureSet.Acc a = fs == null ? null : fs.raw().get(key);
+        if (a == null || a.moments.n == 0) return null;
+        return CaseFile.when(CaseFile.sampleMoments(a.moments.a, a.moments.n), a.momentTotal);
     }
 
     static String line(Scorer.Row row) {
@@ -103,6 +111,8 @@ final class Report {
             sb.append(String.format(Locale.ROOT, "  %-22s %-12s | %s ± %s | %.0f | %5.1f | %.2f | %s%n",
                     s.key(), s.format(row.value()), s.format(row.ref()), s.format(row.scale()), row.support(), row.z(),
                     row.evidence(), row.source()));
+            String when = when(o.features, s.key());
+            if (when != null) sb.append("        когда: ").append(when).append('\n');
         }
         sb.append("\nНе хватило данных: ");
         List<String> missing = new ArrayList<>();

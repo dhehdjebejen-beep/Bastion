@@ -175,6 +175,8 @@ public final class ArgusMenu {
             String ref = spec == null ? "" : spec.format(f.ref);
             rows.add((f.evidence > 0.05 ? "&c" : "&7") + title);
             rows.add(String.format(Locale.ROOT, "&8  %s (норма %s), z=%.1f, улика %.1f", val, ref, f.z, f.evidence));
+            String when = f.when();
+            if (when != null) rows.add("&8  когда: &7" + when);
         }
         if (rows.isEmpty()) rows.add("&7Нет данных");
         gui.button(23, GuiItems.item(Items.COMPARATOR, "&bВсе признаки", rows), () -> {});
