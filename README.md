@@ -8,7 +8,7 @@
   <img alt="Fabric" src="https://img.shields.io/badge/loader-Fabric-DBD0B4">
   <img alt="Java 21" src="https://img.shields.io/badge/Java-21-E76F00">
   <img alt="Server-side only" src="https://img.shields.io/badge/client-no%20mod%20needed-3B82F6">
-  <img alt="License: PolyForm Strict 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Strict%201.0.0-7C5CFF">
+  <img alt="License: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/license-PolyForm%20Noncommercial%201.0.0-7C5CFF">
 </p>
 
 <p align="center"><b>English</b> · <a href="README.ru.md">Русский</a></p>
@@ -128,10 +128,12 @@ target, and Argus with the Argus Lab bench (`./gradlew argusLab` in
 
 ## License
 
-[PolyForm Strict 1.0.0](LICENSE). You may read the code and use the mods for
-noncommercial purposes. You may **not** distribute them, change them or publish
-works based on them without the author's written permission. Please get in touch
-if you need other terms.
+[PolyForm Noncommercial 1.0.0](LICENSE). You may use, fork, change and
+distribute the mods for any noncommercial purpose, as long as every copy carries
+the license and the `Required Notice` line. Commercial use is **not** allowed:
+selling the mods or forks of them, or running them on a server that earns money
+(donations for perks, paid ranks, paid access). For commercial terms, contact the
+author.
 
 ## Author
 

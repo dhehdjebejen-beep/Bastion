@@ -12,7 +12,7 @@
     "issues": "https://github.com/dhehdjebejen-beep/Bastion/issues",
     "homepage": "https://github.com/dhehdjebejen-beep/Bastion"
   },
-  "license": "PolyForm-Strict-1.0.0",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "environment": "*",
   "entrypoints": {
     "server": [

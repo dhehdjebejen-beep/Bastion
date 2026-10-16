@@ -8,7 +8,7 @@
   <img alt="Fabric" src="https://img.shields.io/badge/loader-Fabric-DBD0B4">
   <img alt="Java 21" src="https://img.shields.io/badge/Java-21-E76F00">
   <img alt="Только сервер" src="https://img.shields.io/badge/клиент-мод%20не%20нужен-3B82F6">
-  <img alt="Лицензия: PolyForm Strict 1.0.0" src="https://img.shields.io/badge/лицензия-PolyForm%20Strict%201.0.0-7C5CFF">
+  <img alt="Лицензия: PolyForm Noncommercial 1.0.0" src="https://img.shields.io/badge/лицензия-PolyForm%20Noncommercial%201.0.0-7C5CFF">
 </p>
 
 <p align="center"><a href="README.md">English</a> · <b>Русский</b></p>
@@ -126,10 +126,12 @@ BastionAC. Запуск — `./gradlew test` в папке мода. Отдел�
 
 ## Лицензия
 
-[PolyForm Strict 1.0.0](LICENSE). Код можно читать, а моды — использовать в
-некоммерческих целях. Распространять их, изменять или публиковать работы на их
-основе **нельзя** без письменного разрешения автора. Если нужны другие условия,
-напишите автору.
+[PolyForm Noncommercial 1.0.0](LICENSE). Моды можно использовать, форкать,
+изменять и распространять в любых некоммерческих целях, если с каждой копией
+идут текст лицензии и строка `Required Notice`. Коммерческое использование
+**запрещено**: продажа модов и их форков, а также запуск на сервере, который
+приносит деньги (донат за привилегии, платные ранги, платный вход). Для
+коммерческих условий напишите автору.
 
 ## Автор
 
