@@ -41,7 +41,7 @@ server — players join with an unmodified client and install nothing.
 |---|---|---|
 | [**BastionAuth**](BastionAuth) | 1.12.2 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP and client profile. Before the password the player waits in spectator mode, away from their real location. |
 | [**BastionClaims**](BastionClaims) | 1.19.1 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers, explosions, fire, projectiles, falling blocks, griefing mobs, fishing rods, sculk. Member roles inside a claim. Also includes an operator WorldEdit with undo. |
-| [**BastionAC**](BastionAC) | 3.4.0 | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within minutes. Since 3.3 its model is trained in Argus Lab on synthetic honest and cheating sessions; 3.3.1 stops telling clients other players' health, gear details and where far sounds come from; 3.4 catches ClickTP on foot and lets Argus see teleports. |
+| [**BastionAC**](BastionAC) | 3.4.0 | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within minutes. Since 3.3 its model is trained in Argus Lab on synthetic honest and cheating sessions; 3.3.1 adds an info shield against ESP-style information cheats and InteractWalls; 3.4 catches ClickTP on foot and lets Argus see teleports. Exploits (book/NBT bombs, creative smuggling, packet floods) are blocked at the protocol. |
 
 Each mod works on its own. When they run together, they talk through soft
 reflection bridges, and no mod has a hard dependency on another:
@@ -90,6 +90,15 @@ flowchart LR
   signatures.
 - **Explainable decisions.** `/claim why`, `/claim trace`, `/auth links` and the
   `/bac` panel say *why* something was allowed, refused or flagged.
+- **Light by design.** Live checks are cheap per packet; the heavy analysis (a
+  physics replay of the whole session, combat statistics, the X-ray world test)
+  runs once per case on its own thread and pauses when the server is busy. On a
+  2 vCPU / 4 GB server the suite stays nearly idle.
+- **Proactive, not only reactive.** What a cheat could read is not sent (other
+  players' health and gear details, far sound origins, the Nether past its fog,
+  the account before login); what a vanilla client could never send (book and
+  NBT bombs, creative smuggling, floods, clicks through walls) is dropped on the
+  spot.
 
 ## Building
 

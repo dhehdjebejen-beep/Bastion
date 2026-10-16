@@ -153,7 +153,7 @@ reopened.
 - **New check `entitypredict`**: an attack on an entity the client was never sent
   (CrystalAura id prediction).
 
-## Two principles
+## Three principles
 
 1. **Nothing is punished on one event.** Suspicious ticks fill a buffer, and the
    buffer feeds a violation level (VL) that decays over time. Only a pattern that
@@ -163,6 +163,55 @@ reopened.
    implementation and breaks on the next; an outcome ("this player took no fall
    damage although vanilla had to charge it") catches all of them. Where it helps,
    both run side by side.
+3. **Stay light; move the heavy thinking off the tick.** The live checks are cheap:
+   one comparison per packet, one ray per action, buffers instead of a full
+   movement simulation on every packet. The expensive work — a physics replay of
+   the whole session, combat statistics, the X-ray test against the world — runs
+   once per case, on Argus's own thread, and pauses while the server is busy
+   (MSPT above 45). Prediction is not dropped; it is moved off the hot path. The
+   price is a small window for subtle combat tweaks that Argus then catches from
+   the session statistics, not on the first hit.
+
+   On the author's server (2 vCPU, 4 GB RAM, up to 5 players online) BastionAC
+   keeps the load low. With Grim, a prediction-engine anti-cheat, on the same
+   hardware and with the same 4 active accounts, the CPU stayed above 120 % (of
+   200 %). This is one server's observation, not a benchmark.
+
+## Information and exploit protection
+
+An anti-cheat that only reads packets reacts after the fact. BastionAC also
+works ahead of the cheat: it does not send what a cheat could exploit, and it
+drops what a vanilla client could never send.
+
+**Information cheats are starved, not chased.** A cheat that only *reads*
+packets sends nothing suspicious back, so it cannot be detected — only left with
+nothing to read (`InfoShield`, outgoing packets):
+
+| Leak | What the client gets instead |
+|---|---|
+| other players' health (health ESP) | "alive at full health"; 0 still plays the death animation; no absorption |
+| other players' gear (enchantments, durability, names, shulker contents) | the item's looks only: model, trim, dye, banner, head, glint |
+| global and far sounds — dragon, Wither, End portal, horns (coordinates in the packet) | a point towards the source along the same line: the direction stays, the coordinates go |
+| everything past the Nether fog (terrain, players, mobs for a fog-less client or ESP) | chunks only up to the fog at 96 blocks (`netherViewDistance` 6) |
+| with BastionAuth: the account before the password (location, inventory, effects, game mode, chat) | limbo above spawn, an empty inventory, a plain survival picture, chat held until login |
+
+**Exploits are blocked at the protocol, on the spot.** Things a vanilla client
+can never produce need no statistics:
+
+| Exploit | Response |
+|---|---|
+| book and NBT bombs (past the vanilla 100 pages × 1024 characters) | dropped, permanent ban |
+| creative-slot item smuggling outside creative (grace window after a game-mode change) | dropped, permanent ban |
+| packet floods (sustained rate over a window) | permanent ban |
+| BookBot (book edits faster than the screen allows) | kick |
+| actions from the death screen (dupes at death, hits from the grave) | dropped |
+| clicking, breaking or using an entity through a wall (`InteractWalls`) | refused and resynced |
+| an attack on an entity the client was never sent (`EntityPredict`) | flagged, attack dropped |
+| with BastionAuth: any packet before login except the handful needed to log in | dropped before its handler |
+
+Not covered yet: players behind walls are still sent to the client, so a plain
+player ESP works, and ore blocks are sent as they are — X-ray is caught by
+statistics and an alert to staff, not hidden.
 
 ## Checks (41)
 
