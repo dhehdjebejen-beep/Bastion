@@ -28,7 +28,9 @@ packets past the usual path still hits it.
   member with a role may do only what it grants — say, a "guest" role with doors
   only. A member without a role has full rights.
 - `/claim role create <role>`, `/claim role perm <role> <perm> on|off`,
-  `/claim add <name> <role>`, or the Roles button in the claim menu.
+  `/claim role give <name> <role|none>`, `/claim role delete <role>`,
+  `/claim add <name> <role>`, or the Roles button in the claim menu. Up to 10
+  roles per claim; a new role starts with no rights.
 
 ## What is protected
 
@@ -49,6 +51,8 @@ packets past the usual path still hits it.
 | Falling blocks | Sand, gravel or anvils that started outside break into items |
 | Mobs | Endermen, the wither, ravagers, the dragon, door-breaking zombies — under the `mobs` flag |
 | Farmland and Frost Walker | Strangers do not trample crops or freeze water |
+| Fishing rods | Strangers cannot hook animals, villagers, armor stands or dropped items out of a claim (needs the `entities` right) |
+| Sculk | A catalyst outside the border does not spread sculk into the claim; the owner's own sculk farm inside works as usual |
 
 **Flags** relax protection on purpose. All are off by default:
 `pvp`, `mobs`, `mobdmg`, `explosions`, `fluids`, `pistons`, `hoppers`, `fire`,
@@ -95,11 +99,13 @@ their own claim.
 | Player — `/claim` (alias `/приват`) |
 |---|
 | `wand` · `pos1` · `pos2` · `create <name>` · `create2d` · `create3d` · `list` · `info` · `rename` |
-| `trust` · `untrust` · `add <name> [role]` · `role` (roles: `create`, `perm`, `give`, `delete`) · `transfer` · `flag <flag> <on\|off>` · `addzone` · `zones` · `delzone` · `borders` · `why` · `trace` · `delete` |
+| `trust` · `untrust` · `add <name> [role]` · `role` (`list`, `create`, `perm`, `give`, `delete`) · `transfer` · `flag <flag> <on\|off>` · `addzone` · `zones` · `delzone` · `borders` · `why` · `trace` · `delete` → `delete confirm` |
 
-| Staff — `/claims` |
+| Staff — `/claims` (op 3+) |
 |---|
 | `reload` · `bypass` · `list <name>` · `delete <name> <claim>` · `here` · `manage <name> <claim>` · `flag <name> <flag> on\|off <claim>` · `/we …` |
+
+For operators, `/claim bypass` works the same as `/claims bypass`.
 
 ## Build
 

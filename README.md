@@ -40,8 +40,8 @@ server — players join with an unmodified client and install nothing.
 | Module | Version | In one line |
 |---|---|---|
 | [**BastionAuth**](BastionAuth) | 1.12.2 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP and client profile. Before the password the player waits in spectator mode, away from their real location. |
-| [**BastionClaims**](BastionClaims) | 1.19.1 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers, explosions, fire, projectiles, falling blocks, griefing mobs. Member roles inside a claim. Also includes an operator WorldEdit with undo. |
-| [**BastionAC**](BastionAC) | 3.4.0 | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within minutes. Since 3.3 its model is trained in Argus Lab on synthetic honest and cheating sessions; 3.3.1 stops telling clients other players' health, gear details and where far sounds come from. |
+| [**BastionClaims**](BastionClaims) | 1.19.1 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers, explosions, fire, projectiles, falling blocks, griefing mobs, fishing rods, sculk. Member roles inside a claim. Also includes an operator WorldEdit with undo. |
+| [**BastionAC**](BastionAC) | 3.4.0 | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within minutes. Since 3.3 its model is trained in Argus Lab on synthetic honest and cheating sessions; 3.3.1 stops telling clients other players' health, gear details and where far sounds come from; 3.4 catches ClickTP on foot and lets Argus see teleports. |
 
 Each mod works on its own. When they run together, they talk through soft
 reflection bridges: BastionAC reads BastionAuth's account-link ledger, and
@@ -109,7 +109,10 @@ packets of the cheat modules they target.
 
 - Every module has an English overview (`README.md`) and a Russian one
   (`README.ru.md`).
-- `DETAILS.ru.md` holds the full Russian documentation and the version history.
+- `DETAILS.ru.md` in each module holds the full Russian documentation and the
+  version history.
+- [`BastionAC/ARGUS-LAB.ru.md`](BastionAC/ARGUS-LAB.ru.md) is the Argus Lab report:
+  how the Argus model is trained and how well it detects each cheat.
 
 ## License
 

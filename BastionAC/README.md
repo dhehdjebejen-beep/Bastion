@@ -7,17 +7,6 @@ mod. It started as a targeted answer to **Meteor** and its forks and grew into a
 general engine; version 2.24 added a full pass over **Wurst 7**, built from that
 client's own source and defaults.
 
-## New in 3.2 — Argus progress, live
-
-The case card shows what Argus is doing with the case right now and how long it
-takes, redrawn twice a second while the card is open: collecting (with a
-countdown), queued (jobs ahead), waiting for a lagging server, then each stage of
-the analysis — telemetry files read, physics replay, packets, combat, client, the
-rock around the tunnels (cells read), mining, scoring — and finally the wait for
-the final pass. Every stage's time is kept for the last run. The case list updates
-the cases that are moving. Only the changed slot is sent; the window is never
-reopened.
-
 ## New in 3.4
 
 - **ClickTP closed.** One packet carrying a player on foot more than 2 blocks
@@ -98,6 +87,17 @@ reopened.
 - `./gradlew argusLab` runs the bench; `--args="500 12 --write"` retrains the
   model. Full report in Russian: [ARGUS-LAB.ru.md](ARGUS-LAB.ru.md).
 
+## New in 3.2 — Argus progress, live
+
+The case card shows what Argus is doing with the case right now and how long it
+takes, redrawn twice a second while the card is open: collecting (with a
+countdown), queued (jobs ahead), waiting for a lagging server, then each stage of
+the analysis — telemetry files read, physics replay, packets, combat, client, the
+rock around the tunnels (cells read), mining, scoring — and finally the wait for
+the final pass. Every stage's time is kept for the last run. The case list updates
+the cases that are moving. Only the changed slot is sent; the window is never
+reopened.
+
 ## New in 3.1
 
 - **Argus obeys staff and answers in minutes.** A cheater / not a cheater / ban /
@@ -164,19 +164,19 @@ reopened.
    damage although vanilla had to charge it") catches all of them. Where it helps,
    both run side by side.
 
-## Checks (40)
+## Checks (41)
 
 | Area | Checks |
 |---|---|
 | Movement | Speed · Fly · HighJump · BigMove · Timer (balance on arrival time) · Blink · NoSlow · NoWeb · GroundSpoof · AntiHunger · NoFall (by packet *and* by outcome) · FastFall (vanilla gravity curve) · Spider · FastLadder · Jesus · Step · PacketOrder |
 | Combat | Reach (lag-compensated against the victim's hitbox history) · Angle · Aim (exact hitbox-centre lock, flick-and-return) · Walls · MultiTarget · UseAttack · NoSwing · Criticals · Velocity · CPS · AutoTotem · EntityPredict (an attack on an entity the client was never sent — CrystalAura id prediction) |
-| World | FastBreak · FastPlace · Nuker · PacketMine · Scaffold · AirPlace · AutoPlace (computed face-centre clicks) · XRay (statistical, staff alerts, never bans) |
+| World | FastBreak · FastPlace · Nuker · PacketMine · Scaffold · AirPlace · AutoPlace (computed face-centre clicks) · InteractWalls (a block clicked or broken, or an entity used, through a wall) · XRay (statistical, staff alerts, never bans) |
 | Rhythm | AutoClick · AutoAction — machine-even timing at human-plausible rates |
 | Client & transport | Vehicle (BoatFly) · InvMove · BrandSpoof · GCD (aim grid) · BadRotation |
 | Protocol guard | Packet flood · book/NBT bombs · creative-slot smuggling |
 | Analysis (Argus) | Not checks but a session-level investigation: vanilla physics replay, tick rate and held-back movement, faked ping, aim and clicking, X-ray reveal test against the world — see «New in 3.0» |
 
-40 is the number of check types. HighJump, NoWeb, AntiHunger and FastLadder are signatures inside Fly, NoSlow, GroundSpoof and Spider. The protocol guard is a separate filter, and Argus is a separate analysis layer.
+41 is the number of check types. HighJump, NoWeb, AntiHunger and FastLadder are signatures inside Fly, NoSlow, GroundSpoof and Spider. The protocol guard is a separate filter, and Argus is a separate analysis layer.
 
 ## Client versions
 
@@ -217,6 +217,22 @@ flowchart LR
 - The chain detector counts *different* checks, not points. One module cannot ban
   a player through the chain on its own.
 
+## Commands
+
+All `/bac` commands need operator level 3 or higher.
+
+| Command | |
+|---|---|
+| `/bac`, `/bac panel` | Open the panel |
+| `/bac alerts` | Turn alerts on or off for yourself |
+| `/bac status <name>` | A player's current VLs |
+| `/bac freeze <name> [reason]` · `unfreeze <name>` · `frozen` | Freeze a player for a check, release them, list frozen players |
+| `/bac argus` · `argus case <id>` · `argus explain <id>` | Argus case list, one case card, its report in chat |
+| `/bac argus analyze <name>` · `argus status` | Open a case on a player (offline too), Argus queue state |
+| `/bac argus mode shadow\|assist\|auto` | Argus mode |
+| `/bac telemetry [name]` | Telemetry state, for the server or one player |
+| `/bac reload` · `/bac version` | Reload the config · version |
+
 ## Tooling for staff
 
 - **`/bac` panel.** A chest GUI with:
@@ -236,7 +252,7 @@ flowchart LR
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test    # 193 unit tests
+./gradlew test    # 202 unit tests
 ```
 
 The config is `config/bastionac/config.json`. It has per-check weight, alert,
@@ -244,3 +260,4 @@ mitigate and kick thresholds and decay. It migrates itself between schema versio
 and never overwrites the admin's own tuning.
 
 Full Russian documentation and version history: [`DETAILS.ru.md`](DETAILS.ru.md).
+Argus Lab report (Russian): [`ARGUS-LAB.ru.md`](ARGUS-LAB.ru.md).

@@ -27,6 +27,10 @@ prove who is who, and until it has, the connection must not be able to do anythi
   tick.
 - The player cannot move (snap-back), is invisible and invulnerable, picks nothing
   up, sees no chat, and can run only `/login` and `/register`.
+- **Location hidden until login.** The player waits in spectator mode in a limbo
+  above their world's spawn and is sent no health, experience, effects, attributes
+  or game mode. After the password they return to their real place and mode; a
+  player who left riding sits back on their vehicle only then.
 
 **Brute force and flood**
 - Limits on failed logins per connection, per account (a lock that survives
@@ -35,6 +39,8 @@ prove who is who, and until it has, the connection must not be able to do anythi
 - **A growing per-IP account quota.** The first accounts register at once; each
   further one opens a week after the previous, then two weeks, three… A household
   or a shared NAT can still grow over time; a farm of alts cannot be made in an evening.
+  Accounts nobody has entered for 30 days do not count, so one stranger's
+  throwaway accounts behind a carrier NAT do not make newcomers wait.
 - Argon2 runs in a bounded pool, so a crowd of bots cannot eat the tick.
 
 **Account security**
@@ -91,17 +97,21 @@ sequenceDiagram
 
 | Player | |
 |---|---|
-| `/register <pw> <pw>`, `/login <pw> [code]` | Register / log in |
-| `/logout`, `/changepassword <old> <new> <new>` | Session and password |
-| `/2fa` · `включить` · `подтвердить <code>` · `выключить <code>` · `коды <code>` | Two-factor authentication |
-| `/слово` · `установить <word>` · `снять <word>` · `<word>` | Code word |
+| `/register <pw> <pw>` (`/reg`), `/login <pw> [code]` (`/l`) | Register / log in |
+| `/logout`, `/changepassword <old> <new> <new>` (`/changepw`) | Session and password |
+| `/agreement [read\|accept\|books]` (`/соглашение`) | Server rules |
+| `/2fa` · `включить` · `подтвердить <code>` · `выключить <code>` · `коды <code>` · `<code>` | Two-factor authentication; a bare code is the second login step |
+| `/слово` (`/codeword`) · `установить <word>` · `снять <word>` · `<word>` | Code word |
 | `/auth история`, `/auth lock` | Account history, panic lock |
 
 | Staff (op 3+, also from the console) | |
 |---|---|
 | `/auth status <name>`, `/auth links <name>`, `/auth stats` | Inspect accounts and links |
-| `/auth unlock`, `/auth unregister`, `/auth 2fa reset <name>` | Recovery |
-| `/связи [name]`, `/связи доверять\|наблюдать\|мульти\|сброс <a> <b>` | Account-link verdicts |
+| `/auth unlock <name>`, `/auth unregister <name>`, `/auth 2fa reset <name>` | Recovery |
+| `/auth sessions clear` | Drop all IP sessions |
+| `/auth strict [on\|off]` | Strict login for yourself as an operator (always ask for the password) |
+| `/связи` (`/links`) — the queue of undecided links; `/связи <name>` | Account links and their verdicts |
+| `/связи доверять\|наблюдать\|мульти\|сброс <a> <b> [note]`, `/связи доверять-все <name>` | Record a verdict on a pair, or trust all of an account's links |
 | `/auth reload` | Reload the config |
 
 ## Storage and configuration
