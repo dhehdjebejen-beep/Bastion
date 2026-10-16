@@ -329,6 +329,14 @@ public abstract class ServerPlayNetworkHandlerMixin {
         if (!isAttack[0]) {
             // A right-click on an entity through a wall (InteractWalls, 3.3.1).
             Entity used = packet.getEntity(player.getEntityWorld());
+            long nowTick = BastionAC.serverTick();
+            if (used != null && clickedAt[0] != null) {
+                d.lastInteractAtEntity = used.getId();
+                d.lastInteractAtTick = nowTick;
+                d.lastInteractAtPos = clickedAt[0];
+            } else if (used != null && used.getId() == d.lastInteractAtEntity && nowTick - d.lastInteractAtTick <= 1) {
+                clickedAt[0] = d.lastInteractAtPos;   // the plain INTERACT of the same click
+            }
             if (used != null && used != player && CombatChecks.interactWalls(player, d, used, clickedAt[0])) {
                 ci.cancel();
             }

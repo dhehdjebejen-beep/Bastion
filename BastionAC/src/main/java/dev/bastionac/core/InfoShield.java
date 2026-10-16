@@ -193,10 +193,24 @@ public final class InfoShield {
     }
 
     private static Packet<?> loudSound(ServerPlayerEntity to, PlaySoundS2CPacket sound) {
-        Vec3d at = towards(to.getEyePos(), new Vec3d(sound.getX(), sound.getY(), sound.getZ()), LOUD_SOUND_KEEP);
+        Vec3d src = new Vec3d(sound.getX(), sound.getY(), sound.getZ());
+        Vec3d at = towards(to.getEyePos(), src, LOUD_SOUND_KEEP);
         if (at == null) return sound;
+        float volume = keptLoudness(sound.getVolume(), to.getEyePos().distanceTo(src), LOUD_SOUND_KEEP);
         return new PlaySoundS2CPacket(sound.getSound(), sound.getCategory(), at.x, at.y, at.z,
-                sound.getVolume(), sound.getPitch(), sound.getSeed());
+                volume, sound.getPitch(), sound.getSeed());
+    }
+
+    /**
+     * The volume that makes a sound moved from {@code dist} to {@code keep}
+     * blocks sound as loud as before (3.3.2). The client fades a sound
+     * linearly to zero at 16 × max(volume, 1) blocks, so a horn moved from 200
+     * to 64 blocks was three times louder than it should be. Scaling the volume
+     * by keep / dist keeps the fade at the listener exactly the same.
+     */
+    static float keptLoudness(float volume, double dist, double keep) {
+        if (!(dist > keep) || volume <= 1f) return volume;
+        return (float) Math.max(1.0, volume * keep / dist);
     }
 
     /**

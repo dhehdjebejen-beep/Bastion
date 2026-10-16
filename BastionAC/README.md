@@ -18,6 +18,22 @@ the final pass. Every stage's time is kept for the last run. The case list updat
 the cases that are moving. Only the changed slot is sent; the window is never
 reopened.
 
+## New in 3.3.2 (hotfix)
+
+- **Argus for players who left.** An investigation of an offline player reads
+  their last recorded session; the name is matched case-insensitively against
+  their telemetry. Before, every request read the hour before now — empty for
+  a player who had left.
+- **Investigate a past alert.** In the alert history: left click — Argus reads the
+  session that was running at that alert; right click — teleport to where it
+  happened; shift-left — the player's cases (offline too).
+- **Outcomes are visible.** Each alert shows Argus's case and verdict; a case opened
+  by alerts that ends clean or with too little data tells staff once; cases closed
+  in the last day stay listed.
+- Coordinates in the alert line and in the history; the plain entity-interact
+  packet is judged by its click point (trading over a counter); sounds moved by
+  the info shield keep their loudness.
+
 ## New in 3.3.1
 
 - **Info shield.**

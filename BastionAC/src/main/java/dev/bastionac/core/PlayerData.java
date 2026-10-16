@@ -90,6 +90,15 @@ public final class PlayerData {
     public double airPlaceBuffer;
     /** Clicks through a wall, decaying on every clean one (InteractWalls). */
     public double interactWallsBuffer;
+    /**
+     * The point of the last interact-at on an entity (3.3.2): a vanilla
+     * right-click sends INTERACT_AT with the point and then a plain INTERACT
+     * without one (a villager answers only the second). The second is judged
+     * by the first one's point instead of the centre, head and nearest point.
+     */
+    public int lastInteractAtEntity = -1;
+    public long lastInteractAtTick = -10;
+    public net.minecraft.util.math.Vec3d lastInteractAtPos;
 
     // ---------------- inventory move ----------------
     /** Server tick of the last inventory click. */

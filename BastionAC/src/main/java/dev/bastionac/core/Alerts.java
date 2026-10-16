@@ -55,14 +55,18 @@ public final class Alerts {
         BastionAC.LOGGER.warn("[ALERT] {} failed {} (VL {}): {}",
                 name, type.key, String.format("%.1f", vl), details);
 
+        // The coordinates in the line itself, not only on hover (3.3.2).
         MutableText line = TextFmt.literal(alertPrefix + " &e" + name
-                + " &7» &f" + type.key + " &8VL &f" + String.format("%.1f", vl) + " &8[&bTP&8]");
+                + " &7» &f" + type.key + " &8VL &f" + String.format("%.1f", vl)
+                + " &8(" + pos.getX() + " " + pos.getY() + " " + pos.getZ() + ") &8[&bTP&8]");
 
         MutableText hover = TextFmt.literal(
                 "&7Проверка: &f" + type.key + "\n"
                 + "&7Детали: &f" + details + "\n"
                 + "&7VL: &f" + String.format("%.1f", vl) + "\n"
-                + "&7Коорд: &f" + pos.getX() + " " + pos.getY() + " " + pos.getZ() + "\n"
+                + "&7Коорд: &f" + String.format(java.util.Locale.ROOT, "%.2f %.2f %.2f",
+                        suspect.getX(), suspect.getY(), suspect.getZ())
+                + " &8(" + suspect.getEntityWorld().getRegistryKey().getValue().getPath() + ")\n"
                 + "&7Пинг: &f" + ping + " мс\n"
                 + "&8Клик — телепорт к игроку");
 
@@ -152,6 +156,21 @@ public final class Alerts {
         MutableText clickable = (MutableText) line.styled(s -> s
                 .withClickEvent(new ClickEvent.RunCommand("/bac argus case " + caseId))
                 .withHoverEvent(new HoverEvent.ShowText(TextFmt.literal(hover.toString()))));
+        for (ServerPlayerEntity op : srv.getPlayerManager().getPlayerList()) {
+            if (isAdmin(op) && isEnabledFor(op)) op.sendMessage(clickable, false);
+        }
+    }
+
+    /** A short Argus outcome for staff — click opens the case (3.3.2). */
+    public static void sendArgusNote(String name, String caseId, String outcome) {
+        MinecraftServer srv = BastionAC.server();
+        if (srv == null) return;
+        String alertPrefix = BastionAC.config().messages.alertPrefix;
+        MutableText line = TextFmt.literal(alertPrefix + " &8[&5Аргус&8] &e" + name + " &7» " + outcome
+                + " &8[&dдело #" + caseId + "&8]");
+        MutableText clickable = (MutableText) line.styled(s -> s
+                .withClickEvent(new ClickEvent.RunCommand("/bac argus case " + caseId))
+                .withHoverEvent(new HoverEvent.ShowText(TextFmt.literal("&8Клик — открыть дело"))));
         for (ServerPlayerEntity op : srv.getPlayerManager().getPlayerList()) {
             if (isAdmin(op) && isEnabledFor(op)) op.sendMessage(clickable, false);
         }

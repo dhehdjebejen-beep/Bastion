@@ -177,6 +177,7 @@ public final class Argus {
                 case CLOSE -> {
                     c.status = CaseFile.Status.CLOSED;
                     c.closedAt = now;
+                    if (c.awaitsDecision()) c.closeNote = "мало данных при алертах — нужен взгляд персонала";
                     changed = true;
                 }
                 case NONE -> changed |= wasFinal != c.finalPass;
@@ -213,6 +214,20 @@ public final class Argus {
             c.finalPass = false;
         }
         c.addSignal(s);
+        if (s.kind() == Signal.Kind.MANUAL) {
+            // A staff request may name the span to read (an offline player's
+            // last session, the session behind an old alert); without one the
+            // case reads around now, as before.
+            SessionLocator.Window w = PENDING_WINDOWS.remove(s.uuid().toString());
+            c.windowFrom = w == null ? 0 : w.from();
+            c.windowTo = w == null ? 0 : w.to();
+            c.windowNote = w == null ? null : w.note();
+        } else if (c.windowTo > 0) {
+            // Live play again: the case reads the present.
+            c.windowFrom = 0;
+            c.windowTo = 0;
+            c.windowNote = null;
+        }
         if (s.kind() == Signal.Kind.CHAIN_BURNED || s.kind() == Signal.Kind.CORRECTION_LOOP) {
             c.dueAt = Math.min(c.dueAt, now + 30_000L);
         }
@@ -242,8 +257,13 @@ public final class Argus {
         in.uuid = c.uuid;
         in.name = c.name;
         long now = System.currentTimeMillis();
-        in.from = CaseLifecycle.readFrom(c, now, cfg.windowMinutes * 60_000L);
-        in.to = now;
+        if (c.windowTo > 0) {
+            in.from = c.windowFrom;
+            in.to = c.windowTo;
+        } else {
+            in.from = CaseLifecycle.readFrom(c, now, cfg.windowMinutes * 60_000L);
+            in.to = now;
+        }
         in.worldSample = srv.getPlayerManager().getPlayer(uuid) != null
                 && (c.count(Signal.Kind.XRAY_PROBE) > 0 || c.count(Signal.Kind.MANUAL) > 0
                 || c.count(Signal.Kind.CHAIN_BURNED) > 0 || c.count(Signal.Kind.SESSION_SCAN) > 0);
@@ -345,7 +365,39 @@ public final class Argus {
         boolean online = srv != null && srv.getPlayerManager().getPlayer(UUID.fromString(c.uuid)) != null;
         CaseLifecycle.settle(c, online, now, solidGround(r, c, cfg));
         act(c, r, before, cfg);
+        tellAlertsCleared(c, cfg);
         store.save();
+    }
+
+    /**
+     * A case the alerts opened and whose final word is "clean" or "too little
+     * data": staff hear it once (3.3.2). Before, only a suspicious or guilty
+     * verdict said anything — an alert Argus looked at and cleared looked
+     * exactly like one it never looked at.
+     */
+    private static void tellAlertsCleared(CaseFile c, ACConfig.ArgusCfg cfg) {
+        if (!cfg.notifyClearedAlertCases || c.clearedNotified || !c.finalPass || "SHADOW".equals(mode())) return;
+        if (c.verdict != CaseFile.Verdict.CLEAN && c.verdict != CaseFile.Verdict.INSUFFICIENT) return;
+        String checks = alertChecks(c);
+        if (checks.isEmpty()) return;
+        c.clearedNotified = true;
+        String outcome = c.verdict == CaseFile.Verdict.CLEAN
+                ? "&aчисто &7— алерты (" + checks + ") телеметрией не подтвердились"
+                : "&7мало данных для вывода при алертах (" + checks + ") &e— посмотри сам";
+        dev.bastionac.core.Alerts.sendArgusNote(c.name, c.id, outcome);
+    }
+
+    /** "fly ×3, highjump" — the checks whose alerts fed this case. */
+    static String alertChecks(CaseFile c) {
+        java.util.Map<String, Integer> n = new java.util.LinkedHashMap<>();
+        for (CaseFile.SignalEntry e : c.signals) {
+            if (!Signal.Kind.ALERT.name().equals(e.kind) || e.detail == null) continue;
+            int sp = e.detail.indexOf(' ');
+            n.merge(sp > 0 ? e.detail.substring(0, sp) : e.detail, 1, Integer::sum);
+        }
+        List<String> parts = new ArrayList<>();
+        n.forEach((k, v) -> parts.add(v > 1 ? k + " ×" + v : k));
+        return String.join(", ", parts);
     }
 
     /** Whoever pressed "investigate" hears the outcome, clean or not — "итог придёт сюда". */
@@ -482,9 +534,55 @@ public final class Argus {
     // ---------------------------------------------------------------- staff actions
 
     /** An admin asks for an investigation now. Returns the case id. */
+    /** The outcome of a staff request: the case it opened, or why there is none; and what is being read. */
+    public record Investigation(String caseId, String error, String note) {}
+
+    /** Spans a staff request asked for, handed from {@link #investigate} to the intake of its signal. */
+    private static final java.util.Map<String, SessionLocator.Window> PENDING_WINDOWS =
+            new java.util.concurrent.ConcurrentHashMap<>();
+
+    /**
+     * Investigate a player whether or not they are online (3.3.2):
+     * {@code atMs <= 0} — online: the last hour, as always; offline: their last
+     * recorded session. {@code atMs > 0} — the session that was running at
+     * that moment (an alert in the history). Before, every request read the
+     * hour before now, so a player who had left had nothing to read.
+     */
+    public static Investigation investigate(UUID uuid, String name, String by, long atMs) {
+        if (!ready) return new Investigation(null, "Аргус не запущен", null);
+        MinecraftServer srv = BastionAC.server();
+        boolean online = srv != null && srv.getPlayerManager().getPlayer(uuid) != null;
+        if (online && atMs <= 0) {
+            String id = manual(uuid, name, by);
+            return new Investigation(id, id == null ? "Аргус выключен в конфиге" : null, "последний час, игрок в сети");
+        }
+        Telemetry.flushNow(uuid);
+        SessionLocator.Window w = SessionLocator.find(uuid.toString(), atMs);
+        if (w == null) {
+            return new Investigation(null, "нет телеметрии " + (atMs > 0 ? "за это время" : "этого игрока")
+                    + " (хранится " + BastionAC.config().telemetry.retentionDays + " дн.)", null);
+        }
+        if (online && w.to() >= System.currentTimeMillis() - SessionLocator.MARGIN_MS) {
+            // The alert is from the session being played right now: the live case.
+            String id = manual(uuid, name, by);
+            return new Investigation(id, id == null ? "Аргус выключен в конфиге" : null, "текущая сессия");
+        }
+        PENDING_WINDOWS.put(uuid.toString(), w);
+        try {
+            String id = manual(uuid, name, by, "запросил " + by + ": " + w.note());
+            return new Investigation(id, id == null ? "Аргус выключен в конфиге" : null, w.note());
+        } finally {
+            PENDING_WINDOWS.remove(uuid.toString());
+        }
+    }
+
     public static String manual(UUID uuid, String name, String by) {
+        return manual(uuid, name, by, "запросил " + by);
+    }
+
+    private static String manual(UUID uuid, String name, String by, String detail) {
         if (!ready) return null;
-        signal(uuid, name, Signal.Kind.MANUAL, "запросил " + by);
+        signal(uuid, name, Signal.Kind.MANUAL, detail);
         MinecraftServer srv = BastionAC.server();
         // Take the signal in and queue the case at once. (This used to call the
         // whole tick with tick=0, which also pruned and rewrote every file.)

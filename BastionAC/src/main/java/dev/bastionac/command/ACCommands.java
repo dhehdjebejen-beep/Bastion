@@ -108,14 +108,20 @@ public final class ACCommands {
                             ServerCommandSource src = ctx.getSource();
                             String name = getString(ctx, "ник");
                             ServerPlayerEntity target = src.getServer().getPlayerManager().getPlayer(name);
+                            // Offline: the uuid and exact name from the player's own telemetry
+                            // (an offline-mode uuid from a mistyped case points at nobody).
+                            String[] known = target == null ? dev.bastionac.argus.SessionLocator.byName(name) : null;
                             java.util.UUID id = target != null ? target.getUuid()
+                                    : known != null ? java.util.UUID.fromString(known[0])
                                     : net.minecraft.util.Uuids.getOfflinePlayerUuid(name);
-                            String real = target != null ? target.getGameProfile().name() : name;
-                            String caseId = dev.bastionac.argus.Argus.manual(id, real, src.getName());
-                            src.sendFeedback(() -> dev.bastionac.core.TextFmt.literal(caseId == null
-                                    ? "&c[Аргус] Аргус не запущен"
-                                    : "&5[Аргус] &7Дело #" + caseId + " (" + real + ") — разбор начат"), false);
-                            return 1;
+                            String real = target != null ? target.getGameProfile().name() : known != null ? known[1] : name;
+                            dev.bastionac.argus.Argus.Investigation inv =
+                                    dev.bastionac.argus.Argus.investigate(id, real, src.getName(), 0);
+                            src.sendFeedback(() -> dev.bastionac.core.TextFmt.literal(inv.caseId() == null
+                                    ? "&c[Аргус] " + real + ": " + inv.error()
+                                    : "&5[Аргус] &7Дело #" + inv.caseId() + " (" + real + ") — разбор начат &8(" + inv.note()
+                                            + "), итог придёт сюда"), false);
+                            return inv.caseId() == null ? 0 : 1;
                         })))
                         .then(literal("explain").then(argument("id", word()).executes(ctx -> {
                             dev.bastionac.argus.CaseFile c = dev.bastionac.argus.Argus.get(getString(ctx, "id"));

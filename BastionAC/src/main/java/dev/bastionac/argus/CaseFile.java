@@ -99,6 +99,17 @@ public final class CaseFile {
     /** The player's previous case, when this one was opened as a new episode after it. */
     public String previousCaseId;
 
+    /**
+     * An explicit span to read instead of "around the case" — a past session
+     * staff asked about, or the last session of a player who is offline
+     * (3.3.2). Zero = the usual window. Live play clears it.
+     */
+    public long windowFrom, windowTo;
+    /** What that span is, for the staff ("сессия 15.10 21:04–22:10"). */
+    public String windowNote;
+    /** Staff were told that the alerts behind this case did not hold up (once). */
+    public boolean clearedNotified;
+
     /** Bumped for every analysis handed to the Argus thread; a result carries the one it was started with. */
     public int generation;
     /** An analysis of this case is on the Argus thread right now (not stored: a restart loses the job). */
@@ -139,9 +150,11 @@ public final class CaseFile {
      * make an undecided verdict disappear from the staff's view.
      */
     public boolean awaitsDecision() {
-        return !open() && label == Label.NONE
-                && (verdict == Verdict.SUSPECT || verdict == Verdict.GUILTY)
-                && action != Action.BANNED && action != Action.DISMISSED;
+        if (open() || label != Label.NONE || action == Action.BANNED || action == Action.DISMISSED) return false;
+        if (verdict == Verdict.SUSPECT || verdict == Verdict.GUILTY) return true;
+        // Alerts fired but the telemetry was too thin to judge either way: a
+        // person has to look — closing it silently is how it went unnoticed (3.3.2).
+        return verdict == Verdict.INSUFFICIENT && count(Signal.Kind.ALERT) > 0;
     }
 
     public void addSignal(Signal s) {

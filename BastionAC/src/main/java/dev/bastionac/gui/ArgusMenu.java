@@ -39,7 +39,11 @@ public final class ArgusMenu {
         List<CaseFile> cases = new ArrayList<>(Argus.cases());
         // Closed, undecided "suspicious"/"guilty" cases (e.g. replaced by a new
         // episode) stay listed: closing must not hide a verdict nobody looked at.
-        if (!all) cases.removeIf(c -> !c.open() && c.label == CaseFile.Label.NONE && !c.awaitsDecision());
+        // Also kept by default: cases closed in the last day (3.3.2) — "Argus
+        // looked and cleared it" must be as visible as "Argus is looking".
+        long dayAgo = System.currentTimeMillis() - 86_400_000L;
+        if (!all) cases.removeIf(c -> !c.open() && c.label == CaseFile.Label.NONE && !c.awaitsDecision()
+                && c.closedAt < dayAgo);
         // Open and suspicious first, then newest.
         cases.sort(Comparator.<CaseFile>comparingInt(c -> c.open() ? 0 : 1)
                 .thenComparingInt(c -> -c.verdict.ordinal())
@@ -71,7 +75,7 @@ public final class ArgusMenu {
         gui.button(46, modeButton(), () -> chooseMode(admin));
         gui.button(47, modelButton(), () -> {});
         gui.button(48, GuiItems.item(all ? Items.BOOK : Items.WRITABLE_BOOK,
-                all ? "&fПоказаны все дела" : "&fПоказаны открытые и размеченные",
+                all ? "&fПоказаны все дела" : "&fПоказаны открытые, размеченные и за сутки",
                 "&8клик — переключить"), () -> open(admin, 0, !all));
         gui.button(49, GuiItems.back("в панель"), () -> ACPanel.open(admin));
         if (p > 0) gui.button(52, GuiItems.item(Items.ARROW, "&7← стр. " + p), () -> open(admin, p - 1, all));
@@ -116,6 +120,7 @@ public final class ArgusMenu {
         head.add("&7Вердикт: " + c.verdict.colour + c.verdict.label);
         if (c.closeNote != null) head.add("&8" + c.closeNote);
         if (c.previousCaseId != null) head.add("&7Прошлое дело: &f#" + c.previousCaseId);
+        if (c.windowNote != null) head.add("&7Читается: &f" + c.windowNote);
         if (c.analyses > 0) {
             head.add(String.format(Locale.ROOT, "&7Оценка: &f%.1f%% &8(улик %.1f, сигналы %.1f)", c.score * 100, c.evidence, c.signalEvidence));
             c.categories.forEach((k, v) -> head.add(String.format(Locale.ROOT, "&7  %s: &f%.0f%%", k, v * 100)));
@@ -228,6 +233,11 @@ public final class ArgusMenu {
 
     /** Cases of one player, from the player card. */
     static void openPlayer(ServerPlayerEntity admin, UUID uuid, String name) {
+        openPlayer(admin, uuid, name, () -> ACPlayerMenu.openCard(admin, uuid));
+    }
+
+    /** As above, with where "back" leads (the alert history for a player who is offline). */
+    static void openPlayer(ServerPlayerEntity admin, UUID uuid, String name, Runnable back) {
         List<CaseFile> cases = new ArrayList<>(Argus.casesOf(uuid));
         cases.sort(Comparator.comparingLong((CaseFile c) -> c.openedAt).reversed());
         ChestGui gui = new ChestGui(TextFmt.literal("&8[&5Аргус&8] &7" + name), 4);
@@ -238,13 +248,9 @@ public final class ArgusMenu {
             gui.button(slot++, caseIcon(c), () -> openCase(admin, c.id));
         }
         gui.button(31, GuiItems.item(Items.SPYGLASS, "&5Начать расследование",
-                "&7Аргус прочитает последний час", "&7телеметрии " + name + " сейчас."), () -> {
-            String id = Argus.manual(uuid, name, admin.getGameProfile().name());
-            admin.sendMessage(TextFmt.literal(id == null ? "&c[Аргус] Аргус не запущен"
-                    : "&5[Аргус] &7Дело #" + id + " — разбор начат, итог придёт сюда"), false);
-            if (id != null) openCase(admin, id);
-        });
-        gui.button(27, GuiItems.back("к карточке"), () -> ACPlayerMenu.openCard(admin, uuid));
+                "&7В сети — последний час телеметрии,", "&7не в сети — последняя сессия " + name + "."),
+                () -> investigate(admin, uuid, name, 0));
+        gui.button(27, GuiItems.back("назад"), back);
         gui.fill(GuiItems.filler());
         gui.open(admin);
     }
@@ -314,6 +320,35 @@ public final class ArgusMenu {
         if (current) lines.add("&a✔ выбрано (" + c.labelBy + ")");
         else lines.add("&8клик — отметить");
         return GuiItems.item(current ? Items.NETHER_STAR : icon, title, lines);
+    }
+
+    /**
+     * Starts an investigation — online or not, now or at a past moment — tells
+     * the admin what is being read, and opens the case (3.3.2).
+     */
+    static void investigate(ServerPlayerEntity admin, UUID uuid, String name, long atMs) {
+        Argus.Investigation inv = Argus.investigate(uuid, name, admin.getGameProfile().name(), atMs);
+        if (inv.caseId() == null) {
+            admin.sendMessage(TextFmt.literal("&c[Аргус] " + name + ": " + inv.error()), false);
+            return;
+        }
+        admin.sendMessage(TextFmt.literal("&5[Аргус] &7Дело #" + inv.caseId() + " (" + name + ") — разбор начат &8("
+                + inv.note() + ")&7, итог придёт сюда"), false);
+        openCase(admin, inv.caseId());
+    }
+
+    /** One line for an alert: what Argus made of the player around that moment. */
+    static String caseLineFor(UUID uuid, long atMs) {
+        CaseFile best = null;
+        for (CaseFile c : Argus.casesOf(uuid)) {
+            // A case the alert itself opened or fed: opened at most 6 h before it, not after it.
+            if (c.openedAt > atMs + 120_000L || c.openedAt < atMs - 6 * 3_600_000L) continue;
+            if (best == null || c.openedAt > best.openedAt) best = c;
+        }
+        if (best == null) return "&5Аргус: &7дела по этому моменту нет";
+        return "&5Аргус: &7дело #" + best.id + " — " + best.verdict.colour + best.verdict.label
+                + (best.analyses > 0 ? String.format(Locale.ROOT, " &8(%.0f%%)", best.score * 100) : "")
+                + (best.open() ? "" : " &8· закрыто");
     }
 
     // ---------------------------------------------------------------- live progress (3.2)

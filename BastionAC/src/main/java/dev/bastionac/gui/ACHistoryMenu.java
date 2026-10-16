@@ -53,7 +53,11 @@ final class ACHistoryMenu {
         int start = page * PER_PAGE;
         for (int i = 0; i < PER_PAGE && start + i < all.size(); i++) {
             Event e = all.get(start + i);
-            gui.button(i, icon(e, showName), () -> onClick(admin, e));
+            if (parseKind(e.kind) == HistoryManager.Kind.ALERT) {
+                gui.set(i, icon(e, showName), (p, t) -> onAlertClick(admin, e, t, () -> reopen.accept(pageNow(all, e))));
+            } else {
+                gui.button(i, icon(e, showName), () -> onClick(admin, e));
+            }
         }
         if (all.isEmpty()) gui.button(22, GuiItems.item(Items.BOOK, "&7Пока пусто"), () -> {});
 
@@ -96,14 +100,87 @@ final class ACHistoryMenu {
         }
     }
 
+    /**
+     * An alert in the history (3.3.2): left — Argus investigates the session
+     * that was running at that moment, online or not; right — teleport to
+     * where it happened; shift-left — the player's cases; shift-right — the
+     * player's card (online only).
+     */
+    private static void onAlertClick(ServerPlayerEntity admin, Event e, ChestGui.ClickType t, Runnable back) {
+        UUID uuid;
+        try {
+            uuid = UUID.fromString(e.uuid);
+        } catch (IllegalArgumentException ex) {
+            return;
+        }
+        switch (t) {
+            case LEFT -> ArgusMenu.investigate(admin, uuid, e.name, e.time);
+            case RIGHT -> teleportTo(admin, e);
+            case SHIFT_LEFT -> ArgusMenu.openPlayer(admin, uuid, e.name, back);
+            case SHIFT_RIGHT -> {
+                if (admin.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid) != null) {
+                    ACPlayerMenu.openCard(admin, uuid);
+                } else {
+                    admin.sendMessage(TextFmt.literal("&7[BAC] " + e.name + " не в сети — ЛКМ: расследование Аргуса"), false);
+                }
+            }
+        }
+    }
+
+    /** The page the event is on now (the feed may have grown since it was drawn). */
+    private static int pageNow(List<Event> all, Event e) {
+        int i = all.indexOf(e);
+        return i < 0 ? 0 : i / PER_PAGE;
+    }
+
+    /** Teleports the admin to where the alert happened (its world and the server's position then). */
+    private static void teleportTo(ServerPlayerEntity admin, Event e) {
+        double[] p = alertPos(e);
+        String worldId = e.evidence == null ? null : e.evidence.get("world");
+        var srv = admin.getEntityWorld().getServer();
+        net.minecraft.server.world.ServerWorld world = null;
+        if (worldId != null) {
+            try {
+                world = srv.getWorld(net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.WORLD,
+                        net.minecraft.util.Identifier.of(worldId)));
+            } catch (RuntimeException ignored) {
+            }
+        }
+        if (p == null || world == null) {
+            admin.sendMessage(TextFmt.literal("&c[BAC] У этого алерта нет сохранённой позиции"), false);
+            return;
+        }
+        admin.teleport(world, p[0], p[1], p[2], java.util.Set.of(), admin.getYaw(), admin.getPitch(), false);
+        admin.closeHandledScreen();
+        admin.sendMessage(TextFmt.literal(String.format(java.util.Locale.ROOT,
+                "&7[BAC] Место алерта %s (%s): &f%.1f %.1f %.1f", e.check, e.name, p[0], p[1], p[2])), false);
+    }
+
+    /** The server's position of the player at the alert, from its evidence ("x,y,z"); null if none. */
+    static double[] alertPos(Event e) {
+        if (e.evidence == null) return null;
+        String s = e.evidence.get("serverPos");
+        if (s == null) return null;
+        String[] parts = s.split(",");
+        if (parts.length != 3) return null;
+        try {
+            return new double[]{Double.parseDouble(parts[0]), Double.parseDouble(parts[1]), Double.parseDouble(parts[2])};
+        } catch (NumberFormatException ex) {
+            return null;
+        }
+    }
+
     private static void appendEvidence(List<String> lore, Event e) {
         if (e.evidence == null || e.evidence.isEmpty()) return;
         String tick = e.evidence.getOrDefault("tick", "?");
         String tickMs = e.evidence.getOrDefault("tickMs", "?");
         String ping = e.evidence.getOrDefault("pingMs", "?");
         String world = e.evidence.getOrDefault("world", "?");
+        double[] p = alertPos(e);
+        // Where it happened, readable at a glance (it used to be the last grey line).
+        lore.add(p == null ? "&7Где: &8позиция неизвестна" : String.format(java.util.Locale.ROOT,
+                "&7Где: &f%.1f %.1f %.1f &8(%s)", p[0], p[1], p[2], world.replace("minecraft:", "")));
         lore.add("&8tick " + tick + " · " + tickMs + " ms · ping " + ping + " ms");
-        lore.add("&8" + world + " · " + e.evidence.getOrDefault("serverPos", "позиция неизвестна"));
         String shadow = e.evidence.get("shadow");
         if (shadow != null && !shadow.isBlank()) lore.add("&8" + shadow);
     }
@@ -119,6 +196,13 @@ final class ACHistoryMenu {
                 if (e.details != null && !e.details.isEmpty()) lore.add("&8" + e.details);
                 appendEvidence(lore, e);
                 lore.add("&8" + when);
+                try {
+                    lore.add(ArgusMenu.caseLineFor(UUID.fromString(e.uuid), e.time));
+                } catch (IllegalArgumentException ignored) {
+                }
+                lore.add("&8ЛКМ — Аргус: разобрать эту сессию");
+                lore.add("&8ПКМ — телепорт к месту алерта");
+                lore.add("&8Shift+ЛКМ — дела игрока · Shift+ПКМ — карточка");
                 return GuiItems.head(e.name, "&e⚠ " + e.check, lore);
             }
             case TEMPBAN, MANUAL_BAN, ARGUS_BAN -> {

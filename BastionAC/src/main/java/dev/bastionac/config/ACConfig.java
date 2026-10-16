@@ -272,6 +272,12 @@ public final class ACConfig {
         public int autoBanMinMinutes = 10;
         /** Every finished session is read once to learn what normal looks like (and to catch what nobody flagged). */
         public boolean analyzeEverySession = true;
+        /**
+         * Tell staff when a case the alerts opened ends "clean" or "too little
+         * data" (once per case), so a cleared alert is not mistaken for one
+         * Argus never looked at.
+         */
+        public boolean notifyClearedAlertCases = true;
         /** The analyzer pauses while the server's average tick is above this (ms). */
         public double pauseAboveMspt = 45.0;
         /** Closed cases are kept this many days. */
