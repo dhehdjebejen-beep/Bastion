@@ -21,6 +21,15 @@ class PasswordPolicyTest {
     }
 
     @Test
+    void handlesNullInputsSafely() {
+        assertEquals("password.tooShort", policy().validate("Steve", null).messageKey());
+        assertNull(policy().validate(null, "krepkiyParol42"));
+        PasswordPolicy nullPolicy = new PasswordPolicy(null, null);
+        assertEquals("password.tooShort", nullPolicy.validate(null, null).messageKey());
+        assertNull(nullPolicy.validate(null, "krepkiyParol42"));
+    }
+
+    @Test
     void rejectsSpaces() {
         assertEquals("password.noSpaces", policy().validate("Steve", "has space1").messageKey());
     }
