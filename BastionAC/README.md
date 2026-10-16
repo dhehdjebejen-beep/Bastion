@@ -7,17 +7,6 @@ mod. It started as a targeted answer to **Meteor** and its forks and grew into a
 general engine; version 2.24 added a full pass over **Wurst 7**, built from that
 client's own source and defaults.
 
-## New in 3.2 — Argus progress, live
-
-The case card shows what Argus is doing with the case right now and how long it
-takes, redrawn twice a second while the card is open: collecting (with a
-countdown), queued (jobs ahead), waiting for a lagging server, then each stage of
-the analysis — telemetry files read, physics replay, packets, combat, client, the
-rock around the tunnels (cells read), mining, scoring — and finally the wait for
-the final pass. Every stage's time is kept for the last run. The case list updates
-the cases that are moving. Only the changed slot is sent; the window is never
-reopened.
-
 ## New in 3.4
 
 - **ClickTP closed.** One packet carrying a player on foot more than 2 blocks
@@ -98,6 +87,17 @@ reopened.
 - `./gradlew argusLab` runs the bench; `--args="500 12 --write"` retrains the
   model. Full report in Russian: [ARGUS-LAB.ru.md](ARGUS-LAB.ru.md).
 
+## New in 3.2 — Argus progress, live
+
+The case card shows what Argus is doing with the case right now and how long it
+takes, redrawn twice a second while the card is open: collecting (with a
+countdown), queued (jobs ahead), waiting for a lagging server, then each stage of
+the analysis — telemetry files read, physics replay, packets, combat, client, the
+rock around the tunnels (cells read), mining, scoring — and finally the wait for
+the final pass. Every stage's time is kept for the last run. The case list updates
+the cases that are moving. Only the changed slot is sent; the window is never
+reopened.
+
 ## New in 3.1
 
 - **Argus obeys staff and answers in minutes.** A cheater / not a cheater / ban /
@@ -164,19 +164,19 @@ reopened.
    damage although vanilla had to charge it") catches all of them. Where it helps,
    both run side by side.
 
-## Checks (40)
+## Checks (41)
 
 | Area | Checks |
 |---|---|
 | Movement | Speed · Fly · HighJump · BigMove · Timer (balance on arrival time) · Blink · NoSlow · NoWeb · GroundSpoof · AntiHunger · NoFall (by packet *and* by outcome) · FastFall (vanilla gravity curve) · Spider · FastLadder · Jesus · Step · PacketOrder |
 | Combat | Reach (lag-compensated against the victim's hitbox history) · Angle · Aim (exact hitbox-centre lock, flick-and-return) · Walls · MultiTarget · UseAttack · NoSwing · Criticals · Velocity · CPS · AutoTotem · EntityPredict (an attack on an entity the client was never sent — CrystalAura id prediction) |
-| World | FastBreak · FastPlace · Nuker · PacketMine · Scaffold · AirPlace · AutoPlace (computed face-centre clicks) · XRay (statistical, staff alerts, never bans) |
+| World | FastBreak · FastPlace · Nuker · PacketMine · Scaffold · AirPlace · AutoPlace (computed face-centre clicks) · InteractWalls (a block clicked or broken, or an entity used, through a wall) · XRay (statistical, staff alerts, never bans) |
 | Rhythm | AutoClick · AutoAction — machine-even timing at human-plausible rates |
 | Client & transport | Vehicle (BoatFly) · InvMove · BrandSpoof · GCD (aim grid) · BadRotation |
 | Protocol guard | Packet flood · book/NBT bombs · creative-slot smuggling |
 | Analysis (Argus) | Not checks but a session-level investigation: vanilla physics replay, tick rate and held-back movement, faked ping, aim and clicking, X-ray reveal test against the world — see «New in 3.0» |
 
-40 is the number of check types. HighJump, NoWeb, AntiHunger and FastLadder are signatures inside Fly, NoSlow, GroundSpoof and Spider. The protocol guard is a separate filter, and Argus is a separate analysis layer.
+41 is the number of check types. HighJump, NoWeb, AntiHunger and FastLadder are signatures inside Fly, NoSlow, GroundSpoof and Spider. The protocol guard is a separate filter, and Argus is a separate analysis layer.
 
 ## Client versions
 
@@ -204,18 +204,55 @@ flowchart LR
     V -->|alertVl| AL[Staff alert]
     V -->|mitigateVl| MI[Setback / cancel the action]
     V -->|kickVl| KI[Kick]
-    AL -->|N alerts in a window| TB[Temp-ban ladder<br/>1h → 6h → 24h → 7d]
-    AL --> CH{Attack chain:<br/>distinct checks per hour}
+    AL -->|2 ban-eligible alerts<br/>in 50 min| TB[Temp-ban ladder<br/>2h → 12h → 48h → 14d → 30d]
+    AL --> CH{Attack chain:<br/>distinct checks in 60 min}
     CH -->|2| WA[Watch list]
     CH -->|3+ ban-eligible| TB
-    PG[Protocol guard:<br/>crash / flood / smuggling] --> PB[Permanent ban]
+    AR[Argus AUTO verdict] --> TB
+    PG[Protocol guard:<br/>crash / flood / NBT bomb] --> PB[Permanent ban]
 ```
 
-- Heuristic checks such as GCD, AutoClick and XRay are **observe-only**. They alert
-  staff and never ban on their own.
-- Operators are never auto-banned.
-- The chain detector counts *different* checks, not points. One module cannot ban
-  a player through the chain on its own.
+- **VL.** Every flag adds the check's `weight` to its VL; the VL decays by
+  `decayPerSecond`. Crossing `alertVl` alerts staff, `mitigateVl` sets the
+  player back or drops the action, `kickVl` kicks. `-1` turns a stage off.
+- **Temp-ban.** `alertsToBan` (2) alerts from ban-eligible checks inside
+  `alertWindowMinutes` (50) ban through the vanilla ban list. The length is
+  picked by how many bans the player already had in `banHistoryHours`
+  (336 h = 14 days): `banStepsHours` = 2 → 12 → 48 → 336 → 720 hours.
+- **Never ban on their own** (`banExcludedChecks`, 21 checks): bigmove, timer,
+  groundspoof, noswing, autoclick, autoaction, velocity, gcd, xray, vehicle,
+  airplace, invmove, brandspoof, packetorder, aim, autoplace, jesus, autototem,
+  fastfall, entitypredict, interactwalls. They alert, mitigate and feed the
+  chain; staff decide.
+- **Observe-only** (no setback, no kick): autoclick, autoaction, noswing,
+  groundspoof, multitarget, gcd, xray, brandspoof, autototem. BadRotation does
+  not mitigate but kicks at VL 15.
+- **Chain** (`AttackChainDetector`): within `chainWindowMinutes` (60), 2 distinct
+  checks at alert level put the player on the watch list; 3 distinct
+  ban-eligible checks ban through the same ladder. It counts *different* checks,
+  not points, so one module cannot ban a player through the chain. Recon and
+  evasion (leaving before a kick, rejoining) are context and never ban.
+- **Catastrophic filters** (crash exploits, packet floods, NBT and book bombs)
+  ban permanently at once (`catastrophicPermabanEnabled`; when off, the longest
+  ladder step instead).
+- **Staff** (operator level 3+) are never auto-banned, by the ladder, a chain,
+  Argus or the catastrophic filters. They are still alerted and kicked.
+
+## Commands
+
+All `/bac` commands need operator level 3 or higher.
+
+| Command | |
+|---|---|
+| `/bac`, `/bac panel` | Open the panel |
+| `/bac alerts` | Turn alerts on or off for yourself |
+| `/bac status <name>` | A player's current VLs |
+| `/bac freeze <name> [reason]` · `unfreeze <name>` · `frozen` | Freeze a player for a check, release them, list frozen players |
+| `/bac argus` · `argus case <id>` · `argus explain <id>` | Argus case list, one case card, its report in chat |
+| `/bac argus analyze <name>` · `argus status` | Open a case on a player (offline too), Argus queue state |
+| `/bac argus mode shadow\|assist\|auto` | Argus mode |
+| `/bac telemetry [name]` | Telemetry state, for the server or one player |
+| `/bac reload` · `/bac version` | Reload the config · version |
 
 ## Tooling for staff
 
@@ -232,15 +269,141 @@ flowchart LR
 - **Shadow telemetry.** Measures packet pressure and the cost of each check without
   ever acting on it.
 
+## Technical reference
+
+### Default thresholds
+
+Fresh-install values of `checks.<name>` in `config.json`. "—" in mitigate/kick
+means `-1` (stage off); "Bans" says whether the check's alerts count towards
+the temp-ban and the chain.
+
+| Check | Weight | Alert VL | Mitigate VL | Kick VL | Decay /s | Bans |
+|---|---|---|---|---|---|---|
+| `speed` | 1.0 | 6 | 8 | 20 | 0.75 | ✓ |
+| `fly` | 1.0 | 5 | 7 | 20 | 0.75 | ✓ |
+| `spider` | 3.0 | 3 | 4 | 8 | 0.5 | ✓ |
+| `timer` | 1.0 | 4 | 6 | 16 | 0.1 | — |
+| `bigmove` | 5.0 | 5 | 5 | 20 | 0.5 | — |
+| `groundspoof` | 1.0 | 5 | — | — | 0.5 | — |
+| `nofall` | 2.0 | 3 | 5 | 12 | 0.4 | ✓ |
+| `reach` | 1.0 | 3 | 5 | 7 | 0.5 | ✓ |
+| `angle` | 1.0 | 4 | 7 | 10 | 0.75 | ✓ |
+| `walls` | 1.0 | 3 | 6 | 8 | 0.5 | ✓ |
+| `multitarget` | 1.0 | 4 | — | — | 0.75 | ✓ |
+| `useattack` | 1.0 | 2 | 3 | 10 | 0.5 | ✓ |
+| `noswing` | 1.0 | 4 | — | — | 0.75 | — |
+| `cps` | 1.0 | 4 | 6 | 15 | 1.0 | ✓ |
+| `fastbreak` | 1.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `nuker` | 1.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `fastplace` | 1.0 | 4 | 6 | 15 | 1.0 | ✓ |
+| `autoclick` | 1.0 | 3 | — | — | 0.05 | — |
+| `autoaction` | 1.0 | 3 | — | — | 0.05 | — |
+| `velocity` | 2.0 | 3 | 5 | 12 | 0.5 | — |
+| `packetmine` | 2.0 | 4 | 6 | 12 | 0.5 | ✓ |
+| `criticals` | 1.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `blink` | 2.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `noslow` | 1.0 | 3 | 5 | 12 | 0.5 | ✓ |
+| `scaffold` | 2.0 | 4 | 6 | 12 | 0.5 | ✓ |
+| `gcd` | 2.0 | 3 | — | — | 0.05 | — |
+| `xray` | 2.0 | 3 | — | — | 0.05 | — |
+| `vehicle` | 2.0 | 4 | 6 | 14 | 0.5 | — |
+| `airplace` | 3.0 | 3 | 4 | 10 | 0.5 | — |
+| `interactwalls` | 2.0 | 3 | 4 | 12 | 0.5 | — |
+| `invmove` | 1.5 | 4 | 6 | 14 | 0.5 | — |
+| `brandspoof` | 6.0 | 5 | — | — | 0.02 | — |
+| `packetorder` | 2.0 | 4 | 6 | 14 | 0.4 | — |
+| `aim` | 2.0 | 4 | 6 | 12 | 0.1 | — |
+| `autoplace` | 2.0 | 4 | 6 | 12 | 0.2 | — |
+| `jesus` | 1.5 | 4 | 5 | 12 | 0.5 | — |
+| `step` | 3.0 | 3 | 6 | 12 | 0.3 | ✓ |
+| `autototem` | 3.0 | 3 | — | — | 0.02 | — |
+| `badrotation` | 5.0 | 5 | — | 15 | 0.2 | ✓ |
+| `fastfall` | 2.0 | 4 | 6 | 12 | 0.5 | — |
+| `entitypredict` | 3.0 | 3 | 3 | 12 | 0.2 | — |
+
+Selected `general` keys: `maxCps` 14 (hits above it are dropped), `joinGraceTicks`
+60, `setbackMinIntervalTicks` 10, `timerMaxAheadMs` 400, `timerLagBankMs` 3000,
+`velocityVerifyTicks` 4, `velocityMinRatio` 0.6, `velocityConfirmStreak` 3,
+`blinkMaxIatStdMs` 1.0, `noSlowMaxFactor` 0.35. Info shield:
+`hideOtherPlayersHealth`, `hideOtherPlayersEquipmentDetails`,
+`hideSoundOrigins`, `ignoreDeadPlayerActions` (all on), `netherViewDistance` 6
+(0 = off).
+
+### Argus
+
+| Key | Default | Meaning |
+|---|---|---|
+| `argus.mode` | `ASSIST` | `SHADOW` cases only · `ASSIST` verdict + button for staff · `AUTO` bans on its own |
+| `collectMinutes` | 2 | collecting after the first signal before the first analysis |
+| `reanalyzeMinutes` | 3 | a case with new signals is read again at most this often |
+| `deadlineMinutes` | 15 | the final verdict at the latest (sooner on guilty or when the player leaves) |
+| `windowMinutes` | 60 | telemetry read before the signal |
+| `suspectScore` / `guiltyScore` | 0.60 / 0.95 | verdict thresholds |
+| `autoBanScore` | 0.97 | AUTO bans only from this score, with independent evidence |
+| `autoBanMinMinutes` | 10 | AUTO needs this much telemetry unless a fact is physically impossible |
+| `minBaselineSessions` | 20 | AUTO needs this many honest sessions in the server norms first |
+| `pauseAboveMspt` | 45 | the analyser pauses while the server tick is slower |
+| `caseRetentionDays` | 60 | closed cases are kept this long |
+| `worldSampleBlocksPerTick` | 6000 | how fast the X-ray test may read the world |
+
+Features (40, `Features.ALL`) by group:
+- **Movement** — `move.air_gain`, `air_turn`, `ground_gain`, `rise`, `fall_fast`,
+  `jump_nokey`, `move_nokey`, `input_dir`, `sprint_noforward`, `teleport`.
+- **Packets** — `pkt.tick_rate`, `extra_moves`, `timer_episodes`, `blind_stall`,
+  `phase_loops`, `ping_gap`.
+- **Combat** — `cmb.reach`, `reach_lc`, `reach_over`, `aim_error`, `aim_lc_error`,
+  `aim_center`, `aim_lc_center`, `track_lag`, `track_instant`, `snap`, `rot_const`,
+  `gcd_off`, `yaw_grid`, `yaw_wrap`, `click_rhythm`, `rhythm_kurt`, `blind_hit`.
+- **Client** — `cli.brand_spoof`, `cheat_channel`.
+- **Mining** — `mine.reveal_z`, `diamond_reveal_z`, `discovery_rate`,
+  `diamond_discovery`, `wall_breaks`.
+
+Six are *hard* — a vanilla client cannot produce them at all, so they may stand
+on their own: `move.jump_nokey`, `move.teleport`, `pkt.tick_rate`, `cmb.yaw_wrap`,
+`mine.wall_breaks`, `cli.cheat_channel`.
+
+Each feature is scored against the server's own median/MAD of honest players and
+the player's history, then combined by a logistic model whose prior ships in
+`bastionac/argus-prior.json` and is refined by staff labels.
+
+### Telemetry
+
+`telemetry.enabled` (on), `retentionDays` 30, `maxTotalMb` 3072, `maxSessionMb`
+200 (a runaway session stops recording movement), `pingIntervalTicks` 40,
+`recordTargets` and `recordOreContext` on. Files are
+`logs/bastionac/sessions/<date>/<uuid>__<name>__<start>.btl.gz`, written on a
+low-priority thread; `tools/btl_dump.py` prints one as text.
+
+### Files
+
+| Path | What |
+|---|---|
+| `config/bastionac/config.json` | settings; schema version 15, migrated on start without overwriting the admin's own values |
+| `config/bastionac/bans.json` · `history.json` · `networks.json` · `frozen.json` | bans and ban history, alert/punishment history, linked-account map, frozen players |
+| `config/bastionac/argus/cases.json` · `baselines.json` · `model.json` | Argus cases, server norms, the trained weights |
+| `logs/bastionac/sessions/` | session telemetry |
+| `logs/bastionac/argus/` | Argus reports |
+| `logs/bastionac/dumps/` | context-buffer packet dumps (`.dump.gz`) from first alerts |
+
+### With BastionAuth
+
+Through reflection, with no hard dependency: the checks stand down while
+BastionAuth holds a player before login; the limbo return is announced in
+advance (`expectServerMove`), so it is not read as a teleport; the client brand
+BastionAuth captured in the configuration phase feeds BrandSpoof; linked
+accounts arrive through `noteLinkedAccount`, and the panel's network tab reads
+and sets verdicts in BastionAuth's link ledger.
+
 ## Build
 
 ```bash
-./gradlew build   # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test    # 193 unit tests
+./gradlew build      # JDK 21 → build/libs/bastionac-<version>.jar
+./gradlew test       # 202 unit tests
+./gradlew argusLab   # Argus Lab bench; --args="500 12 --write" retrains the prior
 ```
 
-The config is `config/bastionac/config.json`. It has per-check weight, alert,
-mitigate and kick thresholds and decay. It migrates itself between schema versions
-and never overwrites the admin's own tuning.
+Gradle's forked test worker cannot run from a path with non-ASCII characters;
+on such a path `./gradlew test` skips the tests, so build from an ASCII path.
 
 Full Russian documentation and version history: [`DETAILS.ru.md`](DETAILS.ru.md).
+Argus Lab report (Russian): [`ARGUS-LAB.ru.md`](ARGUS-LAB.ru.md).

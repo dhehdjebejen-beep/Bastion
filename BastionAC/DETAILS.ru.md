@@ -581,8 +581,11 @@ GCD (сетка чувствительности мыши) · **BadRotation**.
 **Ленточка одной проверки.** VL растёт → `alertVl` даёт алерт админам →
 `mitigateVl` даёт мягкое противодействие (движение — сетбек на последнюю
 честную позицию; бой и мир — отмена конкретного пакета) → `kickVl` кикает.
-После `alertsToBan` алертов в окне `alertWindowMinutes` включается автоматический
-временный бан по лестнице `banStepsHours`: **1 ч → 6 ч → 24 ч → 168 ч**.
+После `alertsToBan` (2) алертов банящих проверок в окне `alertWindowMinutes`
+(50 мин) — по всем проверкам вместе — включается автоматический временный бан
+через ванильный бан-лист. Срок берётся из лестницы `banStepsHours` по числу банов
+за `banHistoryHours` (336 ч = 14 дней): **2 ч → 12 ч → 48 ч → 14 дней → 30 дней**.
+Бан Аргуса в режиме AUTO идёт по той же лестнице.
 
 **Цепочка (AttackChainDetector).** Отвечает на другой вопрос: не «насколько
 сильно сработала одна проверка», а «сколько *разных* проверок сработало на этом
@@ -603,12 +606,20 @@ GCD (сетка чувствительности мыши) · **BadRotation**.
 контекст, а не счёт: они могут поднять одиночную цепочку до WATCH, но сами по
 себе не банят.
 
-Наблюдательные проверки в бан не идут — список в `punishment.banExcludedChecks`:
-`bigmove`, `timer`, `groundspoof`, `noswing`, `autoclick`, `autoaction`,
-`velocity`, `gcd`, `xray`, `vehicle`, `airplace`, `invmove`, `brandspoof`,
-`packetorder`. Они пишут в лог и дают алерты, но решение по ним за админом.
+Проверки, которые сами не банят, — список `punishment.banExcludedChecks`
+(21 проверка): `bigmove`, `timer`, `groundspoof`, `noswing`, `autoclick`,
+`autoaction`, `velocity`, `gcd`, `xray`, `vehicle`, `airplace`, `invmove`,
+`brandspoof`, `packetorder`, `aim`, `autoplace`, `jesus`, `autototem`,
+`fastfall`, `entitypredict`, `interactwalls`. Они пишут в лог, дают алерты,
+противодействуют и идут в цепочку, но в бан их ведёт только решение админа.
 
-Операторы освобождены от банов (`punishment.exemptOperators`).
+Только наблюдают (`mitigateVl` и `kickVl` = −1): `autoclick`, `autoaction`,
+`noswing`, `groundspoof`, `multitarget`, `gcd`, `xray`, `brandspoof`,
+`autototem`. `badrotation` не откатывает, но кикает на VL 15.
+
+Персонал (оператор уровня 3+) освобождён от автобанов — лестницы, цепочки,
+Аргуса и катастрофических фильтров (`punishment.exemptOperators`). Алерты и кик
+для него работают.
 
 ---
 
@@ -623,11 +634,13 @@ GCD (сетка чувствительности мыши) · **BadRotation**.
 `velocityConfirmStreak` подавленных транзакций подряд, поэтому одиночный
 лаг-спайк не осудит.
 
-**Blink.** Token Bucket: +1 токен за 50 мс реального времени, −1 за move-пакет.
-Легитимный клиент не уходит в минус. При перерасходе анализируется **σ(IAT)**
+**Blink.** Token Bucket по времени *прихода* пакета (поток netty, а не тик
+сервера): +1 токен за 50 мс, не больше 20 в запасе, −1 за move-пакет.
+Легитимный клиент не уходит в минус дальше `blinkBurstOverdraw` (8). При перерасходе анализируется **σ(IAT)**
 всплеска: синтетический flush приходит в 1–2 TCP-фреймах (дисперсия → 0),
-реальный bufferbloat сохраняет джиттер сетевого стека. σ < 1 мс физически
-невозможно для честной маршрутизации.
+реальный bufferbloat сохраняет джиттер сетевого стека. σ < `blinkMaxIatStdMs` (1 мс)
+физически невозможно для честной маршрутизации; флаг ставят два таких всплеска
+подряд.
 
 **Criticals.** Ванильный крит требует реального падения. Чит подделывает его
 двумя move-пакетами в одном тике: микро-подъём и мгновенное оседание прямо
@@ -681,12 +694,21 @@ GCD (сетка чувствительности мыши) · **BadRotation**.
 
 ## Команды и панель
 
+Все команды требуют уровня оператора 3+.
+
 | Команда | Описание |
 |---|---|
-| `/bac` | Открыть панель |
-| `/bac panel` | То же |
+| `/bac`, `/bac panel` | Открыть панель |
 | `/bac alerts` | Вкл/выкл алерты лично для себя |
 | `/bac status <ник>` | Текущие VL игрока |
+| `/bac freeze <ник> [причина]` | Заморозить игрока для проверки |
+| `/bac unfreeze <ник>` · `/bac frozen` | Разморозить · список замороженных |
+| `/bac argus` | Список дел Аргуса |
+| `/bac argus case <id>` · `/bac argus explain <id>` | Карточка дела · отчёт в чат |
+| `/bac argus analyze <ник>` | Открыть дело на игрока (и офлайн — по последней сессии) |
+| `/bac argus status` | Состояние очереди Аргуса |
+| `/bac argus mode shadow\|assist\|auto` | Режим Аргуса |
+| `/bac telemetry [ник]` | Размер папки телеметрии, открытые файлы, запись игрока |
 | `/bac reload` | Перечитать конфиг |
 | `/bac version` | Версия |
 
@@ -701,19 +723,36 @@ GCD (сетка чувствительности мыши) · **BadRotation**.
 
 ## Конфиг — `config/bastionac/config.json`
 
-Версия схемы 9; при старте старый конфиг мигрируется, чужие правки сохраняются.
+Версия схемы 15; при старте старый конфиг мигрируется, правки админа сохраняются.
+Числа в скобках — значения по умолчанию.
 
-`general` — `alertsToOps`, `alertCooldownSeconds`, `setbackEnabled`,
-`setbackMinIntervalTicks`, `instantMovementSetback`, `joinGraceTicks`,
-`logViolationsToConsole`, `kickEnabled`, `maxCps`, `timerMinIntervalMs`,
-`speedToleranceMultiplier`, `velocityVerifyTicks`, `velocityMinRatio`,
-`velocityConfirmStreak`, `blinkBurstOverdraw`, `blinkMaxIatStdMs`,
-`noSlowGraceTicks`, `noSlowMaxFactor`, `shadowTelemetryEnabled`.
+`general` — `alertsToOps`, `alertCooldownSeconds` (5), `xrayAlerts`,
+`setbackEnabled`, `setbackMinIntervalTicks` (10), `instantMovementSetback`,
+`setbackFreezeTicks` (6), `joinGraceTicks` (60), `logViolationsToConsole`,
+`kickEnabled`, `maxCps` (14), `timerMinIntervalMs` (40), `timerMaxAheadMs` (400),
+`timerLagBankMs` (3000), `speedToleranceMultiplier` (1,0), `velocityVerifyTicks`
+(4), `velocityMinRatio` (0,6), `velocityConfirmStreak` (3), `blinkBurstOverdraw`
+(8), `blinkMaxIatStdMs` (1,0), `noSlowGraceTicks` (5), `noSlowMaxFactor` (0,35),
+`shadowTelemetryEnabled`, `movementScansPerTickBudget` (2000). Щит информации:
+`hideOtherPlayersHealth`, `hideOtherPlayersEquipmentDetails`, `hideSoundOrigins`,
+`ignoreDeadPlayerActions`, `netherViewDistance` (6, 0 — выкл.).
 
-`punishment` — `autoTempbanEnabled`, `alertsToBan` (3), `alertWindowMinutes` (50),
-`banHistoryHours` (72), `banStepsHours` `[1, 6, 24, 168]`, `banExcludedChecks`,
-`catastrophicPermabanEnabled`, `exemptOperators`, **`chainWindowMinutes` (60)**,
-**`chainWatchDistinctChecks` (2)**, **`chainBanDistinctChecks` (3)**.
+`punishment` — `autoTempbanEnabled`, `alertsToBan` (2), `alertWindowMinutes` (50),
+`banHistoryHours` (336), `banStepsHours` `[2, 12, 48, 336, 720]`,
+`banExcludedChecks`, `catastrophicPermabanEnabled`, `exemptOperators`,
+`chainWindowMinutes` (60), `chainWatchDistinctChecks` (2),
+`chainBanDistinctChecks` (3).
+
+`telemetry` — `enabled`, `retentionDays` (30), `maxTotalMb` (3072),
+`maxSessionMb` (200), `pingIntervalTicks` (40), `recordTargets`,
+`recordOreContext`.
+
+`argus` — `enabled`, `mode` (`ASSIST`), `collectMinutes` (2), `deadlineMinutes`
+(15), `reanalyzeMinutes` (3), `windowMinutes` (60), `suspectScore` (0,60),
+`guiltyScore` (0,95), `autoBanScore` (0,97), `minBaselineSessions` (20),
+`autoBanMinMinutes` (10), `analyzeEverySession`, `notifyClearedAlertCases`,
+`pauseAboveMspt` (45), `caseRetentionDays` (60), `worldSampleBlocksPerTick`
+(6000).
 
 `messages` — `kickScreen`, `kickBroadcast`, `alertPrefix`,
 `announceKickToEveryone`, `revealCheckToPlayer` (по умолчанию `false` — экран
@@ -721,26 +760,36 @@ GCD (сетка чувствительности мыши) · **BadRotation**.
 
 `checks.<имя>` — `enabled`, `weight` (VL за нарушение), `alertVl`,
 `mitigateVl` (**−1 = только наблюдать**), `kickVl` (**−1 = не кикать**),
-`decayPerSecond`.
+`decayPerSecond`. Значения по умолчанию для всех 41 проверки — в таблице в
+[README.ru.md](README.ru.md#пороги-по-умолчанию).
 
 Строже — снижай `mitigateVl` / `kickVl`; ловишь редкие ложные срабатывания —
 подними `alertVl` или поставь `−1`.
 
-Баны живут в `config/bastionac/bans.json`, история — там же рядом.
+Файлы рядом с конфигом: `bans.json` (баны и история банов), `history.json`
+(алерты и наказания), `networks.json` (карта связей), `frozen.json`
+(замороженные), `argus/cases.json`, `argus/baselines.json`, `argus/model.json`.
+В `logs/bastionac/`: `sessions/` (телеметрия), `argus/` (отчёты), `dumps/`
+(буфер контекста).
 
 ---
 
 ## Установка
 
-`mods/`: `bastionac-2.22.0.jar` + Fabric API. Старый `bastionac-*.jar` удалить.
+В `mods/`: `bastionac-<версия>.jar` и Fabric API. Старый `bastionac-*.jar` удалить.
 
 ## Сборка и тесты
 
-```bat
-set JAVA_HOME=<путь к JDK 21>
-runbuild.bat build              → build\libs\bastionac-2.22.0.jar
-runtests.bat                    → юнит-тесты (JUnit ConsoleLauncher)
+```bash
+./gradlew build                # JDK 21 → build/libs/bastionac-<версия>.jar
+./gradlew test                 # 202 юнит-теста
+./gradlew argusLab             # отчёт стенда Argus Lab
 ```
+
+Из пути с не-ASCII символами задача `test` пропускается (воркер Gradle с таким
+путём не работает). Тогда `./gradlew dumpTestClasspath` пишет
+`build/test-classpath.txt`, и тесты запускаются JUnit ConsoleLauncher с этим
+classpath.
 
 ## Что здесь проверено вживую, а что нет
 
