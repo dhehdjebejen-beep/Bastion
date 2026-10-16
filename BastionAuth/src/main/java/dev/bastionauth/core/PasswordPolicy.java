@@ -23,17 +23,19 @@ public final class PasswordPolicy {
     private volatile AuthConfig.PasswordRules rules;
 
     public PasswordPolicy(AuthConfig.PasswordRules rules, Set<String> commonPasswords) {
-        this.rules = rules;
-        this.commonPasswords = commonPasswords;
+        this.rules = rules != null ? rules : new AuthConfig.PasswordRules();
+        this.commonPasswords = commonPasswords != null ? commonPasswords : Set.of();
     }
 
     public void reconfigure(AuthConfig.PasswordRules rules) {
-        this.rules = rules;
+        this.rules = rules != null ? rules : new AuthConfig.PasswordRules();
     }
 
     /** @return {@code null} when the password is acceptable, otherwise the violation to report. */
     public Violation validate(String username, String password) {
         AuthConfig.PasswordRules r = this.rules;
+        if (r == null) r = new AuthConfig.PasswordRules();
+        if (password == null) return Violation.of("password.tooShort", r.minLength);
         if (password.chars().anyMatch(Character::isWhitespace)) return Violation.of("password.noSpaces");
         if (password.length() < r.minLength) return Violation.of("password.tooShort", r.minLength);
         if (password.length() > r.maxLength) return Violation.of("password.tooLong", r.maxLength);
@@ -42,8 +44,8 @@ public final class PasswordPolicy {
             boolean digit = password.chars().anyMatch(Character::isDigit);
             if (!letter || !digit) return Violation.of("password.needLetterDigit");
         }
-        if (r.denyPasswordEqualToName && password.equalsIgnoreCase(username)) return Violation.of("password.equalsName");
-        if (r.denyCommonPasswords && commonPasswords.contains(password.toLowerCase(Locale.ROOT))) {
+        if (r.denyPasswordEqualToName && username != null && password.equalsIgnoreCase(username)) return Violation.of("password.equalsName");
+        if (r.denyCommonPasswords && commonPasswords != null && commonPasswords.contains(password.toLowerCase(Locale.ROOT))) {
             return Violation.of("password.common");
         }
         return null;
