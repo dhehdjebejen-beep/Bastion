@@ -261,6 +261,21 @@ public final class ProtectionService {
         return e instanceof LivingEntity && !(e instanceof PlayerEntity);
     }
 
+    /**
+     * An explosion with no attacker and no mob behind it, hitting a player who
+     * stands in a claim with PvP off. A creeper's blast is PvE and stays as it
+     * is; a player-lit one goes through the PvP rule already.
+     */
+    public static boolean unownedBlastSparesPlayer(ServerPlayerEntity victim, net.minecraft.entity.damage.DamageSource source) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.pvpProtection || source == null) return false;
+        if (!source.isIn(net.minecraft.registry.tag.DamageTypeTags.IS_EXPLOSION)) return false;
+        if (source.getAttacker() != null || isMob(source.getSource())) return false;
+        Claim c = ClaimManager.claimAt(victim.getEntityWorld().getRegistryKey().getValue().toString(),
+                victim.getBlockX(), victim.getBlockY(), victim.getBlockZ());
+        return c != null && !c.allowPvp;
+    }
+
     /** True when the attacker may hit the victim at the given location. */
     public static boolean canPvp(ServerPlayerEntity attacker, String dim, int x, int y, int z) {
         ClaimConfig cfg = BastionClaims.config();
@@ -380,6 +395,97 @@ public final class ProtectionService {
         if (p == null || !p.hopperProtection) return false;
         if (container == null || container.allowHoppers) return false;
         return !container.contains(hx, hy, hz); // hopper outside the claim → block
+    }
+
+    /**
+     * Whether a dropper or crafter at {@code feeder} may not push its item into
+     * the container at {@code target} (1.20): the hopper rule, with the
+     * owner's own neighbouring claim excepted as for dispensers.
+     */
+    public static boolean feederBlocked(ServerWorld world, BlockPos feeder, BlockPos target) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null) return false;
+        String dim = world.getRegistryKey().getValue().toString();
+        Claim container = ClaimManager.claimAt(dim, target.getX(), target.getY(), target.getZ());
+        if (!hopperBlocked(cfg.protection, container, feeder.getX(), feeder.getY(), feeder.getZ())) return false;
+        Claim home = ClaimManager.claimAt(dim, feeder.getX(), feeder.getY(), feeder.getZ());
+        if (home != null && home.owner != null && home.owner.equalsIgnoreCase(container.owner)) return false;
+        return net.minecraft.block.entity.HopperBlockEntity.getInventoryAt(world, target) != null;
+    }
+
+    // ------------------------------------------------------------------ creatures that carry items
+
+    /** The command tag a copper golem gets the first time it is seen: the claim it belongs to. */
+    public static final String GOLEM_HOME_TAG = "bastion_home:";
+
+    /**
+     * Gives a copper golem its home the first time this version sees it: the
+     * claim it stands in when built (or, for one built before 1.20, when first
+     * loaded), or none. Command tags are saved with the entity.
+     */
+    public static void adoptGolem(Entity entity) {
+        if (!(entity instanceof net.minecraft.entity.passive.CopperGolemEntity)) return;
+        for (String tag : entity.getCommandTags()) {
+            if (tag.startsWith(GOLEM_HOME_TAG)) return;
+        }
+        Claim c = claimAt(entity.getEntityWorld(), entity.getBlockPos());
+        entity.addCommandTag(GOLEM_HOME_TAG + (c == null ? "none" : c.id));
+    }
+
+    /** Whether a copper golem may not use the container at {@code pos}: it lies in a claim that is not its home. */
+    public static boolean golemBlocked(Entity golem, BlockPos pos) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.hopperProtection || golem == null) return false;
+        Claim c = claimAt(golem.getEntityWorld(), pos);
+        return golemBlocked(c, golem.getCommandTags());
+    }
+
+    /** Pure decision — unit-testable. */
+    static boolean golemBlocked(Claim container, java.util.Set<String> golemTags) {
+        if (container == null || container.allowHoppers) return false;
+        return !golemTags.contains(GOLEM_HOME_TAG + container.id);
+    }
+
+    /**
+     * Whether an allay may not pick up this item: it lies in a claim where the
+     * player it serves has no {@code entities} permission (1.20).
+     */
+    public static boolean allayPickupBlocked(net.minecraft.entity.passive.AllayEntity allay, net.minecraft.entity.ItemEntity item) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.entityProtection || item == null) return false;
+        Claim c = claimAt(item.getEntityWorld(), item.getBlockPos());
+        if (c == null) return false;
+        UUID liked = allay.getBrain().getOptionalRegisteredMemory(
+                net.minecraft.entity.ai.brain.MemoryModuleType.LIKED_PLAYER).orElse(null);
+        if (liked == null) return true;
+        if (allay.getEntityWorld() instanceof ServerWorld sw) {
+            ServerPlayerEntity online = sw.getServer().getPlayerManager().getPlayer(liked);
+            if (online != null && bypassesProtection(online)) return false;
+        }
+        return c.arrested || !c.can(liked, Claim.Perm.ENTITIES);
+    }
+
+    // ------------------------------------------------------------------ portals
+
+    /**
+     * Whether a portal generated for {@code traveller} may not be written: one
+     * of its blocks lies in a claim the traveller may not build in (anything
+     * that is not a player may build in none). Tells a player why (1.20).
+     */
+    public static boolean portalBlocked(ServerWorld world, Entity traveller, java.util.List<PortalPlan.Cell> cells) {
+        ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || !cfg.protection.blockProtection || cells.isEmpty()) return false;
+        String dim = world.getRegistryKey().getValue().toString();
+        ServerPlayerEntity player = traveller instanceof ServerPlayerEntity p ? p : null;
+        if (player != null && bypassesProtection(player)) return false;
+        for (PortalPlan.Cell cell : cells) {
+            Claim c = ClaimManager.claimAt(dim, cell.pos().getX(), cell.pos().getY(), cell.pos().getZ());
+            if (c == null) continue;
+            if (player != null && !c.arrested && c.can(player.getUuid(), Claim.Perm.BUILD)) continue;
+            if (player != null) notifyThrottled(player, dev.bastionclaims.util.Fmt.text(cfg.message("protect.portal")));
+            return true;
+        }
+        return false;
     }
 
     // ------------------------------------------------------------------ pistons

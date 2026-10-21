@@ -196,8 +196,8 @@ For operators, `/claim bypass` works the same as `/claims bypass`.
 ## Build
 
 ```bash
-./gradlew build   # JDK 21 → build/libs/bastionclaims-<version>.jar
-./gradlew test    # 58 unit tests
+./gradlew build   # JDK 21 → build/libs/bastionclaims-<version>+build.<N>.jar
+./gradlew test    # 62 unit tests
 ```
 
 The config lives in `config/bastionclaims/config.json` (hot-reload) and the claims

@@ -55,8 +55,18 @@ public final class ClaimConfig {
     /** Item used as the selection wand. */
     public String wandItem = "minecraft:wooden_axe";
     /**
-     * Custom names marking server NPCs that anyone may right-click, wherever
-     * they stand. Matched as a substring of the entity's display name.
+     * Command tags marking server NPCs that anyone may right-click, wherever
+     * they stand (1.20). Only an operator or a mod can put a tag on an entity
+     * — {@code /tag <npc> add bastion_service} — so nobody can make their own.
+     * An entry ending in {@code *} matches every tag that starts with it.
+     */
+    public List<String> serviceEntityTags = new ArrayList<>(List.of("bastion_service"));
+    /**
+     * Legacy: complete custom names marking such NPCs. A name tag is
+     * something anybody can write, so a claim owner who named their own
+     * villager like that opened it to everybody; prefer
+     * {@link #serviceEntityTags}. Empty by default since 1.20 and no longer
+     * refilled when emptied.
      */
     public List<String> serviceEntityNames = new ArrayList<>();
     /**
@@ -270,9 +280,7 @@ public final class ClaimConfig {
         if (worldEdit == null) worldEdit = new WorldEdit();
         if (wandItem == null || wandItem.isBlank()) wandItem = "minecraft:wooden_axe";
         if (serviceEntityNames == null) serviceEntityNames = new ArrayList<>();
-        if (serviceEntityNames.isEmpty()) {
-            serviceEntityNames.addAll(List.of("Паспортист", "Товарищ Майор"));
-        }
+        if (serviceEntityTags == null) serviceEntityTags = new ArrayList<>();
         if (workstationBlocks == null) workstationBlocks = new ArrayList<>();
         if (workstationBlocks.isEmpty()) {
             workstationBlocks.addAll(List.of(
@@ -418,6 +426,7 @@ public final class ClaimConfig {
                 + "&7Владелец может открыть доступ: &f/claim flag entities on");
         m.put("protect.deniedFluid", "&cЭто чужой приват (&f%s&c). Разливать жидкости нельзя.");
         m.put("protect.pvp", "&cВ этом привате PvP отключено.");
+        m.put("protect.portal", "&cПортал вышел бы в чужой приват — там он не строится. Поставь портал в другом месте.");
         m.put("notPlayer", "&cКоманда только для игроков.");
         m.put("noPermission", "&cНедостаточно прав.");
         m.put("admin.reloaded", "&aКонфигурация BastionClaims перезагружена.");

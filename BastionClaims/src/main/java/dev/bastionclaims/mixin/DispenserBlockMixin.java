@@ -17,8 +17,11 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * pour lava, light fires, spawn primed TNT, place boats or shulkers, shear
  * sheep or bone-meal crops one block into somebody else's land.
  *
- * <p>Droppers override {@code dispense} and are not affected — they only spit
- * items out or push them into a container, which the hopper rules cover.
+ * <p>Droppers and crafters override {@code dispense} and are not reached
+ * here. Spitting an item over the border is no worse than throwing it, but
+ * pushing it into a container goes through
+ * {@code HopperBlockEntity.getInventoryAt}, which the hopper guards never
+ * see — that part is closed in {@link ContainerFeederMixins}.
  */
 @Mixin(DispenserBlock.class)
 public abstract class DispenserBlockMixin {

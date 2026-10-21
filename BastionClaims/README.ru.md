@@ -200,8 +200,8 @@ reason)`, `isArrested(id)`.
 ## Сборка
 
 ```bash
-./gradlew build   # JDK 21 → build/libs/bastionclaims-<версия>.jar
-./gradlew test    # 58 юнит-тестов
+./gradlew build   # JDK 21 → build/libs/bastionclaims-<версия>+build.<N>.jar
+./gradlew test    # 62 юнит-теста
 ```
 
 Конфиг — `config/bastionclaims/config.json` (перечитывается на лету), приваты —

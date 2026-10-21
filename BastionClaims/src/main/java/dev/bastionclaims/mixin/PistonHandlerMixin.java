@@ -33,6 +33,10 @@ public abstract class PistonHandlerMixin {
     @Shadow @Final private Direction motionDirection;
     @Shadow @Final private List<BlockPos> movedBlocks;
     @Shadow @Final private List<BlockPos> brokenBlocks;
+    /** Where the piston faces (motionDirection is the opposite of it on a retraction). */
+    @Shadow @Final private Direction pistonDirection;
+    /** Vanilla's name for "extending": true when the head goes out. */
+    @Shadow @Final private boolean retracted;
 
     @Inject(method = "calculatePush", at = @At("RETURN"), cancellable = true)
     private void bastionclaims$guardClaims(CallbackInfoReturnable<Boolean> cir) {
@@ -42,11 +46,16 @@ public abstract class PistonHandlerMixin {
 
         // The piston head itself occupies the cell in front of the base when
         // it extends — a head poking into a neighbour's claim pushes entities
-        // and blocks doorways even when no block moves.
-        BlockPos head = posFrom.offset(motionDirection);
-        if (ProtectionService.pistonCellBlocked(dim, head.getX(), head.getY(), head.getZ(), px, py, pz)) {
-            cir.setReturnValue(false);
-            return;
+        // and blocks doorways even when no block moves. Only when it extends:
+        // on a sticky retraction motionDirection points backwards, and the
+        // cell it named was the one BEHIND the base — a sticky piston with its
+        // back to a neighbour's claim could push but never pull (audit).
+        if (retracted) {
+            BlockPos head = posFrom.offset(pistonDirection);
+            if (ProtectionService.pistonCellBlocked(dim, head.getX(), head.getY(), head.getZ(), px, py, pz)) {
+                cir.setReturnValue(false);
+                return;
+            }
         }
 
         for (BlockPos moved : movedBlocks) {

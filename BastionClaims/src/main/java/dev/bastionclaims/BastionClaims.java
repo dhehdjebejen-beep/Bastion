@@ -65,6 +65,9 @@ public final class BastionClaims implements DedicatedServerModInitializer {
         });
 
         ClaimEvents.register();
+        // A copper golem belongs to the claim it was built in. See ProtectionService#adoptGolem.
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents.ENTITY_LOAD.register(
+                (entity, world) -> dev.bastionclaims.core.ProtectionService.adoptGolem(entity));
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
             ClaimCommands.register(dispatcher);

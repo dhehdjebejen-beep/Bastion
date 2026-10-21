@@ -59,6 +59,10 @@ public final class ClaimEvents {
                 ProtectionService.notifyThrottled(attacker, Fmt.text(cfg().message("protect.pvp")));
                 return false;
             }
+            // A blast nobody owns — TNT lit by redstone, a dispenser, another
+            // blast — has no attacker for the PvP rule to see, so a trap just
+            // outside the border killed a player standing in a PvP-off claim.
+            if (ProtectionService.unownedBlastSparesPlayer(p, source)) return false;
             return true;
         });
     }
@@ -223,17 +227,34 @@ public final class ClaimEvents {
     }
 
     /**
-     * Named NPCs listed in config are never treated as claim property. The
-     * comparison deliberately requires the complete custom name: matching an
-     * arbitrary substring allowed a renamed player entity to inherit a service
-     * exception inside someone else's claim.
+     * Server NPCs are never treated as claim property: those carrying a
+     * configured command tag (1.20), and — legacy — those with a configured
+     * complete custom name. The name must match in full: a substring allowed
+     * a renamed entity to inherit the exception in someone else's claim.
      */
     private static boolean isServiceEntity(net.minecraft.entity.Entity entity) {
+        if (hasServiceTag(entity.getCommandTags(), cfg().serviceEntityTags)) return true;
         net.minecraft.text.Text name = entity.getCustomName();
         if (name == null) return false;
         String plain = name.getString().trim();
         for (String marker : cfg().serviceEntityNames) {
             if (marker != null && !marker.isBlank() && plain.equals(marker.trim())) return true;
+        }
+        return false;
+    }
+
+    /** Pure: whether one of the entity's tags is a configured service tag ({@code x*} is a prefix). */
+    static boolean hasServiceTag(java.util.Set<String> tags, java.util.List<String> markers) {
+        if (tags == null || tags.isEmpty() || markers == null) return false;
+        for (String marker : markers) {
+            if (marker == null || marker.isBlank()) continue;
+            String m = marker.trim();
+            if (m.endsWith("*")) {
+                String prefix = m.substring(0, m.length() - 1);
+                for (String t : tags) if (!prefix.isEmpty() && t.startsWith(prefix)) return true;
+            } else if (tags.contains(m)) {
+                return true;
+            }
         }
         return false;
     }
