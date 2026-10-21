@@ -33,5 +33,11 @@ public record Signal(long at, UUID uuid, String name, Kind kind, String detail) 
             this.label = label;
             this.prior = prior;
         }
+
+        /** Raised by the checks themselves: what proactive mode reads within seconds. */
+        public boolean fromChecks() {
+            return this == ALERT || this == CHAIN_WATCH || this == CHAIN_BURNED
+                    || this == XRAY_PROBE || this == CORRECTION_LOOP;
+        }
     }
 }

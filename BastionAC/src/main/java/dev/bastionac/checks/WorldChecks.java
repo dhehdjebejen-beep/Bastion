@@ -74,6 +74,14 @@ public final class WorldChecks {
             // InteractWalls: the face being broken must be in view (3.3.1).
             if (breakWalls(player, d, packet)) {
                 d.clearMining();
+                // The break never happens, so the X-ray statistics below never
+                // saw it — and an ore with every face covered can only be broken
+                // this way: refused here, that was the end of the hidden-ore
+                // signal since 3.3.1. The attempt is the evidence (3.5).
+                if (BastionAC.config().check(CheckType.XRAY.key).enabled) {
+                    XrayTracker.noteRefusedBreak(player, d, world.getBlockState(pos), pos,
+                            XrayTracker.hasAdjacentAir(world, pos));
+                }
                 return Action.CANCEL;
             }
 

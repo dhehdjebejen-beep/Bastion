@@ -7,6 +7,32 @@ mod. It started as a targeted answer to **Meteor** and its forks and grew into a
 general engine; version 2.24 added a full pass over **Wurst 7**, built from that
 client's own source and defaults.
 
+## New in 3.5 beta
+
+- **Builds instead of versions.** The mod version (3.5.0-beta) changes only with
+  new features; every build in between gets a number:
+  `bastionac-3.5.0-beta+build.4.jar`, shown in game as `3.5.0-beta+build.4`.
+- **Proactive mode** (`/bac proactive on`, off by default). The checks only add
+  VL and raise signals; setbacks, cancels and kicks are held back. Argus looks at
+  the case 10 seconds after the alert and reads it again every 30 seconds. From a
+  score of 75 % every check bites for that player for 30 minutes; a confident
+  guilty verdict bans. What cannot wait (flight, speed, timer, vehicles, Blink,
+  impossible packets) is cut at once, as without the mode. Without a working
+  Argus the mode switches itself off.
+- **The worst fight.** Argus judges every encounter on its own and looks at the
+  worst one of a session, so a module switched on for a single fight (a
+  "toggler") no longer drowns in the honest play around it. The model was
+  retrained in Argus Lab, now on real honest sessions as well.
+- **False alerts.** GCD no longer mistakes a fast camera swing for interpolated
+  aim; Reach on mobs allows for how far the mob flew from the last hit and does
+  not judge hits at multi-second pings; MultiTarget needs off-crosshair hits on
+  targets around the player, not just three targets in a row in a crowd.
+- **Bypasses closed:** Anti-KB with the ping answer dropped, a sawtooth NoSlow,
+  two vehicle packets per tick, the vehicle setback that landed on the cheat's
+  spot, a hovering BoatFly, InvMove at a walk, AutoTotem through the F key. A
+  packet flood now kicks instead of banning for good, and is not counted right
+  after a server stall.
+
 ## New in 3.4
 
 - **ClickTP closed.** One packet carrying a player on foot more than 2 blocks
@@ -437,8 +463,8 @@ and sets verdicts in BastionAuth's link ledger.
 ## Build
 
 ```bash
-./gradlew build      # JDK 21 → build/libs/bastionac-<version>.jar
-./gradlew test       # 202 unit tests
+./gradlew build      # JDK 21 → build/libs/bastionac-<version>+build.<N>.jar
+./gradlew test       # 221 unit tests
 ./gradlew argusLab   # Argus Lab bench; --args="500 12 --write" retrains the prior
 ```
 

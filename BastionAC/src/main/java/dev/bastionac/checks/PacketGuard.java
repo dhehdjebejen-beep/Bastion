@@ -64,6 +64,10 @@ public final class PacketGuard {
     /** Called for every tapped play C2S packet from the handler mixin (server thread). */
     public static void onAnyPacket(ServerPlayerEntity player) {
         if (player == null) return;
+        // Counted where the server handles the packet: right after a server
+        // stall it works through every player's queued packets at once, and
+        // an honest client's seconds of movement read as a flood.
+        if (BastionAC.isServerLagging(BastionAC.serverTick())) return;
         Deque<Long> hits = ARRIVALS.computeIfAbsent(player.getUuid(), u -> new ArrayDeque<>());
         long now = System.currentTimeMillis();
         synchronized (hits) {
@@ -73,7 +77,10 @@ public final class PacketGuard {
                 hits.clear();
                 BastionAC.LOGGER.warn("[PacketGuard] flood from {}: >{} packets/{}ms — dropping connection",
                         player.getGameProfile().name(), FLOOD_PACKETS, FLOOD_WINDOW_MS);
-                BanManager.catastrophicBan(player, "packet-flood",
+                // A kick, not the permanent ban (3.5 beta, audit): unlike a book
+                // bomb, a burst like this can be a stalled uplink flushing at once.
+                // Dropping the connection already ends the attack.
+                BanManager.kickWithAlert(player, "packet-flood",
                         FLOOD_PACKETS + "+ packets in " + FLOOD_WINDOW_MS + "ms");
             }
         }

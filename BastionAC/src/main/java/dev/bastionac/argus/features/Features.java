@@ -27,7 +27,7 @@ public final class Features {
     }
 
     /** How the accumulated numbers become the feature's value. */
-    public enum Agg { RATE, MEDIAN, P95, CV, LOG_CV, KURTOSIS, MAX, PER_HOUR, FLAG, Z }
+    public enum Agg { RATE, MEDIAN, P95, CV, LOG_CV, KURTOSIS, MAX, MIN, PER_HOUR, FLAG, Z }
 
     /**
      * @param direction   +1: higher is suspicious; -1: lower is suspicious
@@ -111,6 +111,17 @@ public final class Features {
                 "реакция прицела на рывки цели (за вычетом пинга)", " т", 1));
         add(new Spec("cmb.track_instant", Category.COMBAT, Agg.MEDIAN, 1, 0.05, 0.08, 0.05, 3, 2, 0.8, false,
                 "мгновенный ответ прицела на рывки цели (без реакции)", "", 1));
+        // The worst single fight (3.5 beta, a module switched on for one fight):
+        // each value is the lower 99 % bound of one encounter's share, the
+        // feature the highest of them (CombatFeatures.encounters).
+        add(new Spec("enc.aim_lc_center", Category.COMBAT, Agg.MAX, 1, 0.02, 0.06, 0.04, 1, 1, 1.0, false,
+                "худшая стычка: удары точно в цель с учётом лага", "%", 100));
+        add(new Spec("enc.aim_lc_error", Category.COMBAT, Agg.MIN, -1, 4.0, 1.5, 0.8, 1, 1, 1.0, false,
+                "лучшая стычка: медианный промах с учётом лага", "°", 1));
+        add(new Spec("enc.aim_center", Category.COMBAT, Agg.MAX, 1, 0.03, 0.08, 0.05, 1, 1, 1.0, false,
+                "худшая стычка: удары точно в центр хитбокса", "%", 100));
+        add(new Spec("enc.reach_over", Category.COMBAT, Agg.MAX, 1, 0.01, 0.05, 0.04, 1, 1, 1.0, false,
+                "худшая стычка: удары дальше 3,1 блока", "%", 100));
         add(new Spec("cmb.snap", Category.COMBAT, Agg.RATE, 1, 0.03, 0.05, 0.03, 40, 15, 1.0, false,
                 "рывок прицела к цели перед ударом", "%", 100));
         add(new Spec("cmb.rot_const", Category.COMBAT, Agg.RATE, 1, 0.02, 0.03, 0.02, 300, 100, 1.0, false,

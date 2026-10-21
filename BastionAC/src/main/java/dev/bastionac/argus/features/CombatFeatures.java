@@ -71,6 +71,64 @@ public final class CombatFeatures {
         reachOver(s, out);
         lagCompensatedAim(s, out);
         trackLag(s, out);
+        encounters(s, out);
+    }
+
+    /** Hits on one target with no pause longer than this are one encounter. */
+    static final long ENCOUNTER_GAP_MS = 5_000;
+    /** Judged hits an encounter needs before it says anything. */
+    static final int ENCOUNTER_MIN_HITS = 12;
+
+    /**
+     * The worst single fight (3.5 beta). Every other combat feature pools the
+     * whole window, so a module switched on for ten seconds of a long session
+     * — a "toggler" — drowned in the honest fights around it. Here the hits
+     * are cut into encounters (one target, no pause over five seconds), each
+     * encounter's share of hits dead on target is taken at the lower bound of
+     * its 99 % interval (a short fight is never read better than it can
+     * support), and the feature is the highest of those bounds: one fight
+     * played by a module stands out however much honest play surrounds it.
+     */
+    static void encounters(SessionData s, FeatureSet out) {
+        java.util.List<SessionData.Attack> a = s.attacks;
+        int i = 0;
+        while (i < a.size()) {
+            int target = a.get(i).targetId;
+            int j = i + 1;
+            while (j < a.size() && a.get(j).targetId == target && a.get(j).t - a.get(j - 1).t <= ENCOUNTER_GAP_MS) j++;
+            if (j - i >= ENCOUNTER_MIN_HITS) encounter(s, a.subList(i, j), out);
+            i = j;
+        }
+    }
+
+    private static void encounter(SessionData s, java.util.List<SessionData.Attack> hits, FeatureSet out) {
+        int lcJudged = 0, lcCentre = 0, judged = 0, centre = 0, reachJudged = 0, over = 0;
+        Prim.Doubles lcErrors = new Prim.Doubles();
+        for (SessionData.Attack a : hits) {
+            if (a.distance > 1.5f) {
+                judged++;
+                if (a.aimError < 1.2f) centre++;
+                double lc = lagCompensatedError(s, a);
+                if (!Double.isNaN(lc)) {
+                    lcJudged++;
+                    lcErrors.add(lc);
+                    if (lc < 1.0) lcCentre++;
+                }
+            }
+            if (a.has(dev.bastionac.telemetry.SessionWriter.Attack.F_PLAYER)) {
+                double opened = opened(s, a);
+                if (!Double.isNaN(opened)) {
+                    reachJudged++;
+                    if (a.distance > REACH_LINE + Math.max(0, opened) + Math.max(0, a.ping) * 0.0005) over++;
+                }
+            }
+        }
+        if (lcJudged >= ENCOUNTER_MIN_HITS) {
+            out.sample("enc.aim_lc_center", Stats.wilsonLower(lcCentre, lcJudged));
+            out.sample("enc.aim_lc_error", Stats.median(lcErrors.toArray()));
+        }
+        if (judged >= ENCOUNTER_MIN_HITS) out.sample("enc.aim_center", Stats.wilsonLower(centre, judged));
+        if (reachJudged >= ENCOUNTER_MIN_HITS) out.sample("enc.reach_over", Stats.wilsonLower(over, reachJudged));
     }
 
     /**
@@ -410,6 +468,9 @@ public final class CombatFeatures {
      * Rotation stream as a whole: exact repeats of a step and off-grid steps
      * (inside combat windows), yaw wraps and exact 45° headings (anywhere).
      */
+    /** Most combat steps the aim-grid fit reads (an even sample of the rest). */
+    static final int GRID_SAMPLE = 2000;
+
     static void rotationShape(SessionData s, FeatureSet out, Prim.Longs tpTimes, double hours) {
         Prim.Longs combat = new Prim.Longs();
         for (SessionData.Attack a : s.attacks) combat.add(a.t);
@@ -417,6 +478,7 @@ public final class CombatFeatures {
         double prevDy = Double.NaN, prevDp = Double.NaN;
         long pairs = 0, equal = 0, wraps = 0, looks = 0, grid = 0;
         Prim.Doubles combatSteps = new Prim.Doubles();
+        Prim.Doubles combatNoise = new Prim.Doubles();
         for (int i = 0; i < s.moveT.n; i++) {
             if ((s.moveFlags.a[i] & MV_LOOK) == 0) continue;
             float y = s.moveYaw.a[i], p = s.movePitch.a[i];
@@ -437,8 +499,17 @@ public final class CombatFeatures {
                         pairs++;
                         if (Math.abs(dy - prevDy) < 1e-3 && Math.abs(dp - prevDp) < 1e-3) equal++;
                     }
-                    if (Math.abs(dy) > 0.01 && Math.abs(dy) < 30) combatSteps.add(Math.abs(dy));
-                    if (Math.abs(dp) > 0.01 && Math.abs(dp) < 30) combatSteps.add(Math.abs(dp));
+                    // Each step with the float precision it was measured at; a
+                    // pitch pinned at ±90° moved less than the mouse (3.5 build 2).
+                    if (Math.abs(dy) > 0.01 && Math.abs(dy) < 30) {
+                        combatSteps.add(Math.abs(dy));
+                        combatNoise.add(MathUtil.angleNoise(y, prevYaw));
+                    }
+                    boolean clamped = Math.abs(p) >= 89.999f || Math.abs(prevPitch) >= 89.999f;
+                    if (!clamped && Math.abs(dp) > 0.01 && Math.abs(dp) < 30) {
+                        combatSteps.add(Math.abs(dp));
+                        combatNoise.add(MathUtil.angleNoise(p, prevPitch));
+                    }
                 }
                 prevDy = dy;
                 prevDp = dp;
@@ -451,9 +522,22 @@ public final class CombatFeatures {
         out.rate("cmb.rot_const", equal, pairs);
         if (combatSteps.n >= 40) {
             double[] steps = combatSteps.toArray();
+            double[] noise = combatNoise.toArray();
+            // A long session holds tens of thousands of steps; an even sample
+            // of 2000 reads the same grid at a fraction of the cost (3.5 beta).
+            if (steps.length > GRID_SAMPLE) {
+                double[] s2 = new double[GRID_SAMPLE], n2 = new double[GRID_SAMPLE];
+                for (int k = 0; k < GRID_SAMPLE; k++) {
+                    int j = (int) ((long) k * steps.length / GRID_SAMPLE);
+                    s2[k] = steps[j];
+                    n2[k] = noise[j];
+                }
+                steps = s2;
+                noise = n2;
+            }
             // No common grid at all is the strongest form of the signal, not
             // a reason to skip it (bestGridFit, 3.1).
-            double onGrid = MathUtil.bestGridFit(steps).ratio();
+            double onGrid = MathUtil.bestGridFit(steps, noise, 0).ratio();
             if (!Double.isNaN(onGrid)) out.rate("cmb.gcd_off", (1 - onGrid) * steps.length, steps.length);
         }
     }

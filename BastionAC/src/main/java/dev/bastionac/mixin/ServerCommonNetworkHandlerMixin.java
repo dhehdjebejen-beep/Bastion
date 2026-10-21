@@ -86,7 +86,7 @@ public abstract class ServerCommonNetworkHandlerMixin {
         if (handler.player == null || !BastionAC.enabled()) return;
         // Runs on the netty thread (vanilla ignores pongs): the round trip is
         // measured where it ends, untouched by how busy the server is.
-        if (dev.bastionac.telemetry.Telemetry.isOurPing(packet.getParameter())) {
+        if (dev.bastionac.telemetry.Telemetry.isOurPing(handler.player, packet.getParameter())) {
             dev.bastionac.telemetry.Telemetry.pong(handler.player, packet.getParameter());
             return;
         }

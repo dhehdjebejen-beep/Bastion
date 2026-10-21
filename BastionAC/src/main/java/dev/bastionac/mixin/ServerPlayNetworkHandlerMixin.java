@@ -176,6 +176,12 @@ public abstract class ServerPlayNetworkHandlerMixin {
 
     @Inject(method = "onVehicleMove", at = @At("HEAD"), cancellable = true)
     private void bastionac$onVehicleMove(VehicleMoveC2SPacket packet, CallbackInfo ci) {
+        PlayerData nd = bastionac$netty(packet);
+        if (nd != null) {
+            // The vehicle's own clock: steering packets as they come off the wire.
+            MovementChecks.vehicleTimerArrival(player, nd, System.currentTimeMillis());
+            return;
+        }
         if (!bastionac$ready()) return;
         dev.bastionac.checks.PacketGuard.onAnyPacket(player);
         PlayerData d = BastionAC.data(player);
@@ -394,9 +400,27 @@ public abstract class ServerPlayNetworkHandlerMixin {
             return;
         }
         dev.bastionac.core.PlayerContextBuffer.recordEvent(player, "action", packet.getAction().name());
+        if (packet.getAction() == PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND) {
+            dev.bastionac.checks.ClientChecks.beforeSlotClick(player, d);
+        }
         if (WorldChecks.onAction(player, d, packet) != Action.NONE) {
             ci.cancel();
         }
+    }
+
+    /**
+     * AutoTotem by the swap key: a click puts the totem in the hotbar, the
+     * swap-hands packet (F) moves it to the off hand in the same tick. Only
+     * slot clicks were judged, so this way round went unseen (3.5 beta,
+     * audit). RETURN, not TAIL: vanilla returns straight out of the swap branch.
+     */
+    @Inject(method = "onPlayerAction", at = @At("RETURN"))
+    private void bastionac$afterPlayerAction(PlayerActionC2SPacket packet, CallbackInfo ci) {
+        if (packet.getAction() != PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND) return;
+        if (player == null || !player.getEntityWorld().getServer().isOnThread() || !bastionac$ready()) return;
+        PlayerData d = BastionAC.data(player);
+        if (d == null) return;
+        dev.bastionac.checks.ClientChecks.afterSlotClick(player, d);
     }
 
     /**

@@ -203,6 +203,25 @@ public final class XrayTracker {
         return fam;
     }
 
+    /**
+     * A break of a valuable ore that InteractWalls refused because none of its
+     * faces was in view (3.5). The ore stays where it is, so it is not counted
+     * as mined; but with every face covered it was only findable by seeing
+     * through stone, which is the hidden-ore signal. Returns the family, or
+     * null when the block is not a tracked ore or it was not covered.
+     */
+    public static OreFamily noteRefusedBreak(ServerPlayerEntity player, PlayerData d,
+                                             BlockState state, BlockPos pos, boolean hasAdjacentAir) {
+        if (state == null || hasAdjacentAir) return null;
+        OreFamily fam = classify(state);
+        if (fam == OreFamily.OTHER) return null;
+        d.xrayHidden++;
+        d.xrayHiddenOreFamily = fam;
+        feed(player, d, KIND_HIDDEN, weightOf(fam),
+                " @" + pos.getX() + " " + pos.getY() + " " + pos.getZ() + " (сквозь блок)");
+        return fam;
+    }
+
     private static void judgeRatio(ServerPlayerEntity player, PlayerData d) {
         // Fire once per threshold crossing, not per block: compare against
         // the baseline so the verdict lands on the first stone-like break

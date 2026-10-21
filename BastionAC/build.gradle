@@ -3,6 +3,7 @@ plugins {
 }
 
 version = project.mod_version
+apply from: file('../buildnumber.gradle')
 group = project.maven_group
 
 base {

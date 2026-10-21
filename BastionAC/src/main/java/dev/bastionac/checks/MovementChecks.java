@@ -594,7 +594,7 @@ public final class MovementChecks {
                 d.speedBuffer = 2;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.SPEED,
                         String.format("средняя %.2f бл/тик, лимит %.2f", avgSpeed, avgLimit));
-                if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
             }
@@ -622,7 +622,7 @@ public final class MovementChecks {
                     d.groundSpeedBuffer = 1;
                     boolean mitigate = BastionAC.flag(player, d, CheckType.SPEED,
                             String.format("на земле %.2f бл/тик, лимит %.2f", hDist, groundLimit));
-                    if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                    if (mitigate || BastionAC.instantSetback(d)) {
                         action = Action.max(action, Action.SETBACK);
                     }
                 }
@@ -672,8 +672,19 @@ public final class MovementChecks {
                 // leaking off, not a cheat, and must not fill the buffer. This
                 // is what kills the sprint+apple false NoSlow from the live test
                 // (0,29-0,33 бл/тик while the apple animation finished).
-                boolean decaying = d.noSlowLastHDist >= 0 && hDist < d.noSlowLastHDist - 0.004;
-                if (hDist > useLimit && !decaying) {
+                //
+                // 3.5 beta (audit): "slower than the tick before" let a sawtooth
+                // through — 0.26, 0.25, 0.26, 0.25 read as decaying every other
+                // tick, and the decaying tick also drained the buffer, so it
+                // never filled. Momentum only goes down, and only for the first
+                // few ticks: a tick counts as decay when it is below the slowest
+                // tick of this use so far, early in the use, and decay merely
+                // holds the buffer.
+                boolean decaying = noSlowDecaying(d.noSlowMinHDist, hDist, usingFor, general.noSlowGraceTicks);
+                d.noSlowMinHDist = d.noSlowMinHDist < 0 ? hDist : Math.min(d.noSlowMinHDist, hDist);
+                if (decaying) {
+                    // Momentum leaking off: neither evidence nor an excuse.
+                } else if (hDist > useLimit) {
                     d.noSlowBuffer += 1;
                     // Six consecutive ticks, not four. The server keeps
                     // isUsingItem() true until the client's release packet lands,
@@ -684,7 +695,7 @@ public final class MovementChecks {
                         d.noSlowBuffer = 1;
                         boolean mitigate = BastionAC.flag(player, d, CheckType.NOSLOW,
                                 String.format("%.2f бл/тик с предметом (лимит %.2f)", hDist, useLimit));
-                        if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                        if (mitigate || BastionAC.instantSetback(d)) {
                             action = Action.max(action, Action.SETBACK);
                         }
                     }
@@ -697,11 +708,13 @@ public final class MovementChecks {
                 // ice, mid-bounce). Break the decay series so the next judgeable
                 // tick starts a fresh comparison rather than reading across a gap.
                 d.noSlowLastHDist = -1;
+                d.noSlowMinHDist = -1;
             }
         } else {
             d.usingItemSinceTick = -1;
             d.noSlowBuffer = Math.max(0, d.noSlowBuffer - 0.5);
             d.noSlowLastHDist = -1;
+            d.noSlowMinHDist = -1;
         }
 
         // ---------------- NOWEB ----------------
@@ -715,7 +728,7 @@ public final class MovementChecks {
                 d.webFastStreak = 2;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.NOSLOW,
                         String.format("в паутине %.2f бл/тик (без мода не больше 0.08)", hDist));
-                if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
             }
@@ -740,7 +753,7 @@ public final class MovementChecks {
                     d.berryFastStreak = 2;
                     boolean mitigate = BastionAC.flag(player, d, CheckType.NOSLOW, String.format(
                             "в кусте ягод %.2f бл/тик (без мода не больше %.2f)", hDist, bushLimit));
-                    if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                    if (mitigate || BastionAC.instantSetback(d)) {
                         action = Action.max(action, Action.SETBACK);
                     }
                 }
@@ -821,7 +834,7 @@ public final class MovementChecks {
                         d.fastFallBuffer = 1;
                         boolean mitigate = BastionAC.flag(player, d, CheckType.FASTFALL, String.format(
                                 "падение %.2f бл/тик (ванильный предел %.2f на %d-м тике)", -dy, cap, d.fallTicks));
-                        if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                        if (mitigate || BastionAC.instantSetback(d)) {
                             action = Action.max(action, Action.SETBACK);
                         }
                     }
@@ -929,7 +942,7 @@ public final class MovementChecks {
                 d.highJumpBase = d.climbBaseY;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.FLY, String.format(
                         "прыжок на %.2f бл без опоры (предел %.2f) — HighJump", gain, maxGain));
-                if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
             }
@@ -950,7 +963,7 @@ public final class MovementChecks {
                 // check that fires once per wall.
                 boolean mitigate = BastionAC.flag(player, d, CheckType.SPIDER,
                         String.format("по лестнице %.3f бл/тик (без мода 0.118) — FastLadder", dy), 0.5);
-                if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
             }
@@ -1043,7 +1056,7 @@ public final class MovementChecks {
                 d.jesusBuffer = 2;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.JESUS,
                         String.format("стоит на воде (onGround над жидкостью, dy=%.2f)", dy));
-                if (mitigate || BastionAC.config().general.instantMovementSetback) {
+                if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
             }
@@ -1122,8 +1135,13 @@ public final class MovementChecks {
         }
         if (feet.isOf(Blocks.SCAFFOLDING) || ground.isOf(Blocks.SCAFFOLDING)) b |= dev.bastionac.telemetry.TelemetryFormat.ENV_SCAFFOLDING;
         if (inBlock(world, x, y, z, Blocks.SWEET_BERRY_BUSH)) b |= dev.bastionac.telemetry.TelemetryFormat.ENV_BERRY;
-        // Anything that can shove a player in mid-air (other players, mobs, boats).
-        if (!env.support && !world.getOtherEntities(player, player.getBoundingBox().expand(0.6, 0.3, 0.6),
+        // Anything that can shove the player (other players, mobs, boats) — on
+        // the ground too: in a dense flock the sheep push a player standing
+        // still, and Argus read those ticks as "speeding up with no keys held"
+        // (10.6 % on an honest session of 19.10, 3.5 beta). The probe is the
+        // player's own box widened by 0.3 on the ground, where shoving needs contact.
+        double reach = env.support ? 0.3 : 0.6;
+        if (!world.getOtherEntities(player, player.getBoundingBox().expand(reach, 0.3, reach),
                 e -> e.isPushable() && e != player.getVehicle()).isEmpty()) {
             b |= dev.bastionac.telemetry.TelemetryFormat.ENV_PUSHABLE_NEAR;
         }
@@ -1140,6 +1158,49 @@ public final class MovementChecks {
      * client is judged by — ClientTickEnd for 1.21.2+, move packets for older
      * clients whose tick ends Via makes up. See {@link dev.bastionac.core.TimerBalance}.
      */
+    /** Ticks after the grace in which honest sprint momentum can still be bleeding off. */
+    static final int NOSLOW_DECAY_TICKS = 8;
+
+    /**
+     * Whether this judged tick is momentum decaying rather than NoSlow: below
+     * the slowest tick of the use so far (by more than noise), and early in the
+     * use. Pure, unit-tested.
+     */
+    static boolean noSlowDecaying(double minSoFar, double hDist, long usingFor, int graceTicks) {
+        return minSoFar >= 0 && hDist < minSoFar - 0.004 && usingFor <= graceTicks + NOSLOW_DECAY_TICKS;
+    }
+
+    /**
+     * One vehicle-steering packet came off the wire (netty thread). A pilot's
+     * client sends exactly one per tick; the speed check above judges each
+     * packet on its own, so two packets a tick, each within the limit, doubled
+     * a boat's or horse's speed unseen — on any client version, and on a
+     * 1.21.1 client the vehicle had no clock at all (3.5 beta, audit). Same
+     * balance as the player timer, kept separately.
+     */
+    public static void vehicleTimerArrival(ServerPlayerEntity player, PlayerData d, long nowMs) {
+        var g = BastionAC.config().general;
+        double balance = d.vehicleTimer.onTick(nowMs, g.timerLagBankMs);
+        if (balance >= -g.timerMaxAheadMs) return;
+        double ahead = -balance;
+        d.vehicleTimer.settle();
+        var srv = BastionAC.server();
+        if (srv != null) srv.execute(() -> vehicleTimerVerdict(player, d, ahead));
+    }
+
+    private static void vehicleTimerVerdict(ServerPlayerEntity player, PlayerData d, double aheadMs) {
+        if (player.isRemoved() || BastionAC.data(player) != d) return;
+        long tick = BastionAC.serverTick();
+        if (player.isCreative() || player.isSpectator() || BastionAC.isAuthFrozen(player)) return;
+        if (d.isFullyExempt(tick)) return;
+        net.minecraft.entity.Entity vehicle = player.getRootVehicle();
+        if (vehicle == null || vehicle == player) return;
+        // Flag only: the packets already played out, and the anchor is the
+        // latest accepted one — there is no earlier spot to put it back to.
+        BastionAC.flag(player, d, CheckType.TIMER, String.format(java.util.Locale.ROOT,
+                "транспорт обогнал реальное время на %.0f мс (по пакетам транспорта)", aheadMs));
+    }
+
     public static void timerArrival(ServerPlayerEntity player, PlayerData d, long nowMs, boolean tickEnd) {
         int kind = d.tickEndKind;
         boolean tickClock = kind == 1;
@@ -1175,13 +1236,15 @@ public final class MovementChecks {
         d.flyBuffer = 1.5;
         boolean mitigate = BastionAC.flag(player, d, CheckType.FLY,
                 String.format("dy=%.3f, в воздухе %d тиков", dy, d.airTicks));
-        return mitigate || BastionAC.config().general.instantMovementSetback;
+        return mitigate || BastionAC.instantSetback(d);
     }
 
     private static void update(PlayerData d, double x, double y, double z, double dy, Env env) {
         d.prevMoveX = d.lastX;
         d.prevMoveY = d.lastY;
         d.prevMoveZ = d.lastZ;
+        d.lastMoveHDist = Math.sqrt((x - d.lastX) * (x - d.lastX) + (z - d.lastZ) * (z - d.lastZ));
+        d.lastMoveHDistTick = BastionAC.serverTick();
         d.lastX = x;
         d.lastY = y;
         d.lastZ = z;

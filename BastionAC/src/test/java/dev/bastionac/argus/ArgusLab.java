@@ -144,10 +144,20 @@ final class ArgusLab {
         }
     }
 
+    /** Combat modules a toggler switches on for a fight. */
+    static final List<Cheat> TOGGLED = List.of(Cheat.AURA, Cheat.AURA_SMOOTH, Cheat.AIM_ASSIST, Cheat.REACH);
+
     /** Every scenario of the bench: each cheat at three intensities. */
     static List<Scenario> cheatScenarios(double... levels) {
         List<Scenario> out = new ArrayList<>();
-        for (Cheat c : Cheat.values()) for (double l : levels) out.add(new Scenario(c, l));
+        for (Cheat c : Cheat.values()) {
+            if (c == Cheat.TOGGLER) continue;
+            for (double l : levels) out.add(new Scenario(c, l));
+        }
+        // A toggler: an aura, an aim assist or a reach switched on for a few fights only.
+        for (double l : levels) {
+            for (Cheat c : TOGGLED) out.add(new Scenario(Cheat.TOGGLER, l, Map.of(c, 1.0)));
+        }
         return out;
     }
 
@@ -159,7 +169,12 @@ final class ArgusLab {
         Random r = new Random(seed);
         List<Scenario> out = new ArrayList<>();
         for (Cheat c : Cheat.values()) {
+            if (c == Cheat.TOGGLER) continue;
             for (int k = 0; k < perCheat; k++) out.add(new Scenario(c, 0.15 + 0.85 * r.nextDouble()));
+        }
+        for (int k = 0; k < perCheat; k++) {
+            Cheat c = TOGGLED.get(r.nextInt(TOGGLED.size()));
+            out.add(new Scenario(Cheat.TOGGLER, 0.15 + 0.85 * r.nextDouble(), Map.of(c, 0.5 + 0.5 * r.nextDouble())));
         }
         for (int k = 0; k < perCheat; k++) {
             out.add(new Scenario(Cheat.AURA_SMOOTH, 0.2 + 0.8 * r.nextDouble(),
@@ -216,7 +231,7 @@ final class ArgusLab {
     }
 
     /**
-     * Real session files ({@code .btl.gz}, e.g. {@code logs/bastionac/telemetry}
+     * Real session files ({@code .btl.gz}, e.g. {@code logs/bastionac/sessions}
      * of a live server), measured like the lab's, each taken as one honest
      * session. Mining is left out (no world to sample) and the movement replay
      * takes every block as ordinary ground.
@@ -562,7 +577,7 @@ final class ArgusLab {
         Bench coldBefore = benchmark(test, new Baselines(), neutral);
         System.out.println(coldBefore.report("без норм, модель без обучения (все веса 1)"));
 
-        String version = "lab-3.3.0";
+        String version = "lab-3.5.0-beta";
         Calibration.Prior prior = trainBagged(bags, realSessions, base, version);
         Calibration trained = model(prior);
         Bench after = benchmark(test, base, trained);

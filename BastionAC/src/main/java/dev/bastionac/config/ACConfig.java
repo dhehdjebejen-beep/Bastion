@@ -32,7 +32,37 @@ public final class ACConfig {
     public Punishment punishment = new Punishment();
     public TelemetryCfg telemetry = new TelemetryCfg();
     public ArgusCfg argus = new ArgusCfg();
+    public ProactiveCfg proactive = new ProactiveCfg();
     public Map<String, CheckCfg> checks = new LinkedHashMap<>();
+
+    /**
+     * Proactive mode (3.5 beta, see core.Proactive): the checks only raise
+     * alerts, Argus reads each one within seconds and decides — sanctions for
+     * that player from {@link #enforceScore}, a ban on a confident guilty
+     * verdict. Off by default; /bac proactive on.
+     */
+    public static final class ProactiveCfg {
+        public boolean enabled = false;
+        /** Argus score from which every check sets back / cancels this player. */
+        public double enforceScore = 0.75;
+        /** How long those sanctions stay on after the verdict that switched them on. */
+        public int enforceMinutes = 30;
+        /** A guilty verdict bans with this many minutes of telemetry behind it (impossible facts: at once). */
+        public int banMinMinutes = 3;
+        /** First look at a case this soon after the alert that opened it. */
+        public int firstLookSeconds = 10;
+        /** A case with fresh alerts is read again this often. */
+        public int reanalyzeSeconds = 30;
+        /** Telemetry read for a proactive verdict: the recent past, not the whole hour. */
+        public int windowMinutes = 10;
+        /** Checks whose harm cannot wait for Argus: they mitigate at once, as without the mode. */
+        public java.util.List<String> alwaysMitigate = new java.util.ArrayList<>(ALWAYS_MITIGATE_DEFAULT);
+    }
+
+    /** Movement exploits and packets no client can send: mitigated at once even in proactive mode. */
+    public static final java.util.List<String> ALWAYS_MITIGATE_DEFAULT = java.util.List.of(
+            "speed", "fly", "spider", "timer", "bigmove", "nofall", "jesus", "step", "fastfall",
+            "vehicle", "blink", "packetorder", "badrotation", "entitypredict", "airplace", "interactwalls");
 
     public static final class General {
         /** Ops receive in-game alerts by default (each admin can /bac alerts off). */
@@ -322,7 +352,7 @@ public final class ACConfig {
      * staff alerts within {@code alertWindowMinutes}, they are temp-banned via
      * the vanilla ban list. The duration escalates by how many bans they
      * already have within {@code banHistoryHours}, stepping through
-     * {@code banStepsHours} (e.g. 1h → 6h → 24h → 1 week).
+     * {@code banStepsHours} (by default 2 h → 12 h → 48 h → 2 weeks → 30 days).
      */
     /**
      * Only checks with a live track record drive the automatic tempban. Every
@@ -619,6 +649,8 @@ public final class ACConfig {
         if (general == null) general = new General();
         if (telemetry == null) telemetry = new TelemetryCfg();
         if (argus == null) argus = new ArgusCfg();
+        if (proactive == null) proactive = new ProactiveCfg();
+        if (proactive.alwaysMitigate == null) proactive.alwaysMitigate = new java.util.ArrayList<>(ALWAYS_MITIGATE_DEFAULT);
         if (messages == null) messages = new Messages();
         if (punishment == null) punishment = new Punishment();
         if (punishment.banStepsHours == null || punishment.banStepsHours.isEmpty()) {
@@ -761,6 +793,14 @@ public final class ACConfig {
     }
 
     void clamp() {
+        if (proactive != null) {
+            proactive.enforceScore = clampD(proactive.enforceScore <= 0 ? 0.75 : proactive.enforceScore, 0.3, 0.99);
+            proactive.enforceMinutes = clampInt(proactive.enforceMinutes <= 0 ? 30 : proactive.enforceMinutes, 1, 1440);
+            proactive.banMinMinutes = clampInt(proactive.banMinMinutes <= 0 ? 3 : proactive.banMinMinutes, 1, 60);
+            proactive.firstLookSeconds = clampInt(proactive.firstLookSeconds <= 0 ? 10 : proactive.firstLookSeconds, 1, 600);
+            proactive.reanalyzeSeconds = clampInt(proactive.reanalyzeSeconds <= 0 ? 30 : proactive.reanalyzeSeconds, 5, 1800);
+            proactive.windowMinutes = clampInt(proactive.windowMinutes <= 0 ? 10 : proactive.windowMinutes, 2, 120);
+        }
         general.alertCooldownSeconds = clampInt(general.alertCooldownSeconds, 1, 300);
         if (general.netherViewDistance != 0) general.netherViewDistance = clampInt(general.netherViewDistance, 2, 32);
         general.xrayHiddenAlertSeconds = clampInt(general.xrayHiddenAlertSeconds <= 0 ? 60 : general.xrayHiddenAlertSeconds, 5, 3600);

@@ -69,7 +69,10 @@ public final class CombatChecks {
             double[] deltas = rotationWindow(d);
             // bestGridFit: deltas with no common grid at all used to return
             // step 0 and skip the check — the purest interpolated aim passed.
-            dev.bastionac.core.MathUtil.GridFit fit = dev.bastionac.core.MathUtil.bestGridFit(deltas);
+            // The step this player's mouse was already seen on is a candidate
+            // too, and every delta carries the precision it was measured at.
+            dev.bastionac.core.MathUtil.GridFit fit = dev.bastionac.core.MathUtil.bestGridFit(
+                    deltas, d.rotationNoise(), d.gridStep);
             double step = fit.step();
             if (!Double.isNaN(fit.ratio())) {
                 double onGrid = fit.ratio();
@@ -143,6 +146,29 @@ public final class CombatChecks {
         // movement is a quarter block); widen the soft margin so the buffered
         // path, not the alert ladder, absorbs the jitter.
         if (playerTarget && ping > 200) margin = 0.35;
+        // What the client hit is where the target was one view delay ago, and
+        // a mob has no history to look that up in: the server's box is all
+        // there is. A sheep knocked back by the hit before (or by the sweep of
+        // the hit on its neighbour) flies close to a block a tick, and the
+        // client draws it ping + tracker interval + three lerp ticks late —
+        // the 4.2–6.5 block "reaches" of 18–19.10 in a flock were exactly
+        // that. Allow the distance it can have covered; when the view delay is
+        // past what any allowance can cover (the multi-second pings of a link
+        // drowning in a flock's entity updates), the hit cannot be judged.
+        // A player target whose round trip is past the twenty ticks of history
+        // cannot be judged either: the band was clamped to boxes far newer
+        // than the one the client saw (3.5 build 2).
+        double drift = 0;
+        boolean judgeable;
+        if (playerTarget) {
+            judgeable = rtt[1] / 50 + REACH_BAND_SLACK <= HitboxHistory.DEPTH - 1;
+        } else {
+            double speed = Math.max(target.getVelocity().length(), Math.sqrt(target.squaredDistanceTo(
+                    target.lastX, target.lastY, target.lastZ)));
+            boolean hurt = target instanceof net.minecraft.entity.LivingEntity le && le.hurtTime > 0;
+            drift = mobDriftAllowance(speed, hurt, ping, target.getType().getTrackTickInterval());
+            judgeable = !Double.isNaN(drift);
+        }
         double best = Double.MAX_VALUE;
         Box bestBox = boxes.get(0);
         for (Box b : boxes) {
@@ -154,16 +180,18 @@ public final class CombatChecks {
                 bestBox = b;
             }
         }
-        if (best > base + 1.2) {
+        if (!judgeable) {
+            // No verdict either way: keep the buffer as it is.
+        } else if (best > base + 1.2 + drift) {
             BastionAC.flag(player, d, CheckType.REACH,
-                    String.format("%.2f бл (лимит %.2f, пинг %d)", best, base + 1.2, ping));
+                    String.format("%.2f бл (лимит %.2f, пинг %d)", best, base + 1.2 + drift, ping));
             action = Action.max(action, Action.CANCEL); // blatant — always cancel the hit
-        } else if (best > base + margin) {
+        } else if (best > base + margin + drift) {
             d.reachBuffer += 1;
             if (d.reachBuffer >= 2) {
                 d.reachBuffer = 0;
                 if (BastionAC.flag(player, d, CheckType.REACH,
-                        String.format("%.2f бл (лимит %.2f, пинг %d)", best, base + margin, ping))) {
+                        String.format("%.2f бл (лимит %.2f, пинг %d)", best, base + margin + drift, ping))) {
                     action = Action.max(action, Action.CANCEL);
                 }
             }
@@ -258,9 +286,22 @@ public final class CombatChecks {
         }
 
         // ---------------- MULTITARGET ----------------
-        int distinct = d.recordTargetAndCountDistinct(target.getId(), tick, 6);
-        if (distinct >= 3) {
-            BastionAC.flag(player, d, CheckType.MULTITARGET, distinct + " разных целей за 6 тиков");
+        // Three targets in six ticks is what a hand does too: clicking ten
+        // times a second into a dense flock, each click lands on whichever
+        // sheep is under the crosshair now (18.10: eleven alerts on one player,
+        // every hit on the sheep they were looking at). A multi-aura's tell is
+        // hitting targets it is not looking at, spread around the player. So
+        // a switch counts only when the look ray missed the target (with room
+        // for a mob's unknown drift) and the distinct targets of the window
+        // span a real angle (3.5 build 2).
+        boolean lookHits = lookRayHits(player, eye, target, playerTarget ? 0.15 : 0.6 + drift);
+        double dirYaw = Math.toDegrees(Math.atan2(-(target.getX() - eye.x), target.getZ() - eye.z));
+        int offLook = d.recordTargetAndCountOffLook(target.getId(), tick, 6, lookHits, (float) dirYaw);
+        if (offLook >= 2 && d.recentTargetSpread(tick, 6) >= MULTITARGET_MIN_SPREAD_DEG
+                && d.distinctRecentTargets(tick, 6) >= 3) {
+            BastionAC.flag(player, d, CheckType.MULTITARGET, String.format(java.util.Locale.ROOT,
+                    "%d разных целей за 6 тиков, %d мимо прицела, разброс %.0f°",
+                    d.distinctRecentTargets(tick, 6), offLook, d.recentTargetSpread(tick, 6)));
         }
 
         // ---------------- USEATTACK ----------------
@@ -465,6 +506,37 @@ public final class CombatChecks {
         return hit.getType() == HitResult.Type.BLOCK;
     }
 
+    /** The distinct targets of a multitarget window must span at least this (yaw, degrees). */
+    static final double MULTITARGET_MIN_SPREAD_DEG = 60.0;
+    /** Ticks a mob is drawn behind the server: client lerp steps on top of ping and tracker interval. */
+    static final int MOB_LERP_TICKS = 3;
+    /** Past this view delay a mob hit is not judged at all. */
+    static final int MOB_MAX_VIEW_DELAY_TICKS = 20;
+    /** A struck mob's knockback flight, on top of its current speed. */
+    static final double MOB_KNOCKBACK_DRIFT = 2.0;
+    static final double MOB_DRIFT_CAP = 4.0;
+
+    /**
+     * How far a mob may have moved between the position the client drew and the
+     * server's current box: speed (blocks/tick) over the view delay, plus a
+     * knockback flight when it was hurt recently. NaN when the delay is too
+     * long to judge the hit at all. Pure, unit-tested.
+     */
+    static double mobDriftAllowance(double speedPerTick, boolean hurtRecently, int pingMs, int trackInterval) {
+        int delay = (Math.max(0, pingMs) + 49) / 50 + Math.max(1, trackInterval) + MOB_LERP_TICKS;
+        if (delay > MOB_MAX_VIEW_DELAY_TICKS) return Double.NaN;
+        double drift = Math.max(0, speedPerTick) * delay + (hurtRecently ? MOB_KNOCKBACK_DRIFT : 0);
+        return Math.min(MOB_DRIFT_CAP, drift);
+    }
+
+    /** Whether the player's look ray passes through the target's box grown by {@code grow}. */
+    private static boolean lookRayHits(ServerPlayerEntity player, Vec3d eye, Entity target, double grow) {
+        Box b = target.getBoundingBox().expand(grow);
+        if (b.contains(eye)) return true;
+        Vec3d look = player.getRotationVec(1.0F);
+        return b.raycast(eye, eye.add(look.multiply(8))).isPresent();
+    }
+
     // ------------------------------------------------------------------
     // GCD (aim grid) plumbing
     // ------------------------------------------------------------------
@@ -485,12 +557,31 @@ public final class CombatChecks {
                 return;
             }
             if (Math.abs(dy) > 1.0e-3 || Math.abs(dp) > 1.0e-3) {
-                d.pushRotationDelta(dy, dp);
+                // A pitch that ends (or starts) pinned at ±90° was clamped by
+                // the client: the mouse moved further than the head did.
+                boolean clamped = Math.abs(pitch) >= 89.999f || Math.abs(d.lastPitchDelta2) >= 89.999f;
+                d.pushRotationDelta(dy, clamped ? Float.NaN : dp,
+                        (float) MathUtil.angleNoise(yaw, d.lastYawDelta2),
+                        (float) MathUtil.angleNoise(pitch, d.lastPitchDelta2));
+                learnGridStep(d);
             }
         }
         d.lastYawDelta2 = yaw;
         d.lastPitchDelta2 = pitch;
         d.hasLastRotation = true;
+    }
+
+    /**
+     * Every forty fresh deltas, remember the step the player's mouse sits on —
+     * only when it explains nearly all of them. Judging a window of fast swings
+     * needs that step: such a window has no small turn to read it from, and
+     * every candidate it offers itself is a multiple (3.5 build 2).
+     */
+    private static void learnGridStep(PlayerData d) {
+        if (d.gridLearnSamples < 40) return;
+        d.gridLearnSamples = 0;
+        MathUtil.GridFit fit = MathUtil.bestGridFit(d.rotationDeltas(), d.rotationNoise(), d.gridStep);
+        if (!Double.isNaN(fit.ratio()) && fit.ratio() >= 0.9 && fit.judged() >= 20) d.gridStep = fit.step();
     }
 
     private static double[] rotationWindow(PlayerData d) {

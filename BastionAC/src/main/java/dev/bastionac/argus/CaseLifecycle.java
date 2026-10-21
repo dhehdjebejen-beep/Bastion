@@ -139,7 +139,12 @@ final class CaseLifecycle {
                 return now >= c.dueAt ? Step.ANALYZE : Step.NONE;
             }
             case ANALYZED -> {
-                if (c.pendingSignals && now - c.lastAnalyzedAt >= cfg.reanalyzeMinutes * 60_000L
+                long reanalyzeMs = cfg.reanalyzeMinutes * 60_000L;
+                if (dev.bastionac.core.Proactive.enabled()) {
+                    reanalyzeMs = Math.min(reanalyzeMs,
+                            dev.bastionac.BastionAC.config().proactive.reanalyzeSeconds * 1000L);
+                }
+                if (c.pendingSignals && now - c.lastAnalyzedAt >= reanalyzeMs
                         && now <= c.deadlineAt + REANALYZE_GRACE_MS) {
                     return Step.ANALYZE;
                 }

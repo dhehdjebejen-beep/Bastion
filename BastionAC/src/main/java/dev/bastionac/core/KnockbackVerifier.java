@@ -38,9 +38,9 @@ import net.minecraft.world.World;
  */
 public final class KnockbackVerifier {
 
-    /** Ping ids of our transactions: a recognisable high bit pattern, then a counter. */
-    private static final int ID_BASE = 0xBAC00000;
-    private static int counter;
+    // Ping ids are random (3.5 beta): the old fixed 0xBAC00000 prefix told a
+    // cheat which pings were the knockback check's, so it could drop exactly
+    // those and keep every other ping answered.
 
     /** Below this the replay is too short to tell anything from noise. */
     static final double MIN_JUDGED = 0.35;
@@ -71,7 +71,14 @@ public final class KnockbackVerifier {
     public static void flushPing(ServerPlayerEntity player, PlayerData d) {
         if (!d.kbNeedPing) return;
         d.kbNeedPing = false;
-        int id = ID_BASE | (counter++ & 0xFFFFF);
+        // The previous knockback's ping still unanswered after more movement
+        // than its flight time: that is a held transaction, whether or not the
+        // three seconds of the move-side timeout have run. A new hit used to
+        // wipe it without a word, so a client that never answered was never
+        // judged as long as it kept getting hit at least every three seconds —
+        // all of real PvP (3.5 beta, audit).
+        if (d.kbAwaitPong && d.kbMovesSincePing > inFlight(player)) noteUnanswered(player, d);
+        int id = java.util.concurrent.ThreadLocalRandom.current().nextInt();
         d.clearKbVerify();
         d.kbPending = true;
         d.kbAwaitPong = true;
@@ -85,9 +92,19 @@ public final class KnockbackVerifier {
         player.networkHandler.sendPacket(new CommonPingS2CPacket(id));
     }
 
-    /** True for the ids this class sends, so the pong hook ignores everyone else's pings. */
-    public static boolean isOurs(int id) {
-        return (id & 0xFFF00000) == ID_BASE;
+    /** Movement packets a vanilla client can still send before it has even seen our ping. */
+    private static int inFlight(ServerPlayerEntity player) {
+        return player.networkHandler.getLatency() / 50 + 20;
+    }
+
+    /** One knockback ping went unanswered with movement flowing on; five in a row is the flag. */
+    private static void noteUnanswered(ServerPlayerEntity player, PlayerData d) {
+        d.kbUnanswered++;
+        if (d.kbUnanswered >= 5) {
+            d.kbUnanswered = 0;
+            BastionAC.flag(player, d, CheckType.VELOCITY,
+                    "клиент не отвечает на ping после отброса (5 раз подряд)");
+        }
     }
 
     /** The client answered (server thread, in packet order): the knockback is in its velocity now. */
@@ -136,18 +153,12 @@ public final class KnockbackVerifier {
         if (!d.kbPending) return;
         if (d.kbAwaitPong) {
             d.kbMovesSincePing++;
-            int inFlight = player.networkHandler.getLatency() / 50 + 20;
-            if (d.kbMovesSincePing > inFlight && System.currentTimeMillis() - d.kbPingMs > 3000) {
+            if (d.kbMovesSincePing > inFlight(player) && System.currentTimeMillis() - d.kbPingMs > 3000) {
                 // A vanilla client always answers before its next movement; a
                 // packet stall stops the movement too. Movement flowing on with
                 // our ping unanswered is a client holding the transaction back.
                 d.clearKbVerify();
-                d.kbUnanswered++;
-                if (d.kbUnanswered >= 5) {
-                    d.kbUnanswered = 0;
-                    BastionAC.flag(player, d, CheckType.VELOCITY,
-                            "клиент не отвечает на ping после отброса (5 раз подряд)");
-                }
+                noteUnanswered(player, d);
             }
             return;
         }

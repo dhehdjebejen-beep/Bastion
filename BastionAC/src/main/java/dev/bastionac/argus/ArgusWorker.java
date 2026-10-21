@@ -14,8 +14,17 @@ import java.util.concurrent.atomic.AtomicLong;
 final class ArgusWorker {
 
     static final int PRIO_CASE = 0;
-    static final int PRIO_LABELS = 1;
-    static final int PRIO_SCAN = 2;
+    /** A case read again (fresh alerts): after every first look (3.5 beta). */
+    static final int PRIO_RECHECK = 1;
+    static final int PRIO_LABELS = 2;
+    static final int PRIO_SCAN = 3;
+    /**
+     * After a job the thread rests this many times as long as the job ran:
+     * Argus never takes more than a quarter of one core, however many cases
+     * the alerts open (3.5 beta, proactive mode on a two-core host).
+     */
+    static final int REST_FACTOR = 3;
+    static final long MAX_REST_MS = 5_000;
 
     private record Job(int priority, long seq, String what, ArgusProgress progress, Runnable task)
             implements Comparable<Job> {
@@ -87,12 +96,21 @@ final class ArgusWorker {
             // briefly; background scans can afford the full two minutes.
             waitForQuietServer(job.priority() == PRIO_CASE ? 20_000 : 120_000, job.progress());
             current = job.what();
+            long t0 = System.nanoTime();
             try {
                 job.task().run();
             } catch (Throwable t) {
                 BastionAC.LOGGER.warn("Argus job '{}' failed: {}", job.what(), t.toString());
             } finally {
                 current = null;
+            }
+            long rest = Math.min(MAX_REST_MS, (System.nanoTime() - t0) / 1_000_000L * REST_FACTOR);
+            if (rest > 0) {
+                try {
+                    Thread.sleep(rest);
+                } catch (InterruptedException e) {
+                    if (!running) return;
+                }
             }
         }
     }

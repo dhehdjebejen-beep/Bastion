@@ -94,6 +94,12 @@ public final class FeatureSet {
         });
     }
 
+    private static double[] negate(double[] s) {
+        double[] out = new double[s.length];
+        for (int i = 0; i < s.length; i++) out[i] = -s[i];
+        return out;
+    }
+
     public boolean has(String key) {
         return accs.containsKey(key);
     }
@@ -116,6 +122,7 @@ public final class FeatureSet {
             case LOG_CV -> s.length < 3 ? null : new Value(Math.log(Math.max(1e-3, Stats.cv(s))), s.length);
             case KURTOSIS -> s.length < 4 ? null : new Value(Stats.excessKurtosis(s), s.length);
             case MAX -> s.length == 0 ? null : new Value(Stats.max(s), s.length);
+            case MIN -> s.length == 0 ? null : new Value(-Stats.max(negate(s)), s.length);
             case FLAG -> s.length == 0 ? null : new Value(Stats.max(s), 1);
             case Z -> a.den <= 0 ? null : new Value(Stats.poissonUpperZ(a.num, a.den), a.den);
         };

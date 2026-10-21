@@ -67,6 +67,46 @@ class ArgusLabTest {
         }
     }
 
+    /**
+     * 3.5: the subtle cheats of the audit. Every tick's motion only 5 % longer
+     * (×1.05) is still an excess the physics replay sees on every tick of a
+     * run, and the ClickTP jumps are a weighted fact of the trained prior.
+     */
+    @Test
+    void aFivePerCentSpeedAndClickTpAreCaught() {
+        Baselines norms = ArgusLab.baselines(ArgusLab.corpus(1, 40, 0, List.of(), ROCK));
+        List<ArgusLab.Scenario> subtle = List.of(new ArgusLab.Scenario(Cheat.SPEED_MULT, 0.5),
+                new ArgusLab.Scenario(Cheat.CLICK_TP, 1.0));
+        List<ArgusLab.Played> test = ArgusLab.corpus(2_000_000, 0, 4, subtle, ROCK);
+        ArgusLab.Bench bench = ArgusLab.benchmark(test, norms, new Calibration());
+        for (ArgusLab.Scenario sc : subtle) {
+            int[] r = bench.byScenario.get(sc.name());
+            assertTrue(r[1] >= 3, sc.name() + " caught " + r[1] + " of " + r[0] + "\n" + bench.report("subtle"));
+        }
+        assertTrue(Calibration.Prior.get().weight("move.teleport") > 1.0, "move.teleport is trained, not the default 1");
+    }
+
+    @Test
+    void aTogglerIsSeenInItsWorstFight() {
+        // Reach switched on for one fight in a few (3.5 beta): the encounter
+        // feature picks that fight out of the honest ones around it.
+        Baselines norms = ArgusLab.baselines(ArgusLab.corpus(1, 40, 0, List.of(), ROCK));
+        ArgusLab.Scenario toggled = new ArgusLab.Scenario(Cheat.TOGGLER, 1.0, java.util.Map.of(Cheat.REACH, 1.0));
+        List<ArgusLab.Played> test = ArgusLab.corpus(3_000_000, 0, 4, List.of(toggled), ROCK);
+        ArgusLab.Bench bench = ArgusLab.benchmark(test, norms, new Calibration());
+        int[] r = bench.byScenario.get(toggled.name());
+        assertTrue(r[1] >= 3, toggled.name() + " caught " + r[1] + " of " + r[0] + System.lineSeparator()
+                + bench.report("toggler"));
+        dev.bastionac.argus.features.Features.Spec enc = dev.bastionac.argus.features.Features.spec("enc.reach_over");
+        // A fight shorter than the encounter minimum says nothing; most say it plainly.
+        int seen = 0;
+        for (ArgusLab.Played p : test) {
+            dev.bastionac.argus.features.FeatureSet.Value v = p.features().value(enc);
+            if (v != null && v.value() > 0.0) seen++;
+        }
+        assertTrue(seen >= 3, "the reach fight stands out in " + seen + " of " + test.size());
+    }
+
     @Test
     void anAimModuleAnswersTheTargetAtOnce() {
         // The reaction lag reads ≈ 0 ticks for every aim module and 3+ for a hand.

@@ -232,7 +232,7 @@ public final class BastionAC implements DedicatedServerModInitializer {
      * starts exactly between the last pre-knockback move and the first one after.
      */
     public static void onPong(ServerPlayerEntity player, int id) {
-        if (!dev.bastionac.core.KnockbackVerifier.isOurs(id)) return;
+        // Ids are random now; KnockbackVerifier.onPong matches the one it sent.
         var server = player.getEntityWorld().getServer();
         if (server == null) return;
         server.execute(() -> {
@@ -277,6 +277,12 @@ public final class BastionAC implements DedicatedServerModInitializer {
         // punishment; the alert/kick path below still logs the violation.
         boolean staff = BanManager.isExemptOperator(player);
 
+        // Proactive mode: the flag is evidence for Argus; whether it may also
+        // set back / cancel / kick is Argus's call (core.Proactive).
+        boolean proactive = dev.bastionac.core.Proactive.enabled();
+        boolean mayMitigate = dev.bastionac.core.Proactive.mayMitigate(player.getUuid(), type);
+        d.lastFlagType = type;
+
         double vl = d.vl.add(type, check.weight * Math.max(0.0, weightMultiplier));
         if (cfg.general.logViolationsToConsole) {
             LOGGER.info("[VL] {} {} -> {} ({})", d.name, type.key, String.format("%.1f", vl), details);
@@ -313,24 +319,34 @@ public final class BastionAC implements DedicatedServerModInitializer {
                     type.key + " VL " + String.format(java.util.Locale.ROOT, "%.1f", vl) + ": " + details);
             // Evasion watch: a staff alert landing arms the panic-pause pattern.
             dev.bastionac.core.EvasionTracker.onAlert(player);
-            // An alert counts toward the progressive auto-tempban.
-            if (BanManager.onAlert(player, type)) {
+            // An alert counts toward the progressive auto-tempban — not in
+            // proactive mode, where the ban is Argus's verdict.
+            if (!proactive && BanManager.onAlert(player, type)) {
                 d.punished = true; // banned — stop piling on this tick
                 return true;
             }
         }
 
-        if (cfg.general.kickEnabled && check.kickVl > 0 && vl >= check.kickVl && srv != null) {
+        if (mayMitigate && cfg.general.kickEnabled && check.kickVl > 0 && vl >= check.kickVl && srv != null) {
             d.punished = true; // one-shot: guarantees a single kick + announcement
             srv.execute(() -> punish(srv, player, type));
             return true;
         }
         if (staff && vl >= alertVl) {
             // Nothing else to escalate for staff; keep the mitigation answer honest.
-            return check.mitigateVl > 0 && vl >= check.mitigateVl;
+            return mayMitigate && check.mitigateVl > 0 && vl >= check.mitigateVl;
         }
 
-        return check.mitigateVl > 0 && vl >= check.mitigateVl;
+        return mayMitigate && check.mitigateVl > 0 && vl >= check.mitigateVl;
+    }
+
+    /**
+     * The "instant setback" setting, for the flag just raised: in proactive
+     * mode it bites only where that flag may mitigate.
+     */
+    public static boolean instantSetback(PlayerData d) {
+        return config.general.instantMovementSetback
+                && dev.bastionac.core.Proactive.mayMitigate(d.uuid, d.lastFlagType);
     }
 
     /** Runs on the server thread: announces the kick and disconnects the player.

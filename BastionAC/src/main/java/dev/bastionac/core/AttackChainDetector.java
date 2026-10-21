@@ -256,6 +256,8 @@ public final class AttackChainDetector {
         MinecraftServerLike srv = BastionAC.serverLike();
         if (srv == null) return; // tests / not yet started
         Set<String> kinds = chain.eligibleKinds();
+        // Proactive mode: the burned chain is a signal to Argus (sent above), not a ban.
+        if (Proactive.enabled()) return;
         srv.execute(() -> BanManager.chainBan(chain.uuid, chain.name, chain.burnedCount, String.join("+", kinds)));
     }
 

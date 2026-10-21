@@ -64,8 +64,6 @@ public final class Telemetry {
     private static final Map<UUID, SessionWriter> OPEN = new ConcurrentHashMap<>();
     private static final Map<UUID, Track> TRACK = new ConcurrentHashMap<>();
     private static final DateTimeFormatter STAMP = DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
-    private static final int PING_BASE = 0xBAD00000;
-    private static int pingCounter;
     private static volatile Supplier<Set<String>> pinned = Set::of;
     private static volatile long lastErrorLogMs;
 
@@ -305,15 +303,18 @@ public final class Telemetry {
 
     private static void ping(ServerPlayerEntity p, Track tr, long now) {
         if (p.networkHandler == null) return;
-        int id = PING_BASE | (pingCounter++ & 0xFFFFF);
+        // Random, like the knockback pings (3.5 beta): a fixed prefix let a
+        // cheat answer these at once and hold everything else back.
+        int id = java.util.concurrent.ThreadLocalRandom.current().nextInt();
         tr.pingId = id;
         tr.pingSentMs = now;
         p.networkHandler.sendPacket(new CommonPingS2CPacket(id));
     }
 
-    /** True for the ping ids the telemetry sends. */
-    public static boolean isOurPing(int id) {
-        return (id & 0xFFF00000) == PING_BASE;
+    /** True when this is the ping the telemetry last sent this player. */
+    public static boolean isOurPing(ServerPlayerEntity p, int id) {
+        Track tr = p == null ? null : TRACK.get(p.getUuid());
+        return tr != null && tr.pingId == id && tr.pingSentMs > 0;
     }
 
     // ---------------------------------------------------------------- movement hooks

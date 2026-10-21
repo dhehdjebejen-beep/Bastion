@@ -5,6 +5,19 @@ import java.util.Arrays;
 /** Small, dependency-free statistics: robust location/scale, moments, Poisson tails. */
 public final class Stats {
 
+    /**
+     * Lower bound of the Wilson score interval (one-sided 99 %) of a share of
+     * {@code hits} in {@code n}: what the share is at least, given how few
+     * trials stand behind it. 0 for no trials. Pure.
+     */
+    public static double wilsonLower(double hits, double n) {
+        if (n <= 0) return 0;
+        double z = 2.326, p = hits / n, z2 = z * z;
+        double centre = p + z2 / (2 * n);
+        double spread = z * Math.sqrt(p * (1 - p) / n + z2 / (4 * n * n));
+        return Math.max(0, (centre - spread) / (1 + z2 / n));
+    }
+
     private Stats() {}
 
     /** Linear-interpolated percentile, p in [0,1]. Sorts a copy. */

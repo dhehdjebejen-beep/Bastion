@@ -47,6 +47,8 @@ public final class VehicleChecks {
 
     /** Packets of ascent before the climb counts as powered flight. */
     private static final int ASCENT_PACKETS = 6;
+    /** Packets without support after which a vehicle must be falling. */
+    private static final int HOVER_PACKETS = 20;
     /** Ticks after mounting during which physics is still settling. */
     private static final long MOUNT_GRACE_TICKS = 20;
 
@@ -72,6 +74,7 @@ public final class VehicleChecks {
 
         if (d.lastVehicleId != vehicle.getId()) {
             d.lastVehicleId = vehicle.getId();
+            d.vehicleTimer.requestReset();
             d.vehicleInit = false;
             d.vehicleSinceTick = tick;
             d.vehicleAirTicks = 0;
@@ -141,7 +144,8 @@ public final class VehicleChecks {
         // A rideable entity that can genuinely fly under its own power is exempt:
         // the happy ghast is a mount, not an exploit.
         boolean canFlyItself = canFly(vehicle);
-        if (!canFlyItself && !supported && !settling && !velocityActive && dy > 0.02) {
+        boolean free = !canFlyItself && !supported && !env.slowing && !settling && !velocityActive;
+        if (free && dy > 0.02) {
             if (d.vehicleAirTicks > ASCENT_PACKETS) {
                 d.vehicleAirBuffer += 1;
                 if (d.vehicleAirBuffer > 2) {
@@ -153,16 +157,38 @@ public final class VehicleChecks {
                     }
                 }
             }
-        } else if (dy <= 0.02) {
+        } else if (free && d.vehicleAirTicks > HOVER_PACKETS && dy > -0.03) {
+            // Hovering. Every vehicle without support falls (a boat gains
+            // 0.04 a tick downwards, a horse 0.08); a full horse jump is long
+            // past its apex after twenty ticks. Flat flight and a slow climb
+            // under the +0.02 line used to pass untouched, and so did a
+            // staircase — two fast climbs, then level ticks that drained the
+            // buffer (3.5 beta, audit). Level flight now drains nothing.
+            d.vehicleHoverBuffer += 1;
+            if (d.vehicleHoverBuffer > 4) {
+                d.vehicleHoverBuffer = 2;
+                if (BastionAC.flag(player, d, CheckType.VEHICLE, String.format(
+                        "%s не падает без опоры: dy=%.3f, %d пакетов в воздухе",
+                        nameOf(vehicle), dy, d.vehicleAirTicks))) {
+                    action = Action.max(action, Action.SETBACK);
+                }
+            }
+        } else if (supported || dy < -0.05) {
+            // Only a real descent, or support, takes evidence away.
             d.vehicleAirBuffer = Math.max(0, d.vehicleAirBuffer - 0.5);
+            d.vehicleHoverBuffer = Math.max(0, d.vehicleHoverBuffer - 0.5);
         }
 
-        anchor(d, pos);
         if (action == Action.SETBACK && BastionAC.config().general.setbackEnabled) {
-            // Put the vehicle back where the server still believes it is. The
-            // server copy is authoritative and was never moved by the cheat.
-            vehicle.requestTeleport(d.lastVehX, d.lastVehY, d.lastVehZ);
+            // Put the vehicle back where the server still believes it is: the
+            // packet is refused, so the server copy never moved. This used to
+            // anchor on the refused packet first and then teleport to the
+            // anchor — the setback delivered the vehicle to exactly the spot
+            // the cheat asked for (3.5 beta, audit).
+            vehicle.requestTeleport(vehicle.getX(), vehicle.getY(), vehicle.getZ());
             anchor(d, new Vec3d(vehicle.getX(), vehicle.getY(), vehicle.getZ()));
+        } else {
+            anchor(d, pos);
         }
         return action;
     }
@@ -201,6 +227,8 @@ public final class VehicleChecks {
         boolean climbable;
         boolean ice;
         boolean rail;
+        /** Cobweb, powder snow, scaffolding, honey: a fall there can be near zero. */
+        boolean slowing;
     }
 
     /** Probes the cells the hull actually rests in — collision shapes, not "is it air". */
@@ -222,6 +250,9 @@ public final class VehicleChecks {
                 if (state.isIn(BlockTags.CLIMBABLE)) env.climbable = true;
                 if (state.isIn(BlockTags.ICE)) env.ice = true;
                 if (state.isIn(BlockTags.RAILS)) { env.rail = true; env.support = true; }
+                if (state.isOf(net.minecraft.block.Blocks.COBWEB) || state.isOf(net.minecraft.block.Blocks.POWDER_SNOW)
+                        || state.isOf(net.minecraft.block.Blocks.SCAFFOLDING)
+                        || state.isOf(net.minecraft.block.Blocks.HONEY_BLOCK)) env.slowing = true;
             }
         } catch (RuntimeException e) {
             // Unloaded chunk edge — treat as supported so nothing is convicted on missing data.

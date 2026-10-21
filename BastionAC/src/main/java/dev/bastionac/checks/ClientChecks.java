@@ -298,8 +298,11 @@ public final class ClientChecks {
         // not a vanilla client. Plain walking is measured instead, and only
         // well above the speed a player keeps from released-key inertia.
         boolean sprinting = player.isSprinting();
-        double moved = horizontalSince(d, player);
-        if (!sprinting && moved < 0.12) {
+        double moved = recentSpeed(d, tick);
+        // Momentum that is not the player's own input: ice, a knockback, water.
+        boolean carried = d.iceMemoryTicks > 0 || tick < d.velocityGraceUntil
+                || player.isTouchingWater() || player.isInLava();
+        if (!sprinting && (moved < 0.12 || carried)) {
             d.invMoveBuffer = Math.max(0, d.invMoveBuffer - 0.5);
             return Action.NONE;
         }
@@ -380,11 +383,15 @@ public final class ClientChecks {
         }
     }
 
-    /** Horizontal distance of the player's last accepted movement sample. */
-    private static double horizontalSince(PlayerData d, ServerPlayerEntity player) {
-        double dx = player.getX() - d.lastX;
-        double dz = player.getZ() - d.lastZ;
-        return Math.sqrt(dx * dx + dz * dz);
+    /**
+     * Horizontal speed of the latest accepted move, when it came in within the
+     * last two ticks (0 otherwise). This used to be the distance from the
+     * last accepted position to the player's position — the same point once
+     * the move was accepted, so it was always 0 and walking with the
+     * inventory open was never measured, only sprinting (3.5 beta, audit).
+     */
+    static double recentSpeed(PlayerData d, long tick) {
+        return d.lastMoveHDistTick >= 0 && tick - d.lastMoveHDistTick <= 2 ? d.lastMoveHDist : 0.0;
     }
 
     private ClientChecks() {}

@@ -17,6 +17,9 @@ public final class PlayerData {
     public final String name;
     public final VlTracker vl = new VlTracker();
 
+    /** The check of the latest flag (proactive mode: may its setback bite?). */
+    public volatile CheckType lastFlagType;
+
     public PlayerData(UUID uuid, String name) {
         this.uuid = uuid;
         this.name = name;
@@ -188,6 +191,13 @@ public final class PlayerData {
     // ------------------------------------------------------------------
     /** Timer by balance, fed from the netty thread at packet arrival (see TimerBalance). */
     public final TimerBalance timer = new TimerBalance();
+    /** The same balance over vehicle-steering packets (one per tick while piloting). */
+    public final TimerBalance vehicleTimer = new TimerBalance();
+    /** Evidence of a vehicle that stopped falling in mid-air (BoatFly hover). */
+    public double vehicleHoverBuffer;
+    /** Horizontal distance of the latest accepted move and the server tick it came in (InvMove). */
+    public double lastMoveHDist;
+    public long lastMoveHDistTick = -1;
     /** When each packet came off the wire (see ArrivalClock). */
     public final ArrivalClock arrivals = new ArrivalClock();
     /** Arrival time of the packet the server thread is handling right now. */
@@ -318,6 +328,7 @@ public final class PlayerData {
         lastGroundedOnFace = false;
         groundedAtTickEnd = false;
         noSlowLastHDist = -1;
+        noSlowMinHDist = -1;
         fallTicks = 0;
         fastFallBuffer = 0;
         resetSpeedSamples();
@@ -345,31 +356,52 @@ public final class PlayerData {
     public boolean hasLastRotation;
     /** Rolling GCD evidence window. */
     public double gcdOffGridRatio;
+    /** Deltas pushed since the window was last judged (not the ring's fill). */
     public int gcdSamples;
     public int gcdOffGrid;
     public double gcdBuffer;
+    /**
+     * The sensitivity step this player's mouse was seen to sit on (0 = not yet),
+     * learned from any rotation, not only the ones leading into hits: a window
+     * of nothing but fast swings holds no small turn to read the step from.
+     */
+    public double gridStep;
+    /** Deltas pushed since the step was last learned. */
+    public int gridLearnSamples;
 
     // Ring of |yaw|+|pitch| rotation deltas, oldest discarded, for the GCD
     // window. Fixed 40 samples — enough grid evidence, bounded memory.
     private final float[] rotDeltaRing = new float[40];
+    /** Float precision of each delta in {@link #rotDeltaRing} (MathUtil.angleNoise). */
+    private final float[] rotNoiseRing = new float[40];
     private int rotDeltaIdx;
     private int rotDeltaCount;
 
     /** Absolute rotation of the previous packet (set by the move hook). */
     public float prevYaw, prevPitch;
 
-    /** Records one rotation delta pair into the GCD window. */
-    public void pushRotationDelta(float dy, float dp) {
-        // Two floats per slot would need a second ring; the GCD treats yaw
-        // and pitch deltas as one population (they share the sensitivity
-        // step), so interleave both into the single ring.
-        rotDeltaRing[rotDeltaIdx] = Math.abs(dy);
+    /**
+     * Records one rotation delta pair into the GCD window, each with the float
+     * precision it was measured at; NaN leaves that axis out (a pitch pinned at
+     * ±90° moved less than the mouse did). The GCD treats yaw and pitch deltas
+     * as one population (they share the sensitivity step), so both go into the
+     * single ring.
+     */
+    public void pushRotationDelta(float dy, float dp, float noiseY, float noiseP) {
+        if (!Float.isNaN(dy)) pushDelta(dy, noiseY);
+        if (!Float.isNaN(dp)) pushDelta(dp, noiseP);
+    }
+
+    private void pushDelta(float delta, float noise) {
+        rotDeltaRing[rotDeltaIdx] = Math.abs(delta);
+        rotNoiseRing[rotDeltaIdx] = noise;
         rotDeltaIdx = (rotDeltaIdx + 1) % rotDeltaRing.length;
         if (rotDeltaCount < rotDeltaRing.length) rotDeltaCount++;
-        rotDeltaRing[rotDeltaIdx] = Math.abs(dp);
-        rotDeltaIdx = (rotDeltaIdx + 1) % rotDeltaRing.length;
-        if (rotDeltaCount < rotDeltaRing.length) rotDeltaCount++;
-        gcdSamples = rotDeltaCount;
+        // Fresh deltas since the last verdict. This used to be set to the
+        // ring's fill, so once the ring was full every attack re-judged the
+        // same forty deltas and one bad window became an alert per click.
+        if (gcdSamples < rotDeltaRing.length) gcdSamples++;
+        if (gridLearnSamples < rotDeltaRing.length) gridLearnSamples++;
     }
 
     /** Snapshot of the collected rotation deltas (degrees). */
@@ -377,6 +409,15 @@ public final class PlayerData {
         double[] out = new double[rotDeltaCount];
         for (int i = 0; i < rotDeltaCount; i++) {
             out[i] = rotDeltaRing[i];
+        }
+        return out;
+    }
+
+    /** Float precision of each delta of {@link #rotationDeltas()}, same order. */
+    public double[] rotationNoise() {
+        double[] out = new double[rotDeltaCount];
+        for (int i = 0; i < rotDeltaCount; i++) {
+            out[i] = rotNoiseRing[i];
         }
         return out;
     }
@@ -554,9 +595,63 @@ public final class PlayerData {
 
     private final int[] recentTargetIds = new int[8];
     private final long[] recentTargetTicks = new long[8];
+    /** Per slot: the look ray missed this target / yaw from the eye to it. */
+    private final boolean[] recentTargetOffLook = new boolean[8];
+    private final float[] recentTargetYaw = new float[8];
     private int targetIdx;
 
     /** Records the target and returns distinct targets hit in the window. */
+    /**
+     * Records an attack for the multitarget window and returns how many of the
+     * window's distinct targets were struck with the look ray missing them.
+     */
+    public int recordTargetAndCountOffLook(int entityId, long tick, int windowTicks, boolean lookHits, float dirYaw) {
+        recentTargetOffLook[targetIdx] = !lookHits;
+        recentTargetYaw[targetIdx] = dirYaw;
+        recordTargetAndCountDistinct(entityId, tick, windowTicks);
+        int off = 0;
+        int[] seen = new int[recentTargetIds.length];
+        int n = 0;
+        for (int i = 0; i < recentTargetIds.length; i++) {
+            if (tick - recentTargetTicks[i] > windowTicks || recentTargetTicks[i] == 0 || !recentTargetOffLook[i]) continue;
+            int id = recentTargetIds[i];
+            boolean dup = false;
+            for (int j = 0; j < n; j++) if (seen[j] == id) dup = true;
+            if (!dup) {
+                seen[n++] = id;
+                off++;
+            }
+        }
+        return off;
+    }
+
+    /** Distinct targets struck within the window. */
+    public int distinctRecentTargets(long tick, int windowTicks) {
+        int distinct = 0;
+        int[] seen = new int[recentTargetIds.length];
+        for (int i = 0; i < recentTargetIds.length; i++) {
+            if (tick - recentTargetTicks[i] > windowTicks || recentTargetTicks[i] == 0) continue;
+            boolean dup = false;
+            for (int j = 0; j < distinct; j++) if (seen[j] == recentTargetIds[i]) dup = true;
+            if (!dup) seen[distinct++] = recentTargetIds[i];
+        }
+        return distinct;
+    }
+
+    /** Widest yaw angle between the directions of the window's targets, degrees. */
+    public double recentTargetSpread(long tick, int windowTicks) {
+        double widest = 0;
+        for (int i = 0; i < recentTargetIds.length; i++) {
+            if (tick - recentTargetTicks[i] > windowTicks || recentTargetTicks[i] == 0) continue;
+            for (int j = i + 1; j < recentTargetIds.length; j++) {
+                if (tick - recentTargetTicks[j] > windowTicks || recentTargetTicks[j] == 0) continue;
+                double a = Math.abs(((recentTargetYaw[i] - recentTargetYaw[j]) % 360 + 540) % 360 - 180);
+                widest = Math.max(widest, a);
+            }
+        }
+        return widest;
+    }
+
     public int recordTargetAndCountDistinct(int entityId, long tick, int windowTicks) {
         recentTargetIds[targetIdx] = entityId;
         recentTargetTicks[targetIdx] = tick;
@@ -723,6 +818,8 @@ public final class PlayerData {
      *  decaying sprint-carry (honest) from a flat-held excess (real NoSlow).
      *  -1 = no sample yet / the judged run was broken. */
     public double noSlowLastHDist = -1;
+    /** Slowest judged tick of the current item use (-1 = none yet): honest momentum only ever goes down. */
+    public double noSlowMinHDist = -1;
 
     // ------------------------------------------------------------------
     // World

@@ -231,6 +231,11 @@ public final class Argus {
         if (s.kind() == Signal.Kind.CHAIN_BURNED || s.kind() == Signal.Kind.CORRECTION_LOOP) {
             c.dueAt = Math.min(c.dueAt, now + 30_000L);
         }
+        if (dev.bastionac.core.Proactive.enabled() && s.kind().fromChecks()) {
+            // Proactive mode: the checks no longer act on their own, so the
+            // alert is read within seconds, not after two minutes of collecting.
+            c.dueAt = Math.min(c.dueAt, now + BastionAC.config().proactive.firstLookSeconds * 1000L);
+        }
         if (s.kind() == Signal.Kind.MANUAL || s.kind() == Signal.Kind.SESSION_SCAN) {
             // Asked for now: an already decided case is read again at once, not
             // in a quarter of an hour — and one being read right now is read
@@ -260,6 +265,11 @@ public final class Argus {
         if (c.windowTo > 0) {
             in.from = c.windowFrom;
             in.to = c.windowTo;
+        } else if (dev.bastionac.core.Proactive.enabled() && c.count(Signal.Kind.MANUAL) == 0) {
+            // A proactive verdict is about what the player is doing now: the
+            // recent minutes, undiluted by an hour of honest play before.
+            in.from = now - BastionAC.config().proactive.windowMinutes * 60_000L;
+            in.to = now;
         } else {
             in.from = CaseLifecycle.readFrom(c, now, cfg.windowMinutes * 60_000L);
             in.to = now;
@@ -272,7 +282,8 @@ public final class Argus {
         ArgusProgress progress = new ArgusProgress(id, gen, now);
         PROGRESS.put(id, progress);
         in.progress = progress;
-        worker.submit(ArgusWorker.PRIO_CASE, "дело #" + id + " (" + c.name + ")", progress, () -> {
+        int priority = c.analyses == 0 ? ArgusWorker.PRIO_CASE : ArgusWorker.PRIO_RECHECK;
+        worker.submit(priority, "дело #" + id + " (" + c.name + ")", progress, () -> {
             MinecraftServer s = BastionAC.server();
             if (s != null) s.execute(() -> {
                 CaseFile live = store.byId(id);
@@ -370,6 +381,7 @@ public final class Argus {
         boolean online = srv != null && srv.getPlayerManager().getPlayer(UUID.fromString(c.uuid)) != null;
         CaseLifecycle.settle(c, online, now, solidGround(r, c, cfg));
         act(c, r, before, cfg);
+        proactiveVerdict(c, r, cfg);
         tellAlertsCleared(c, cfg);
         store.save();
     }
@@ -456,15 +468,44 @@ public final class Argus {
     }
 
     private static boolean autoBanAllowed(CaseFile c, Scorer.Result r, ACConfig.ArgusCfg cfg) {
+        return autoBanAllowed(c, r, cfg, cfg.autoBanMinMinutes);
+    }
+
+    private static boolean autoBanAllowed(CaseFile c, Scorer.Result r, ACConfig.ArgusCfg cfg, int minMinutes) {
         if (r.score() < cfg.autoBanScore) return false;
         // With a two-minute collection the first verdict can rest on very
         // little; a ban waits for enough telemetry unless a fact is impossible.
         // Staff are told meanwhile, and the deadline pass reads it again.
-        if (!solidGround(r, c, cfg)) return false;
+        if (!(r.hardHit() || c.dataMinutes >= minMinutes)) return false;
         if (r.score() <= calibration.maxCleanScore + 0.01) return false;
         if (baselines.sessions() < cfg.minBaselineSessions && !r.hardHit()) return false;
         MinecraftServer srv = BastionAC.server();
         return srv != null && !BanManager.isExemptOperator(srv, UUID.fromString(c.uuid), c.name);
+    }
+
+    /**
+     * Proactive mode (3.5 beta): the verdict is the sanction. From
+     * enforceScore every check bites for this player; a guilty verdict with
+     * the auto-ban evidence bans after only banMinMinutes of telemetry.
+     */
+    private static void proactiveVerdict(CaseFile c, Scorer.Result r, ACConfig.ArgusCfg cfg) {
+        if (!dev.bastionac.core.Proactive.enabled() || c.label == CaseFile.Label.CLEAN) return;
+        ACConfig.ProactiveCfg p = BastionAC.config().proactive;
+        UUID uuid = UUID.fromString(c.uuid);
+        long now = System.currentTimeMillis();
+        if (c.verdict == CaseFile.Verdict.GUILTY && c.action != CaseFile.Action.BANNED
+                && autoBanAllowed(c, r, cfg, p.banMinMinutes)) {
+            ban(c.id, "Аргус (проактивный)");
+            return;
+        }
+        if (r.score() >= p.enforceScore && dev.bastionac.core.Proactive.enforce(uuid, p.enforceMinutes, now)) {
+            AcJournal.write("argus-enforce", c.name, c.uuid, "argus", 0, String.format(Locale.ROOT,
+                    "дело #%s: оценка %.3f — откаты и отмены включены на %d мин", c.id, r.score(), p.enforceMinutes), null);
+            if (!"SHADOW".equals(mode())) {
+                dev.bastionac.core.Alerts.sendArgusNote(c.name, c.id, String.format(Locale.ROOT,
+                        "&cсанкции проверок включены &7на %d мин &8(оценка %.0f%%)", p.enforceMinutes, r.score() * 100));
+            }
+        }
     }
 
     private static void writeReport(CaseFile c, Analysis.Output out, Scorer.Result r) {
@@ -612,6 +653,7 @@ public final class Argus {
             CHEATERS.add(c.uuid);
             baselines.forget(c.uuid);
         } else if (label == CaseFile.Label.CLEAN) {
+            dev.bastionac.core.Proactive.clear(UUID.fromString(c.uuid));
             boolean other = store.ofPlayer(c.uuid).stream().anyMatch(x -> x != c && x.label == CaseFile.Label.CHEATER);
             if (!other) CHEATERS.remove(c.uuid);
         }

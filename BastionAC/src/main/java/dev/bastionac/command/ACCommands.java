@@ -154,6 +154,10 @@ public final class ACCommands {
                                             "&5[Аргус] &7Режим: &f" + dev.bastionac.argus.Argus.modeLabel(m)), true);
                                     return 1;
                                 }))))
+                .then(literal("proactive")
+                        .executes(ctx -> proactive(ctx.getSource(), null))
+                        .then(literal("on").executes(ctx -> proactive(ctx.getSource(), true)))
+                        .then(literal("off").executes(ctx -> proactive(ctx.getSource(), false))))
                 .then(literal("telemetry")
                         .executes(ctx -> telemetry(ctx.getSource(), null))
                         .then(argument("ник", word()).executes(ctx -> telemetry(ctx.getSource(), getString(ctx, "ник")))))
@@ -215,6 +219,23 @@ public final class ACCommands {
         boolean fresh = dev.bastionac.core.FreezeManager.freeze(target, src.getName(), reason);
         src.sendFeedback(() -> Text.literal(fresh ? "§b[BAC] " + target.getGameProfile().name() + " заморожен"
                 : "§7[BAC] " + target.getGameProfile().name() + " уже заморожен (причина обновлена)"), true);
+        return 1;
+    }
+
+    /** /bac proactive [on|off] — the checks only alert, Argus decides (3.5 beta). */
+    private static int proactive(net.minecraft.server.command.ServerCommandSource src, Boolean on) {
+        var p = BastionAC.config().proactive;
+        if (on != null) {
+            p.enabled = on;
+            BastionAC.saveConfig();
+        }
+        boolean live = dev.bastionac.core.Proactive.enabled();
+        int enforced = dev.bastionac.core.Proactive.enforcedCount(System.currentTimeMillis());
+        String state = !p.enabled ? "&7выключен" : live ? "&aвключён" : "&cвключён, но Аргус не работает — проверки действуют как обычно";
+        src.sendFeedback(() -> dev.bastionac.core.TextFmt.literal(String.format(java.util.Locale.ROOT,
+                "&5[Аргус] &7Проактивный режим: %s&7. Санкции с оценки &f%.0f%% &7на &f%d мин&7, "
+                        + "первый взгляд через &f%d с&7, бан от &f%d мин &7данных. Сейчас под санкциями: &f%d",
+                state, p.enforceScore * 100, p.enforceMinutes, p.firstLookSeconds, p.banMinMinutes, enforced)), on != null);
         return 1;
     }
 

@@ -36,12 +36,16 @@ final class LabSimulator {
         REACH("Reach: удар дальше 3 блоков"),
         AUTOCLICKER("Автокликер: ровный ритм"),
         SPEED("Speed: разгон в воздухе"),
+        SPEED_MULT("Speed ×: вся скорость чуть больше (уровень 0,5 = ×1,05)"),
         STRAFE("Strafe: боковой толчок в воздухе"),
+        CLICK_TP("ClickTP: телепорт пешком на 3–7 блоков"),
         BHOP("BHop: прыжки без клавиши"),
         TIMER("Timer: тики чаще 20 в секунду"),
         BLINK("Blink: придержанное движение"),
         PING_SPOOF("PingSpoof: задержка keep-alive"),
-        XRAY("X-ray: туннели к руде");
+        XRAY("X-ray: туннели к руде"),
+        /** Not a cheat of its own: the others are on only in some fights (level 1 = 30 % of them). */
+        TOGGLER("Тогглер: читы включаются на одну драку из нескольких");
 
         final String label;
 
@@ -113,8 +117,15 @@ final class LabSimulator {
 
     double level(Cheat c) {
         Double v = cheats.get(c);
-        return v == null ? 0 : v;
+        if (v == null) return 0;
+        // A toggler's modules are off outside the fights it chose.
+        if (c != Cheat.TOGGLER && cheats.containsKey(Cheat.TOGGLER) && !toggledOn) return 0;
+        return v;
     }
+
+    /** Toggler: whether the modules are on right now, and how many fights were played with them. */
+    private boolean toggledOn;
+    private int toggledFights;
 
     boolean on(Cheat c) {
         return level(c) > 0;
@@ -122,10 +133,20 @@ final class LabSimulator {
 
     /** Plays the whole session and returns the encoded telemetry. */
     byte[] play() {
-        long end = t + p.minutes * 60_000L;
+        long start = t, end = t + p.minutes * 60_000L;
+        Double toggle = cheats.get(Cheat.TOGGLER);
         while (t < end) {
             double r = rnd.nextDouble();
-            if (r < p.fight) fight(200 + rnd.nextInt(400));
+            toggledOn = false;
+            if (r < p.fight) {
+                if (toggle != null) {
+                    // One fight in a few — and at least one before the session is out.
+                    toggledOn = rnd.nextDouble() < 0.3 * toggle || (toggledFights == 0 && t > start + (end - start) / 2);
+                    if (toggledOn) toggledFights++;
+                }
+                fight(200 + rnd.nextInt(400));
+                toggledOn = false;
+            }
             else if (r < p.fight + p.dig) dig(40 + rnd.nextInt(60));
             else roam(200 + rnd.nextInt(400));
         }
@@ -242,6 +263,12 @@ final class LabSimulator {
             vx += fz * kick * dir;
             vz -= fx * kick * dir;
         }
+        if (on(Cheat.SPEED_MULT)) {
+            // The "subtle" speed: every tick's motion a few per cent longer, on the ground and in the air.
+            double m = 1 + 0.1 * level(Cheat.SPEED_MULT);
+            vx *= m;
+            vz *= m;
+        }
         x += vx;
         z += vz;
         double ny = y + vy;
@@ -277,6 +304,12 @@ final class LabSimulator {
             if (i % 60 == 0) turn(rnd.nextGaussian() * 40, rnd.nextGaussian() * 8);
             else if (rnd.nextDouble() < 0.3) turn(rnd.nextGaussian() * 3, rnd.nextGaussian() * 1.5);
             move(forward, jump);
+            if (on(Cheat.CLICK_TP) && rnd.nextDouble() < 0.004 * level(Cheat.CLICK_TP)) {
+                // One packet 3–7 blocks ahead: the click-teleport of a hacked client.
+                double d = 3 + 4 * rnd.nextDouble(), r = Math.toRadians(yaw);
+                x += -Math.sin(r) * d;
+                z += Math.cos(r) * d;
+            }
             if (blink && --blinkIn <= 0) {
                 blinkBurst();
                 continue;
