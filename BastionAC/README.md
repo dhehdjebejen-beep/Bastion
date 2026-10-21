@@ -27,6 +27,9 @@ client's own source and defaults.
   aim; Reach on mobs allows for how far the mob flew from the last hit and does
   not judge hits at multi-second pings; MultiTarget needs off-crosshair hits on
   targets around the player, not just three targets in a row in a crowd.
+- **Load, measured:** on two cores with 50 players the anti-cheat adds +0.6 % of
+  one core, within the scatter of the measurement; Grim adds +11.6 % in the same
+  benchmark ([report](BENCHMARK.md)).
 - **Bypasses closed:** Anti-KB with the ping answer dropped, a sawtooth NoSlow,
   two vehicle packets per tick, the vehicle setback that landed on the cheat's
   spot, a hovering BoatFly, InvMove at a walk, AutoTotem through the F key. A

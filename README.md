@@ -21,6 +21,10 @@ server — players join with an unmodified client and install nothing.
 
 ## The idea
 
+- **Light, as measured.** On a two-core server with 50 players BastionAC adds
+  +0.6 % of one core to the load — within the scatter of the measurement; Grim
+  adds +11.6 % in the same benchmark. Method, repeats, limits and the scripts to
+  reproduce it are in the [benchmark report](BastionAC/BENCHMARK.md).
 - **Zero trust towards every player.** Before login a player gets nothing: no
   world (empty chunks instead), no chat, no inventory, no commands, no packets
   for their own mods. Trust is never granted for a name, an IP or a "premium"
@@ -151,6 +155,8 @@ The Argus model is trained and measured on the Argus Lab bench
   version history.
 - [`BastionAC/ARGUS-LAB.ru.md`](BastionAC/ARGUS-LAB.ru.md) is the Argus Lab report:
   how the Argus model is trained and how well it detects each cheat.
+- [`BastionAC/BENCHMARK.md`](BastionAC/BENCHMARK.md) measures the anti-cheat's
+  load on two cores, compared with Grim.
 
 ## License
 
