@@ -49,6 +49,12 @@ public abstract class PlayerManagerMixin {
         dev.bastionauth.core.SpectatorGate.onRemove(player);
     }
 
+    /** The final save is written: a vehicle held for the password now lives in the file only. */
+    @Inject(method = "remove", at = @At("RETURN"))
+    private void bastionauth$limboRemoved(net.minecraft.server.network.ServerPlayerEntity player, CallbackInfo ci) {
+        dev.bastionauth.core.Limbo.afterRemove(player);
+    }
+
     /** Every save of a player in limbo writes the real position and game mode, never the sky or spectator. */
     @Inject(method = "savePlayerData", at = @At("HEAD"))
     private void bastionauth$saveReal(net.minecraft.server.network.ServerPlayerEntity player, CallbackInfo ci) {

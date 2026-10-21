@@ -219,8 +219,8 @@ warns it before moving a player out of limbo.
 ## Build
 
 ```bash
-./gradlew build   # JDK 21 → build/libs/bastionauth-<version>.jar
-./gradlew test    # 90 unit tests
+./gradlew build   # JDK 21 → build/libs/bastionauth-<version>+build.<N>.jar
+./gradlew test    # 100 unit tests
 ```
 
 The jar bundles BouncyCastle 1.79, sqlite-jdbc 3.47.1.0 and ZXing 3.5.3. Fabric

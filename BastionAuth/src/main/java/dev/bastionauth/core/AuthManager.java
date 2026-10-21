@@ -86,6 +86,8 @@ public final class AuthManager {
 
     private final ConcurrentHashMap<UUID, PlayerAuthState> states = new ConcurrentHashMap<>();
     private final ConcurrentHashMap<UUID, Session> sessions = new ConcurrentHashMap<>();
+    /** Which accounts joined from which address lately. See {@link AddressSightings}. */
+    private final AddressSightings addressSightings = new AddressSightings();
     /** Operators who chose to type the password every time (op_prefs.strict_login). */
     private final java.util.Set<UUID> strictOps = ConcurrentHashMap.newKeySet();
     private final ConcurrentHashMap<String, String> nameCache = new ConcurrentHashMap<>();
@@ -106,7 +108,8 @@ public final class AuthManager {
         this.secrets = secrets;
         this.db = db;
         this.hasher = new PasswordHasher(secrets, cfg.hashing.usePepper,
-                new PasswordHasher.Params(cfg.hashing.memoryKib, cfg.hashing.iterations, cfg.hashing.parallelism));
+                new PasswordHasher.Params(cfg.hashing.memoryKib, cfg.hashing.iterations, cfg.hashing.parallelism),
+                cfg.hashing.legacyPepperFallback);
         this.policy = new PasswordPolicy(cfg.passwordRules, PasswordPolicy.loadBundledCommonPasswords());
         this.twoFactor = new TwoFactor(db, secrets, cfg.twoFactor.window, cfg.twoFactor.backupCodes);
         this.codeword = new Codeword(db, hasher, cfg.codeword.unlockMinutes);
@@ -128,6 +131,14 @@ public final class AuthManager {
         for (Database.SessionRow row : db.loadSessions()) {
             try {
                 sessions.put(UUID.fromString(row.uuid()), new Session(row.ipHmac(), row.expiresAt(), row.profile()));
+            } catch (IllegalArgumentException ignored) {
+            }
+        }
+        // Who logged in from where within a session's lifetime, so a restart
+        // does not make a shared address look private again.
+        for (Database.RecentLogin row : db.recentLogins(nowMs - 2 * cfg.session.ttlMinutes * 60_000L)) {
+            try {
+                addressSightings.note(row.ipHmac(), UUID.fromString(row.uuid()), row.at());
             } catch (IllegalArgumentException ignored) {
             }
         }
@@ -156,9 +167,23 @@ public final class AuthManager {
      * password once.
      */
     static boolean sessionMatches(Session session, String ipHmac, String profile, long now) {
+        return sessionMatches(session, ipHmac, profile, now, DeviceFingerprint.SESSION_CHANGES_ALLOWED);
+    }
+
+    static boolean sessionMatches(Session session, String ipHmac, String profile, long now, int changesAllowed) {
         if (session == null || session.expiresAt() <= now) return false;
         if (!constantTimeEquals(session.ipHmac(), ipHmac)) return false;
-        return DeviceFingerprint.sessionProfileMatches(session.profile(), profile);
+        return DeviceFingerprint.sessionProfileMatches(session.profile(), profile, changesAllowed);
+    }
+
+    /**
+     * Whether the address of a waiting session is shared: another account was
+     * seen there since the session was stored ({@code ttl} before it expires)
+     * or in the same span before that, while its owner was still playing.
+     * Pure over the sightings; unit-tested.
+     */
+    static boolean addressShared(AddressSightings seen, Session session, UUID self, long ttlMs) {
+        return session != null && seen.sharedSince(session.ipHmac(), self, session.expiresAt() - 2 * ttlMs);
     }
 
     private static Pattern compileNameRegex(String regex) {
@@ -397,6 +422,10 @@ public final class AuthManager {
         long now = System.currentTimeMillis();
 
         AuthConfig cfg = this.cfg;
+        String ipHmac = isBindableIp(ip) ? secrets.ipHmac(ip) : null;
+        // Every join counts, a resumed one too: it makes the address shared
+        // for the sessions of every other account that waits on it.
+        addressSightings.note(ipHmac, uuid, now);
         st.agreementDone = hasAcceptedAgreement(player);
         boolean opNoResume = isOperator(player) && opStrict(uuid);
         // An IP session is weaker than a password and far weaker than a
@@ -408,8 +437,17 @@ public final class AuthManager {
         if (cfg.session.enabled && registered && isBindableIp(ip) && !opNoResume && !twoFaNoResume
                 && st.agreementDone) {
             Session session = sessions.get(uuid);
+            boolean shared = cfg.session.refuseSharedAddress
+                    && addressShared(addressSightings, session, uuid, cfg.session.ttlMinutes * 60_000L);
+            if (session != null && shared) {
+                BastionAuth.LOGGER.info("{}: session not resumed, another account joined from {} meanwhile",
+                        name, Secrets.maskIp(ip));
+                submitAudit("SESSION_SHARED_ADDRESS", uuid, name, Secrets.maskIp(ip), null);
+                sessions.remove(uuid);
+                session = null;
+            }
             if (session != null) {
-                if (sessionMatches(session, secrets.ipHmac(ip), st.deviceProfile, now)) {
+                if (sessionMatches(session, ipHmac, st.deviceProfile, now, cfg.session.settingChangesAllowed)) {
                     sessions.remove(uuid);
                     st.authenticated = true;
                     // Every connection starts in limbo with its state masked;
@@ -419,6 +457,7 @@ public final class AuthManager {
                     StateMask.reveal(player);
                     ChatGate.say(player, text("session.restored"), false);
                     ChatGate.release(player, this::heldHeader);
+                    releaseHeldPayloads(player, st);
                     if (isOperator(player)) showOpStrict(player, uuid);
                     submitAudit("SESSION_RESUME", uuid, name, Secrets.maskIp(ip), null);
                     BastionAuth.LOGGER.info("{} resumed session from {}", name, Secrets.maskIp(ip));
@@ -444,6 +483,12 @@ public final class AuthManager {
      */
     private void recordFingerprintAsync(ServerPlayerEntity player, UUID uuid, String name, String ip) {
         try {
+            // Bind the brand parked by the configuration phase to this player's
+            // uuid now that it exists — before anything reads it (the stored
+            // brand, the hash and the session profile all fold it in).
+            DeviceFingerprint.claimPendingBrand(
+                    ((dev.bastionauth.mixin.ServerCommonNetworkHandlerAccessor) player.networkHandler).bastionauth$connection(),
+                    uuid);
             String brand = DeviceFingerprint.brandOf(player);
             String language;
             int viewDistance;
@@ -459,10 +504,6 @@ public final class AuthManager {
                 mainArm = "?";
             }
             String subnet = DeviceFingerprint.subnetOf(ip);
-            // Bind the parked brand payload (from the configuration phase) to
-            // this player's uuid now that it exists — BEFORE the hash, which
-            // folds the brand in.
-            DeviceFingerprint.claimPendingBrand(player.networkHandler, uuid);
             String hash = DeviceFingerprint.compute(player, secrets);
             if (hash == null) return;
             String profile = DeviceFingerprint.computeProfile(player, secrets);
@@ -477,7 +518,7 @@ public final class AuthManager {
             final String fSubnet = subnet;
             final String fHash = hash;
             final AccountLinker.Material material = new AccountLinker.Material(
-                    hash, profile, clientUuid, host, null, true, ipHmac, null);
+                    hash, profile, clientUuid, host, null, true, ipHmac, null, DeviceFingerprint.commonProfile(player));
             executor.execute(() -> {
                 try {
                     PlayerAuthState st = states.get(uuid);
@@ -725,6 +766,7 @@ public final class AuthManager {
             ipFailWindow.cleanup(nowMs);
             ipBlocks.cleanup(nowMs);
             sessions.entrySet().removeIf(e -> e.getValue().expiresAt() <= nowMs);
+            addressSightings.prune(nowMs - 2 * cfg.session.ttlMinutes * 60_000L);
             pendingIps.entrySet().removeIf(e -> nowMs - e.getValue().atMillis() > 120_000);
             // ToS §8.4 TTL: device fingerprints are anti-abuse material —
             // two-year retention horizon, pruned hourly in batches.
@@ -1670,7 +1712,8 @@ public final class AuthManager {
                 server.execute(() -> {
                     this.cfg = fresh;
                     hasher.reconfigure(fresh.hashing.usePepper, new PasswordHasher.Params(
-                            fresh.hashing.memoryKib, fresh.hashing.iterations, fresh.hashing.parallelism));
+                            fresh.hashing.memoryKib, fresh.hashing.iterations, fresh.hashing.parallelism),
+                            fresh.hashing.legacyPepperFallback);
                     policy.reconfigure(fresh.passwordRules);
                     namePattern = compileNameRegex(fresh.general.usernameRegex);
                     rebuildLimiters(fresh);
@@ -1713,6 +1756,8 @@ public final class AuthManager {
         // What the server said to this player while they were on the login
         // screen — transfers, statements, replies, chat — now that it is theirs.
         ChatGate.release(p, this::heldHeader);
+        // And what the client said to other mods meanwhile.
+        releaseHeldPayloads(p, st);
         // Permissions were reported as NONE while frozen (PermissionFreezeMixin);
         // the command tree the client holds must be rebuilt with the real ones.
         try {
@@ -1738,7 +1783,8 @@ public final class AuthManager {
         String channels = p == null ? null : DeviceFingerprint.channelsOf(p);
         String channelsHash = channels == null ? null : secrets.deviceHmac("channels|" + channels);
         return new AccountLinker.Material(deviceHash, profile, clientUuid, host, channelsHash,
-                DeviceFingerprint.channelsAreBaseline(channels), ipHmac, pwFp);
+                DeviceFingerprint.channelsAreBaseline(channels), ipHmac, pwFp,
+                p != null && DeviceFingerprint.commonProfile(p));
     }
 
     /** Server-thread: captures the settled channel list, stores it and re-runs the analysis. */
@@ -1766,6 +1812,42 @@ public final class AuthManager {
     }
 
     /** Netty-thread tap from the packet firewall: one debug line per player per 10 s. */
+    /** How many payloads of other mods one connection may park before the password. */
+    static final int HELD_PAYLOADS_MAX = 32;
+
+    /**
+     * A custom payload of another mod from a client that has not logged in
+     * (netty thread). It is kept, not lost: a mod that asks the server once on
+     * join (a voice chat requesting its secret) would otherwise never work
+     * after this login. A connection that leaves without the password takes
+     * them with it.
+     */
+    public void holdPayload(UUID id, net.minecraft.network.packet.c2s.common.CustomPayloadC2SPacket packet) {
+        PlayerAuthState st = id == null ? null : states.get(id);
+        if (st == null || st.authenticated) return;
+        synchronized (st.heldPayloads) {
+            if (st.heldPayloads.size() < HELD_PAYLOADS_MAX) st.heldPayloads.add(packet);
+        }
+    }
+
+    /** After the login (server thread): the held payloads reach their handlers, in order. */
+    private void releaseHeldPayloads(ServerPlayerEntity p, PlayerAuthState st) {
+        java.util.List<net.minecraft.network.packet.c2s.common.CustomPayloadC2SPacket> held;
+        synchronized (st.heldPayloads) {
+            if (st.heldPayloads.isEmpty()) return;
+            held = new java.util.ArrayList<>(st.heldPayloads);
+            st.heldPayloads.clear();
+        }
+        for (var packet : held) {
+            try {
+                packet.apply(p.networkHandler);
+            } catch (Exception e) {
+                BastionAuth.LOGGER.debug("Held payload {} of {} failed: {}",
+                        packet.payload().getId().id(), st.name, e.toString());
+            }
+        }
+    }
+
     public void notePacketDropped(ServerPlayerEntity player, net.minecraft.network.packet.Packet<?> packet) {
         long now = System.nanoTime();
         Long last = lastDropLogNanos.get(player.getUuid());

@@ -328,6 +328,23 @@ public final class Database implements AutoCloseable {
         return out;
     }
 
+    /** An account's last successful login: when, and from which address (HMAC). */
+    public record RecentLogin(String uuid, String ipHmac, long at) {}
+
+    /** Accounts last logged into at or after {@code since}, for {@code AddressSightings}. */
+    public synchronized java.util.List<RecentLogin> recentLogins(long since) {
+        java.util.List<RecentLogin> out = new java.util.ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT uuid, last_ip_hmac, last_login_at FROM users WHERE last_login_at >= ? AND last_ip_hmac IS NOT NULL")) {
+            ps.setLong(1, since);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) out.add(new RecentLogin(rs.getString(1), rs.getString(2), rs.getLong(3)));
+            }
+        } catch (SQLException ignored) {
+        }
+        return out;
+    }
+
     public synchronized void pruneSessions(long now) {
         try (PreparedStatement ps = conn.prepareStatement("DELETE FROM sessions WHERE expires_at <= ?")) {
             ps.setLong(1, now);

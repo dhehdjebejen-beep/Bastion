@@ -54,6 +54,47 @@ class PasswordHasherTest {
     }
 
     @Test
+    void aNewHashSaysWhetherItIsPeppered() {
+        Secrets s = secrets(3);
+        String peppered = new PasswordHasher(s, true, FAST).hash("myPassword1");
+        String plain = new PasswordHasher(s, false, FAST).hash("myPassword1");
+        assertEquals(Boolean.TRUE, PasswordHasher.pepperedBySalt(saltOf(peppered).length));
+        assertEquals(Boolean.FALSE, PasswordHasher.pepperedBySalt(saltOf(plain).length));
+        // Checked in its own form whatever the setting says now, and moved to the current one.
+        assertEquals(PasswordHasher.VerifyResult.MATCH_NEEDS_REHASH,
+                new PasswordHasher(s, true, FAST).verify(plain, "myPassword1"));
+        assertEquals(PasswordHasher.VerifyResult.MATCH, new PasswordHasher(s, false, FAST).verify(plain, "myPassword1"));
+    }
+
+    /** A hash as 1.12 wrote it: a 16-byte salt that does not say whether it is peppered. */
+    private static String legacy(Secrets s, boolean pepper, String password) {
+        String phc = new PasswordHasher(s, pepper, FAST).hash(password);
+        byte[] salt = java.util.Arrays.copyOf(saltOf(phc), 16);
+        // Re-derive with the legacy salt through a hasher that cannot tell: hash, then swap in the salt.
+        return LegacyHash.make(s, pepper, salt, password, FAST);
+    }
+
+    @Test
+    void anOldHashIsTriedInTheCurrentFormOnly() {
+        Secrets s = secrets(4);
+        String oldPeppered = legacy(s, true, "myPassword1");
+        PasswordHasher now = new PasswordHasher(s, true, FAST);
+        assertEquals(PasswordHasher.VerifyResult.MATCH_NEEDS_REHASH, now.verify(oldPeppered, "myPassword1"),
+                "right, and rewritten with the mark");
+        assertEquals(PasswordHasher.VerifyResult.NO_MATCH, now.verify(oldPeppered, "wrongPassword1"));
+        // Made before the pepper was switched off: without the fallback it is not tried the other way.
+        PasswordHasher plainNow = new PasswordHasher(s, false, FAST);
+        assertEquals(PasswordHasher.VerifyResult.NO_MATCH, plainNow.verify(oldPeppered, "myPassword1"));
+        PasswordHasher withFallback = new PasswordHasher(s, false, FAST, true);
+        assertEquals(PasswordHasher.VerifyResult.MATCH_NEEDS_REHASH, withFallback.verify(oldPeppered, "myPassword1"),
+                "hashing.legacyPepperFallback for a server that switched it");
+    }
+
+    private static byte[] saltOf(String phc) {
+        return java.util.Base64.getDecoder().decode(phc.split("\\$")[4]);
+    }
+
+    @Test
     void differentSecretNeverMatches() {
         PasswordHasher a = new PasswordHasher(secrets(1), true, FAST);
         String phc = a.hash("myPassword1");

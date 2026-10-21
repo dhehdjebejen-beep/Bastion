@@ -15,7 +15,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * The single outbound point for every packet to a player
  * ({@code sendPacket} delegates here). Chat lines, titles and the action bar
  * addressed to a player who has not logged in are held or dropped by
- * {@link ChatGate}; everything else goes out untouched.
+ * {@link ChatGate}; block and light updates around the limbo spot by
+ * {@link dev.bastionauth.core.Limbo#drops}; everything else goes out untouched.
  */
 @Mixin(ServerCommonNetworkHandler.class)
 public abstract class OutboundChatGateMixin {
@@ -25,7 +26,7 @@ public abstract class OutboundChatGateMixin {
         if (!((Object) this instanceof ServerPlayNetworkHandler play)) return;
         ServerPlayerEntity player = play.player;
         if (player == null) return;
-        if (dev.bastionauth.core.StateMask.drops(player, packet)) {
+        if (dev.bastionauth.core.StateMask.drops(player, packet) || dev.bastionauth.core.Limbo.drops(player, packet)) {
             ci.cancel();
             return;
         }

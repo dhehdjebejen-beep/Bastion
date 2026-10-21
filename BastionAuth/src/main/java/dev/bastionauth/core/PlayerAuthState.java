@@ -51,6 +51,9 @@ public final class PlayerAuthState {
 
     /** Guards against parallel hash submissions for the same player. */
     public final AtomicBoolean busy = new AtomicBoolean();
+    /** Custom payloads of other mods sent before the password, handed over after it. Guarded by itself. */
+    public final java.util.List<net.minecraft.network.packet.c2s.common.CustomPayloadC2SPacket> heldPayloads =
+            new java.util.ArrayList<>();
     /** Guards against flooding the main thread with snap-back teleports. */
     public final AtomicBoolean snapPending = new AtomicBoolean();
 

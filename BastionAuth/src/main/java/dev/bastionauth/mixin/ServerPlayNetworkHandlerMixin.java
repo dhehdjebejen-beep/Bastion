@@ -4,6 +4,7 @@ import dev.bastionauth.BastionAuth;
 import dev.bastionauth.core.AuthManager;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.network.packet.c2s.play.CloseHandledScreenC2SPacket;
 import net.minecraft.network.packet.c2s.play.CreativeInventoryActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket;
 import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
@@ -20,6 +21,7 @@ import org.spongepowered.asm.mixin.Shadow;
 import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
+import org.spongepowered.asm.mixin.injection.ModifyArg;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
@@ -104,6 +106,32 @@ public abstract class ServerPlayNetworkHandlerMixin {
     @Inject(method = "onSpectatorTeleport", at = @At("HEAD"), cancellable = true)
     private void bastionauth$onSpectatorTeleport(SpectatorTeleportC2SPacket packet, CallbackInfo ci) {
         if (bastionauth$blocked()) ci.cancel();
+    }
+
+    /**
+     * The inventory mask again, inside the close handler (main thread), so no
+     * slot vanilla might resend on closing reaches a frozen client before it.
+     * On the netty thread the handler only reschedules itself and never gets
+     * here.
+     */
+    @Inject(method = "onCloseHandledScreen", at = @At("TAIL"))
+    private void bastionauth$remaskOnClose(CloseHandledScreenC2SPacket packet, CallbackInfo ci) {
+        if (bastionauth$blocked()) dev.bastionauth.core.InventoryMask.apply(this.player);
+    }
+
+    /**
+     * The command text the dispatcher passes on with an already parsed command
+     * (1.13). Vanilla never logs a player's command, but a mod that logs every
+     * command reads exactly this string: for /login, /register, a password
+     * change, a code or the code word it now reads the command name and
+     * asterisks. The parsed arguments — what actually runs — are untouched.
+     */
+    @ModifyArg(method = {"executeCommand", "handleCommandExecution"},
+            at = @At(value = "INVOKE",
+                    target = "Lnet/minecraft/server/command/CommandManager;execute(Lcom/mojang/brigadier/ParseResults;Ljava/lang/String;)V"),
+            index = 1)
+    private String bastionauth$maskSecrets(String command) {
+        return dev.bastionauth.core.CommandMask.mask(command);
     }
 
     @Inject(method = "onRequestCommandCompletions", at = @At("HEAD"), cancellable = true)

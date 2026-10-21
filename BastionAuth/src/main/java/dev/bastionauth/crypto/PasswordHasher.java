@@ -23,6 +23,16 @@ import java.util.regex.Pattern;
  * <p>With the pepper enabled the password is first keyed through HMAC-SHA256
  * with a server-local secret, so database theft alone is not sufficient for
  * offline cracking.
+ *
+ * <h2>The hash says whether it is peppered (1.13)</h2>
+ * Up to 1.12 a hash did not say, so every failed check ran Argon2 a second
+ * time in the other form, in case the setting had been switched since — on
+ * every wrong password, on the very path a brute force takes. The mark is
+ * the salt length: 24 bytes for a peppered hash, 20 for a plain one. It keeps
+ * the PHC string exactly as before, so an older build still reads it. A hash
+ * with the old 16-byte salt is tried in the current form only (and in the
+ * other one as well with {@code hashing.legacyPepperFallback}), and is
+ * rewritten with its mark at the next successful login.
  */
 public final class PasswordHasher {
 
@@ -32,22 +42,36 @@ public final class PasswordHasher {
 
     private static final Pattern PHC = Pattern.compile(
             "\\$argon2id\\$v=19\\$m=(\\d{1,9}),t=(\\d{1,4}),p=(\\d{1,3})\\$([A-Za-z0-9+/]{16,128})\\$([A-Za-z0-9+/]{16,128})");
-    private static final int SALT_LENGTH = 16;
+    /** The salt of a hash made before 1.13: peppered or not, it does not say. */
+    static final int LEGACY_SALT_LENGTH = 16;
+    static final int PEPPERED_SALT_LENGTH = 24;
+    static final int PLAIN_SALT_LENGTH = 20;
     private static final int HASH_LENGTH = 32;
 
     private final SecureRandom random = new SecureRandom();
     private final Secrets secrets;
     private volatile boolean usePepper;
+    private volatile boolean legacyFallback;
     private volatile Params params;
 
     public PasswordHasher(Secrets secrets, boolean usePepper, Params params) {
+        this(secrets, usePepper, params, false);
+    }
+
+    public PasswordHasher(Secrets secrets, boolean usePepper, Params params, boolean legacyFallback) {
         this.secrets = secrets;
         this.usePepper = usePepper && secrets != null;
+        this.legacyFallback = legacyFallback;
         this.params = sanitize(params);
     }
 
     public void reconfigure(boolean usePepper, Params params) {
+        reconfigure(usePepper, params, this.legacyFallback);
+    }
+
+    public void reconfigure(boolean usePepper, Params params, boolean legacyFallback) {
         this.usePepper = usePepper && secrets != null;
+        this.legacyFallback = legacyFallback;
         this.params = sanitize(params);
     }
 
@@ -59,10 +83,11 @@ public final class PasswordHasher {
     }
 
     public String hash(String password) {
-        byte[] salt = new byte[SALT_LENGTH];
+        boolean pepper = this.usePepper;
+        byte[] salt = new byte[pepper ? PEPPERED_SALT_LENGTH : PLAIN_SALT_LENGTH];
         random.nextBytes(salt);
         Params p = this.params;
-        byte[] digest = compute(password, salt, p, this.usePepper, HASH_LENGTH);
+        byte[] digest = compute(password, salt, p, pepper, HASH_LENGTH);
         String phc = "$argon2id$v=19$m=" + p.memoryKib() + ",t=" + p.iterations() + ",p=" + p.parallelism()
                 + "$" + b64(salt) + "$" + b64(digest);
         Arrays.fill(digest, (byte) 0);
@@ -84,22 +109,34 @@ public final class PasswordHasher {
             return VerifyResult.NO_MATCH;
         }
 
-        boolean pepperFirst = this.usePepper;
+        Boolean marked = pepperedBySalt(salt.length);
+        boolean current = this.usePepper;
+        // A marked hash is checked once, in its own form, whatever the setting
+        // says now. Without the mark: the current form, and the other one only
+        // when the server asked for it.
+        boolean pepperFirst = marked != null ? marked : current;
+        if (pepperFirst && secrets == null) return VerifyResult.NO_MATCH;
         byte[] actual = compute(password, salt, stored, pepperFirst, expected.length);
         boolean ok = MessageDigest.isEqual(expected, actual);
-        boolean usedFallback = false;
+        boolean usedPepper = pepperFirst;
         Arrays.fill(actual, (byte) 0);
-        if (!ok && secrets != null) {
-            // The pepper setting may have been toggled since this hash was created —
-            // accept the other form once; the caller rehashes to the current form.
+        if (!ok && marked == null && legacyFallback && secrets != null) {
             byte[] fallback = compute(password, salt, stored, !pepperFirst, expected.length);
             ok = MessageDigest.isEqual(expected, fallback);
-            usedFallback = true;
+            usedPepper = !pepperFirst;
             Arrays.fill(fallback, (byte) 0);
         }
         if (!ok) return VerifyResult.NO_MATCH;
-        boolean needsRehash = usedFallback || !stored.equals(this.params);
+        // Rewritten: without a mark, in the other form than configured, or with old parameters.
+        boolean needsRehash = marked == null || usedPepper != current || !stored.equals(this.params);
         return needsRehash ? VerifyResult.MATCH_NEEDS_REHASH : VerifyResult.MATCH;
+    }
+
+    /** What a salt length says: peppered, plain, or null for a hash made before 1.13. */
+    static Boolean pepperedBySalt(int saltLength) {
+        if (saltLength == PEPPERED_SALT_LENGTH) return Boolean.TRUE;
+        if (saltLength == PLAIN_SALT_LENGTH) return Boolean.FALSE;
+        return null;
     }
 
     public Params currentParams() {

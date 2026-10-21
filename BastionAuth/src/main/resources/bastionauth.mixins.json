@@ -10,6 +10,7 @@
     "HandshakeCaptureMixin",
     "InteractionManagerInvoker",
     "ItemEntityMixin",
+    "LimboChunkMixin",
     "LoginHelloCaptureMixin",
     "OutboundChatGateMixin",
     "PermissionFreezeMixin",

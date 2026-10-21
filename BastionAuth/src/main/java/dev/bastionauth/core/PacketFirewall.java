@@ -49,8 +49,12 @@ import java.util.Set;
  *       itself is refused by {@code ALLOW_CHAT_MESSAGE};</li>
  *   <li>both command packets — {@code /login} and {@code /register} travel
  *       here; every other command is refused by {@code CommandManagerMixin};</li>
- *   <li>client options / custom payload (brand, Fabric registry) — needed
- *       for the device fingerprint and harmless;</li>
+ *   <li>client options, and of the custom payloads only the brand and the
+ *       channel registration — the fingerprint needs them. Every other
+ *       channel belongs to some other mod (voice chat, maps…) whose handler
+ *       knows nothing of the password: before 1.13 they all got through. Now
+ *       they are held and handed to their handlers after the login
+ *       ({@link AuthManager#holdPayload});</li>
  *   <li>custom click action — the agreement dialog's buttons;</li>
  *   <li>selected slot / close screen / recipe book / advancement tab —
  *       pure client-side UI state with no world effect;</li>
@@ -75,7 +79,6 @@ public final class PacketFirewall {
             CookieResponseC2SPacket.class,
             ResourcePackStatusC2SPacket.class,
             ClientOptionsC2SPacket.class,
-            CustomPayloadC2SPacket.class,
             CustomClickActionC2SPacket.class,
             TeleportConfirmC2SPacket.class,
             AcknowledgeChunksC2SPacket.class,
@@ -94,20 +97,35 @@ public final class PacketFirewall {
             AdvancementTabC2SPacket.class,
             ClientStatusC2SPacket.class);
 
+    /** The custom-payload channels a frozen client may use: its brand and its channel registration. */
+    static final Set<String> CHANNELS_WHILE_FROZEN = Set.of("minecraft:brand", "minecraft:register", "minecraft:unregister");
+
     private PacketFirewall() {}
+
+    /** Whether a custom payload on this channel may reach its handler before the password. */
+    static boolean channelAllowedWhileFrozen(String channel) {
+        return channel != null && CHANNELS_WHILE_FROZEN.contains(channel);
+    }
 
     /** True when a frozen (not yet authenticated) player may send this packet. */
     public static boolean allowedWhileFrozen(Packet<?> packet, ServerPlayerEntity player) {
         if (packet == null) return false;
-        // Closing a screen makes vanilla resynchronise the player's inventory,
-        // which would put the real contents back on a client that is still
-        // frozen. The packet stays allowed — it is harmless UI state — but the
-        // mask is re-asserted after the handler has run.
+        // Closing a screen may make vanilla resynchronise the player's
+        // inventory. The packet stays allowed — it is harmless UI state — and
+        // the mask is re-sent inside the close handler itself, before any slot
+        // can follow (ServerPlayNetworkHandlerMixin); this later re-assertion
+        // stays as a backstop.
         if (packet instanceof CloseHandledScreenC2SPacket && player != null) {
             var manager = dev.bastionauth.BastionAuth.manager();
             if (manager != null) manager.remaskSoon(player.getUuid());
         }
         if (ALLOWED_WHILE_FROZEN.contains(packet.getClass())) return true;
+        if (packet instanceof CustomPayloadC2SPacket custom) {
+            if (channelAllowedWhileFrozen(custom.payload().getId().id().toString())) return true;
+            var manager = dev.bastionauth.BastionAuth.manager();
+            if (manager != null && player != null) manager.holdPayload(player.getUuid(), custom);
+            return false;
+        }
         if (packet instanceof PlayerInteractItemC2SPacket use) {
             // While the agreement is owed, the volumes exist only in the client's
             // view (see InventoryMask). "Open the book in this hand" makes the

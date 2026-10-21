@@ -59,8 +59,8 @@ public final class DeviceFingerprint {
      * same client by construction, and different connections can never
      * see each other's strings.
      */
-    private static final java.util.concurrent.ConcurrentHashMap<Object, String> PENDING_BRANDS =
-            new java.util.concurrent.ConcurrentHashMap<>();
+    private static final java.util.Map<Object, String> PENDING_BRANDS =
+            java.util.Collections.synchronizedMap(new java.util.WeakHashMap<>());
 
     /** Called by the packet mixin when a brand payload arrives (any phase). */
     public static void noteBrandPayload(Object connection, String brand) {
@@ -207,8 +207,8 @@ public final class DeviceFingerprint {
     }
 
     /** Marks the parted session-profile format (see {@link #sessionProfile}). */
-    static final String SESSION_PROFILE_PREFIX = "s2:";
-    /** Everyday settings that may differ between a session and the rejoin that resumes it. */
+    static final String SESSION_PROFILE_PREFIX = "s3:";
+    /** Everyday settings that may differ by default ({@code session.settingChangesAllowed}). */
     public static final int SESSION_CHANGES_ALLOWED = 1;
 
     /**
@@ -219,14 +219,21 @@ public final class DeviceFingerprint {
      *
      * <p>Now the install itself — brand, language, main hand — must match
      * exactly, and of the everyday settings (render distance, skin parts,
-     * particles, chat options) at most {@link #SESSION_CHANGES_ALLOWED} may
-     * differ. A stranger behind the same NAT still has to hit the brand,
-     * language and hand and all but one of the rest. Each part is its own
-     * HMAC, so nothing readable is stored.
+     * particles, chat options) at most {@code session.settingChangesAllowed}
+     * may differ. Each part is its own HMAC, so nothing readable is stored.
+     *
+     * <h2>And the launcher's UUID (1.13)</h2>
+     * On a Russian cracked launcher "vanilla or fabric, ru_ru, right hand" is
+     * the default, not a device: the IP was the only real secret. A launcher
+     * that mints its own profile UUID (not the one derived from the name)
+     * now puts it into the exact part too — a stranger with the same defaults
+     * behind the same NAT also has to have the owner's launcher. Whether the
+     * address is shared at all is judged separately ({@link AddressSightings}).
      */
     public static String sessionProfile(ServerPlayerEntity player, Secrets secrets) {
         try {
-            return sessionProfile(brandOf(player), optionsOf(player), m -> secrets.deviceHmac("session|" + m));
+            String launcher = informativeClientUuid(player.getUuid(), preLoginOf(player.getUuid()));
+            return sessionProfile(brandOf(player), optionsOf(player), launcher, m -> secrets.deviceHmac("session|" + m));
         } catch (Exception e) {
             return null;
         }
@@ -234,8 +241,15 @@ public final class DeviceFingerprint {
 
     /** Pure: the parted profile from the brand and options, with {@code hmac} for each part. */
     static String sessionProfile(String brand, SyncedClientOptionsView v, java.util.function.UnaryOperator<String> hmac) {
+        return sessionProfile(brand, v, null, hmac);
+    }
+
+    /** Pure, with the informative launcher UUID or null when the launcher sent none. */
+    static String sessionProfile(String brand, SyncedClientOptionsView v, String launcherUuid,
+                                 java.util.function.UnaryOperator<String> hmac) {
         return SESSION_PROFILE_PREFIX
-                + hmac.apply("stable|" + brand + "|" + v.language() + "|" + v.mainArm()) + ":"
+                + hmac.apply("stable|" + brand + "|" + v.language() + "|" + v.mainArm()
+                        + "|" + (launcherUuid == null ? "-" : launcherUuid.toLowerCase(Locale.ROOT))) + ":"
                 + hmac.apply("view|" + v.viewDistance()) + ":"
                 + hmac.apply("skin|" + v.playerModelParts()) + ":"
                 + hmac.apply("particles|" + v.particleStatus()) + ":"
@@ -246,10 +260,15 @@ public final class DeviceFingerprint {
     /**
      * Whether a rejoin's profile resumes a stored session: the same install,
      * and no more than {@link #SESSION_CHANGES_ALLOWED} everyday settings
-     * changed. A profile in any other format (a session saved by 1.12.0–1.12.1,
-     * or none) never matches — the password is asked once.
+     * changed. A profile in any other format (a session saved before 1.13, or
+     * none) never matches — the password is asked once.
      */
     public static boolean sessionProfileMatches(String stored, String now) {
+        return sessionProfileMatches(stored, now, SESSION_CHANGES_ALLOWED);
+    }
+
+    /** As above with the configured number of everyday settings that may differ. */
+    public static boolean sessionProfileMatches(String stored, String now, int changesAllowed) {
         if (stored == null || now == null) return false;
         if (!stored.startsWith(SESSION_PROFILE_PREFIX) || !now.startsWith(SESSION_PROFILE_PREFIX)) return false;
         String[] a = stored.substring(SESSION_PROFILE_PREFIX.length()).split(":", -1);
@@ -260,7 +279,25 @@ public final class DeviceFingerprint {
         for (int i = 1; i < a.length; i++) {
             if (!sameDevice(a[i], b[i])) changed++;
         }
-        return changed <= SESSION_CHANGES_ALLOWED;
+        return changed <= changesAllowed;
+    }
+
+    /**
+     * Whether every everyday setting is still the game's default: chat on,
+     * colours on, every skin part, right hand, no text filter, listed, all
+     * particles (1.13). Such a profile is what every fresh install sends — on
+     * a mobile network it matched strangers to each other, so the link score
+     * gives it less weight ({@link AccountLinker}).
+     */
+    public static boolean commonProfile(ServerPlayerEntity player) {
+        return everydayDefaults(optionsOf(player));
+    }
+
+    /** Pure form of {@link #commonProfile}. */
+    static boolean everydayDefaults(SyncedClientOptionsView v) {
+        return v != null && "FULL".equals(v.chatVisibility()) && v.chatColorsEnabled() && v.playerModelParts() == 0x7F
+                && "RIGHT".equals(v.mainArm()) && !v.filtersText() && v.allowsServerListing()
+                && "ALL".equals(v.particleStatus());
     }
 
     /** Computes and caches the player's device hash. Call on join (server thread). */

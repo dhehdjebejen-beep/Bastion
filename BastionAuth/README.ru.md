@@ -223,8 +223,8 @@ IP все игроки приходят с `127.0.0.1`: лимиты по IP с�
 ## Сборка
 
 ```bash
-./gradlew build   # JDK 21 → build/libs/bastionauth-<версия>.jar
-./gradlew test    # 90 юнит-тестов
+./gradlew build   # JDK 21 → build/libs/bastionauth-<версия>+build.<N>.jar
+./gradlew test    # 100 юнит-тестов
 ```
 
 Внутри jar — BouncyCastle 1.79, sqlite-jdbc 3.47.1.0 и ZXing 3.5.3. На сервере

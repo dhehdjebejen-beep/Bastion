@@ -16,9 +16,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
  * per connection so {@link DeviceFingerprint#claimPendingBrand} can fold it
  * into the device hash. The payload arrives during the configuration phase,
  * before the player object exists — it is parked keyed by the connection it
- * arrived on (the handler's own connection object, stable across the
- * configuration→play handover), which is what keeps two simultaneous joins
- * from claiming each other's brands.
+ * arrived on, which is what keeps two simultaneous joins from claiming each
+ * other's brands.
+ *
+ * <p>The key is the {@code ClientConnection}, not the handler (1.13). The
+ * configuration and play phases have a handler each, so a brand parked under
+ * the configuration handler was never found by the play one: every device
+ * hash, install profile and session profile until 1.13 said "unknown".
  */
 @Mixin(ServerCommonNetworkHandler.class)
 public abstract class BrandCaptureMixin {
@@ -28,12 +32,8 @@ public abstract class BrandCaptureMixin {
         if (ci.isCancellable()) return;   // not cancellable here; tap only
         CustomPayload payload = packet.payload();
         if (payload instanceof BrandCustomPayload brand) {
-            // The mixin instance IS the connection-scoped handler: one
-            // ServerCommonNetworkHandler per client connection, alive from
-            // the first configuration packet to the last play packet. Using
-            // it as the parking key is what makes the brand handoff immune
-            // to two simultaneous joins claiming each other's strings.
-            DeviceFingerprint.noteBrandPayload(this, brand.brand());
+            DeviceFingerprint.noteBrandPayload(((ServerCommonNetworkHandlerAccessor) this).bastionauth$connection(),
+                    brand.brand());
         }
     }
 }

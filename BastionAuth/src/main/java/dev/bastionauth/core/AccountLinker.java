@@ -19,11 +19,14 @@ import java.util.Map;
  *   <li><b>DeviceHash equal</b> — brand + client options + subnet all matched
  *       through an HMAC: 60 points. Options are stable per installation, so a
  *       shared hash is close to a shared machine, but alone it stays below the
- *       hard threshold — two brothers on one family PC land exactly here.</li>
+ *       hard threshold — two brothers on one family PC land exactly here.
+ *       When every everyday setting is the game's default (1.13), half: that
+ *       profile is every fresh install's, and on a mobile network the subnet
+ *       is shared too — strangers on one tower matched each other.</li>
  *   <li><b>Profile equal</b> — the same brand + options seen from a
  *       <em>different</em> network (home Wi-Fi vs mobile): 35 points. The
  *       device hash folds the subnet in, so without this a twin who plays
- *       from two networks was two strangers.</li>
+ *       from two networks was two strangers. A third for a default profile.</li>
  *   <li><b>Launcher UUID equal</b> — the client claimed the same profile
  *       UUID under a different name, and it is not the name-derived one:
  *       70 points. Cracked launchers mint that UUID once per installation.</li>
@@ -100,7 +103,13 @@ public final class AccountLinker {
      * after the join; the password only after a successful login).
      */
     public record Material(String deviceHash, String profileHash, String clientUuid, String hostUsed,
-                           String channelsHash, boolean channelsBaseline, String ipHmac, String pwFp) {}
+                           String channelsHash, boolean channelsBaseline, String ipHmac, String pwFp,
+                           boolean commonProfile) {
+        public Material(String deviceHash, String profileHash, String clientUuid, String hostUsed,
+                        String channelsHash, boolean channelsBaseline, String ipHmac, String pwFp) {
+            this(deviceHash, profileHash, clientUuid, hostUsed, channelsHash, channelsBaseline, ipHmac, pwFp, false);
+        }
+    }
 
     private final Weights weights;
     private final long timingWindowMs;
@@ -131,9 +140,18 @@ public final class AccountLinker {
     public int score(boolean sameDeviceHash, boolean sameIp, boolean similarName,
                      boolean registeredSoonAfterBan, boolean samePasswordPhc,
                      boolean sameProfile, boolean sameClientUuid, boolean sameChannels, boolean sameHost) {
+        return score(sameDeviceHash, sameIp, similarName, registeredSoonAfterBan, samePasswordPhc,
+                sameProfile, sameClientUuid, sameChannels, sameHost, false);
+    }
+
+    /** As above; {@code commonProfile}: the matched settings are the game's defaults and say little. */
+    public int score(boolean sameDeviceHash, boolean sameIp, boolean similarName,
+                     boolean registeredSoonAfterBan, boolean samePasswordPhc,
+                     boolean sameProfile, boolean sameClientUuid, boolean sameChannels, boolean sameHost,
+                     boolean commonProfile) {
         int s = 0;
-        if (sameDeviceHash) s += weights.deviceHash();
-        else if (sameProfile) s += weights.profile();
+        if (sameDeviceHash) s += commonProfile ? weights.deviceHash() / 2 : weights.deviceHash();
+        else if (sameProfile) s += commonProfile ? weights.profile() / 3 : weights.profile();
         if (sameClientUuid) s += weights.clientUuid();
         if (sameChannels) s += weights.channels();
         if (sameIp) s += weights.sameIp();
@@ -328,7 +346,7 @@ public final class AccountLinker {
                 boolean timing = isTimingSignal(myCreatedAt, now, timingAnchor);
 
                 int sc = score(sameDevice, sameIp, similar, timing, samePw,
-                        sameProfile, sameClientUuid, sameChannels, sameHost);
+                        sameProfile, sameClientUuid, sameChannels, sameHost, m.commonProfile());
                 if (sc >= 50) {
                     Candidate c = new Candidate(row.uuid(), candidateName, sameDevice, sameIp,
                             similar, timing, samePw);

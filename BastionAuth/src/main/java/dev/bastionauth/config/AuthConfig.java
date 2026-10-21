@@ -102,6 +102,14 @@ public final class AuthConfig {
         public int maxQueuedOperations = 64;
         /** HMAC passwords with the secret.key pepper before hashing. */
         public boolean usePepper = true;
+        /**
+         * 1.13: hashes made by 1.13 say whether they are peppered, and a wrong
+         * password costs one Argon2 run. A hash from an older build does not
+         * say; with this on, it is also tried in the other form (as every
+         * build up to 1.12 did on every failure) — only for a server that
+         * switched {@link #usePepper} at some point before 1.13.
+         */
+        public boolean legacyPepperFallback = false;
     }
 
     public static final class BruteForce {
@@ -149,6 +157,19 @@ public final class AuthConfig {
         public boolean enabled = true;
         /** Session lifetime; sessions also survive server restarts (stored in auth.db). */
         public int ttlMinutes = 360;
+        /**
+         * Everyday client settings (render distance, skin parts, particles,
+         * chat options) that may differ between the session and the rejoin,
+         * 0–4. The install itself — brand, language, main hand and the
+         * launcher's own UUID — must always match.
+         */
+        public int settingChangesAllowed = 1;
+        /**
+         * 1.13: an address another account has joined from during the session
+         * is not a secret — a carrier NAT, a dormitory, a brother on the same
+         * Wi-Fi. A session never resumes from it; the password is asked.
+         */
+        public boolean refuseSharedAddress = true;
         /**
          * Operators never resume by IP. Behind a carrier NAT the IP is shared
          * with strangers; a stranger who knows an operator's name must not
@@ -272,6 +293,7 @@ public final class AuthConfig {
         bruteForce.maxAccountsPerIpHard = clampInt(bruteForce.maxAccountsPerIpHard, 0, 1000);
         bruteForce.quotaIgnoresDormantDays = clampInt(bruteForce.quotaIgnoresDormantDays, 0, 3650);
         session.ttlMinutes = clampInt(session.ttlMinutes, 1, 1440);
+        session.settingChangesAllowed = clampInt(session.settingChangesAllowed, 0, 4);
         linking.timingWindowHours = clampInt(linking.timingWindowHours, 1, 24 * 365);
         linking.channelsDelaySeconds = clampInt(linking.channelsDelaySeconds, 1, 120);
     }
