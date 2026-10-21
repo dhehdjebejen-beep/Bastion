@@ -1,0 +1,31 @@
+// Build numbering, shared by every mod in this folder.
+//
+// mod_version (gradle.properties) changes only for a release that adds
+// something and was agreed on; every jar compiled in between is the next build
+// of that same version: 3.5.0+build.1, 3.5.0+build.2, ... The counter lives in
+// build.number next to gradle.properties as "<version> <build>". Raising
+// mod_version starts the count again at build 1; a pre-release tag
+// (3.5.0-beta) keeps counting the builds of its version.
+//
+// Only a task that produces the jar (build, assemble, jar, remapJar) takes a
+// number; tests, dumpTestClasspath and IDE syncs leave the counter alone.
+// Apply after `version = project.mod_version`.
+
+def counter = file('build.number')
+def release = project.mod_version.toString()
+int last = 0
+if (counter.exists()) {
+    def parts = counter.text.trim().split(/\s+/)
+    // A pre-release tag (3.5.0-beta) is the same line of builds as 3.5.0.
+    if (parts.length == 2 && parts[0].split('-')[0] == release.split('-')[0]) last = parts[1].toInteger()
+}
+def jarTasks = ['build', 'assemble', 'jar', 'remapJar']
+boolean producesJar = gradle.startParameter.taskNames.any { jarTasks.contains(it.tokenize(':').last()) }
+int number = producesJar ? last + 1 : Math.max(last, 1)
+if (producesJar) {
+    def tmp = file('build.number.tmp')
+    tmp.text = "${release} ${number}\n"
+    java.nio.file.Files.move(tmp.toPath(), counter.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+}
+project.ext.build_number = number
+project.version = "${release}+build.${number}"

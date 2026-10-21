@@ -19,6 +19,25 @@ server — players join with an unmodified client and install nothing.
 
 <p align="center"><img src="docs/images/modules-en.png" alt="BastionAuth, BastionClaims, BastionAC"></p>
 
+## The idea
+
+- **Zero trust towards every player.** Before login a player gets nothing: no
+  world (empty chunks instead), no chat, no inventory, no commands, no packets
+  for their own mods. Trust is never granted for a name, an IP or a "premium"
+  account — it is proven with the password, 2FA or a recognised device.
+- **No premium login — on purpose.** Automatic login by a Mojang license is not
+  implemented: in the author's view a Mojang session can be stolen, and then it
+  opens the account without a single question. Instead there are Bastion's own
+  mechanisms: a session bound to the IP, the client profile and the launcher
+  installation, 2FA and a code word. A regular player gets in without the
+  password; a stolen name does not.
+- **An anti-cheat that is precise rather than heavy.** The checks rest on vanilla
+  physics and protocol, and the disputed cases are investigated by Argus over the
+  whole session — instead of simulating every player on every tick.
+- **For the sport of it.** The whole project was written out of curiosity: to
+  understand how cheats and the defences against them work, and to see what can
+  come of it.
+
 ## Status
 
 - **Built for a Minecraft 1.21.11 server on Fabric only.** No other server version
@@ -39,9 +58,9 @@ server — players join with an unmodified client and install nothing.
 
 | Module | Version | In one line |
 |---|---|---|
-| [**BastionAuth**](BastionAuth) | 1.12.2 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP and client profile. Before the password the player waits in spectator mode, away from their real location. |
-| [**BastionClaims**](BastionClaims) | 1.19.1 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers, explosions, fire, projectiles, falling blocks, griefing mobs, fishing rods, sculk. Member roles inside a claim. Also includes an operator WorldEdit with undo. |
-| [**BastionAC**](BastionAC) | 3.4.0 | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Since 3.0: full session telemetry and **Argus**, an analytical investigation that reads a player's whole session and returns a verdict within minutes. Since 3.3 its model is trained in Argus Lab on synthetic honest and cheating sessions; 3.3.1 adds an info shield against ESP-style information cheats and InteractWalls; 3.4 catches ClickTP on foot and lets Argus see teleports. Exploits (book/NBT bombs, creative smuggling, packet floods) are blocked at the protocol. |
+| [**BastionAuth**](BastionAuth) | 1.13.0 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP, client profile and launcher installation. Before the password the player waits in spectator mode, away from their real location, and gets empty chunks instead of the world. |
+| [**BastionClaims**](BastionClaims) | 1.20.0 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers and crafters, explosions, fire, projectiles, falling blocks, griefing mobs, allays, copper golems, portals, fishing rods, sculk. Member roles inside a claim. Also includes an operator WorldEdit with undo. |
+| [**BastionAC**](BastionAC) | 3.5.0-beta | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Full session telemetry and **Argus**, an analytical investigation that reads a player's session and returns a verdict; its model is trained in Argus Lab on synthetic and real sessions and looks at the worst fight of a session (cheats switched on for one fight). 3.5 beta adds a **proactive mode**: the checks only raise signals and Argus's verdict switches the sanctions on within seconds. Exploits (book/NBT bombs, creative smuggling, packet floods) are blocked at the protocol. |
 
 Each mod works on its own. When they run together, they talk through soft
 reflection bridges, and no mod has a hard dependency on another:
@@ -106,8 +125,12 @@ downloads everything else.
 
 ```bash
 cd BastionAC        # or BastionAuth / BastionClaims
-./gradlew build     # → build/libs/<mod>-<version>.jar
+./gradlew build     # → build/libs/<mod>-<version>+build.<N>.jar
 ```
+
+The version of a mod changes only with new features; every build in between
+gets the next number (`3.5.0-beta+build.4`). The counter is in
+`<mod>/build.number`, the shared script in [`buildnumber.gradle`](buildnumber.gradle).
 
 To install, put the jar into the server's `mods/` folder next to
 [Fabric API](https://modrinth.com/mod/fabric-api). Each mod writes its config to
@@ -115,7 +138,7 @@ To install, put the jar into the server's `mods/` folder next to
 
 ## Tests
 
-The repository has 350 unit tests: 90 in BastionAuth, 58 in BastionClaims and 202
+The repository has 383 unit tests: 100 in BastionAuth, 62 in BastionClaims and 221
 in BastionAC. Run them with `./gradlew test` in a module folder.
 The Argus model is trained and measured on the Argus Lab bench
 (`./gradlew argusLab` in `BastionAC`).
