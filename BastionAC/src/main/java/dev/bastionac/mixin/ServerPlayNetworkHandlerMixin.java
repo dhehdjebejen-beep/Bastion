@@ -5,6 +5,7 @@ import dev.bastionac.checks.CombatChecks;
 import dev.bastionac.checks.MovementChecks;
 import dev.bastionac.checks.WorldChecks;
 import dev.bastionac.core.Action;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.PlayerData;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityPosition;
@@ -359,7 +360,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
         if (!d.isFullyExempt(BastionAC.serverTick())
                 && !dev.bastionac.core.EntityKnowledge.knows(player.getUuid(), target.getId())) {
             boolean refuse = BastionAC.flag(player, d, dev.bastionac.core.CheckType.ENTITYPREDICT, String.format(
-                    "удар по %s (id %d), которую клиенту ещё не показывали — предсказание id (CrystalAura)",
+                    Lang.t("удар по %s (id %d), которую клиенту ещё не показывали — предсказание id (CrystalAura)"),
                     net.minecraft.registry.Registries.ENTITY_TYPE.getId(target.getType()).getPath(), target.getId()));
             if (refuse) {
                 d.attackVetoTick = BastionAC.serverTick();
@@ -502,7 +503,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
         if (dev.bastionac.core.FreezeManager.commandAllowed(command)) return;
         ci.cancel();
         player.getEntityWorld().getServer().execute(() -> player.sendMessage(net.minecraft.text.Text.literal(
-                "§b❄ Вы заморожены: §7доступны только личные сообщения (/msg, /r)"), false));
+                Lang.t("§b❄ Вы заморожены: §7доступны только личные сообщения (/msg, /r)")), false));
     }
 
     @Inject(method = "onHandSwing", at = @At("HEAD"))

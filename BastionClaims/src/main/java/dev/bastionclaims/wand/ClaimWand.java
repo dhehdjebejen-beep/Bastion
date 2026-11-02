@@ -2,6 +2,7 @@ package dev.bastionclaims.wand;
 
 import dev.bastionclaims.config.ClaimConfig;
 import dev.bastionclaims.util.Fmt;
+import dev.bastionclaims.util.Lang;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.LoreComponent;
 import net.minecraft.component.type.NbtComponent;
@@ -37,11 +38,11 @@ public final class ClaimWand {
         } catch (Exception ignored) {
         }
         ItemStack stack = new ItemStack(base);
-        stack.set(DataComponentTypes.CUSTOM_NAME, Fmt.label("&b🪓 Приват-топор"));
+        stack.set(DataComponentTypes.CUSTOM_NAME, Fmt.label(Lang.t("&b🪓 Приват-топор")));
         stack.set(DataComponentTypes.LORE, new LoreComponent(List.of(
-                Fmt.label("&7ЛКМ по блоку — &fточка 1"),
-                Fmt.label("&7ПКМ по блоку — &fточка 2"),
-                Fmt.label("&8затем &f/claim create <название>"))));
+                Fmt.label(Lang.t("&7ЛКМ по блоку — &fточка 1")),
+                Fmt.label(Lang.t("&7ПКМ по блоку — &fточка 2")),
+                Fmt.label(Lang.t("&8затем &f/claim create <название>")))));
 
         NbtCompound nbt = new NbtCompound();
         nbt.putBoolean(MARKER, true);
@@ -90,7 +91,7 @@ public final class ClaimWand {
      */
     public static Give give(ServerPlayerEntity player, ClaimConfig cfg) {
         if (has(player)) {
-            return new Give(false, "&7Топор уже есть в инвентаре &8(ЛКМ — точка 1, ПКМ — точка 2)");
+            return new Give(false, Lang.t("&7Топор уже есть в инвентаре &8(ЛКМ — точка 1, ПКМ — точка 2)"));
         }
         long now = System.currentTimeMillis();
         UUID id = player.getUuid();
@@ -102,7 +103,7 @@ public final class ClaimWand {
             long waitMs = cfg.wandCooldownSeconds * 1000L - (now - b.lastMs());
             if (waitMs > 0) {
                 long seconds = (waitMs + 999) / 1000;
-                return new Give(false, "&cСлишком часто. Следующий топор через &f" + seconds + "&c с.");
+                return new Give(false, Lang.t("&cСлишком часто. Следующий топор через &f") + seconds + Lang.t("&c с."));
             }
         }
         BUDGETS.put(id, new Budget(used + 1, now));

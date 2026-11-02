@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.bastionauth.BastionAuth;
 import dev.bastionauth.core.AuthManager;
+import dev.bastionauth.core.Lang;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 
@@ -47,47 +48,47 @@ public final class AuthCommands {
 
     private static LiteralArgumentBuilder<ServerCommandSource> buildRegister(String name) {
         return literal(name)
-                .then(argument("пароль", word())
-                        .then(argument("повтор", word())
+                .then(argument(Lang.arg("пароль"), word())
+                        .then(argument(Lang.arg("повтор"), word())
                                 .executes(ctx -> {
                                     AuthManager m = BastionAuth.manager();
                                     if (m == null) return 0;
                                     m.tryRegister(ctx.getSource().getPlayerOrThrow(),
-                                            getString(ctx, "пароль"), getString(ctx, "повтор"));
+                                            getString(ctx, Lang.arg("пароль")), getString(ctx, Lang.arg("повтор")));
                                     return 1;
                                 })));
     }
 
     private static LiteralArgumentBuilder<ServerCommandSource> buildLogin(String name) {
         return literal(name)
-                .then(argument("пароль", word())
+                .then(argument(Lang.arg("пароль"), word())
                         .executes(ctx -> {
                             AuthManager m = BastionAuth.manager();
                             if (m == null) return 0;
-                            m.tryLogin(ctx.getSource().getPlayerOrThrow(), getString(ctx, "пароль"));
+                            m.tryLogin(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("пароль")));
                             return 1;
                         })
                         // Password and second factor in one line, for those who prefer it.
-                        .then(argument("код", word()).executes(ctx -> {
+                        .then(argument(Lang.arg("код"), word()).executes(ctx -> {
                             AuthManager m = BastionAuth.manager();
                             if (m == null) return 0;
-                            m.tryLogin(ctx.getSource().getPlayerOrThrow(), getString(ctx, "пароль"), getString(ctx, "код"));
+                            m.tryLogin(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("пароль")), getString(ctx, Lang.arg("код")));
                             return 1;
                         })));
     }
 
     private static LiteralArgumentBuilder<ServerCommandSource> buildChangePassword(String name) {
         return literal(name)
-                .then(argument("старый", word())
-                        .then(argument("новый", word())
-                                .then(argument("повтор", word())
+                .then(argument(Lang.arg("старый"), word())
+                        .then(argument(Lang.arg("новый"), word())
+                                .then(argument(Lang.arg("повтор"), word())
                                         .executes(ctx -> {
                                             AuthManager m = BastionAuth.manager();
                                             if (m == null) return 0;
                                             m.tryChangePassword(ctx.getSource().getPlayerOrThrow(),
-                                                    getString(ctx, "старый"),
-                                                    getString(ctx, "новый"),
-                                                    getString(ctx, "повтор"));
+                                                    getString(ctx, Lang.arg("старый")),
+                                                    getString(ctx, Lang.arg("новый")),
+                                                    getString(ctx, Lang.arg("повтор")));
                                             return 1;
                                         }))));
     }
@@ -144,31 +145,31 @@ public final class AuthCommands {
                 }))
                 .then(literal("read")
                         .executes(ctx -> readPage(ctx.getSource(), 0, 0))
-                        .then(argument("том", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 9))
+                        .then(argument(Lang.arg("том"), com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 9))
                                 .executes(ctx -> readPage(ctx.getSource(),
-                                        com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "том") - 1, 0))
-                                .then(argument("страница", com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 200))
+                                        com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, Lang.arg("том")) - 1, 0))
+                                .then(argument(Lang.arg("страница"), com.mojang.brigadier.arguments.IntegerArgumentType.integer(1, 200))
                                         .executes(ctx -> readPage(ctx.getSource(),
-                                                com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "том") - 1,
-                                                com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, "страница") - 1)))));
+                                                com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, Lang.arg("том")) - 1,
+                                                com.mojang.brigadier.arguments.IntegerArgumentType.getInteger(ctx, Lang.arg("страница")) - 1)))));
     }
 
     /** Chat fallback for a single page, for clients that cannot be handed a book. */
     private static int readPage(ServerCommandSource source, int volume, int page) {
         var vols = dev.bastionauth.core.AgreementManager.volumes();
         if (volume < 0 || volume >= vols.size()) {
-            source.sendFeedback(() -> net.minecraft.text.Text.literal("§cНет такого тома."), false);
+            source.sendFeedback(() -> net.minecraft.text.Text.literal(Lang.t("§cНет такого тома.")), false);
             return 0;
         }
         var v = vols.get(volume);
         var text = dev.bastionauth.core.AgreementManager.page(volume, page);
         if (text.isEmpty()) {
-            source.sendFeedback(() -> net.minecraft.text.Text.literal("§cНет такой страницы."), false);
+            source.sendFeedback(() -> net.minecraft.text.Text.literal(Lang.t("§cНет такой страницы.")), false);
             return 0;
         }
         int shown = page + 1;
         source.sendFeedback(() -> net.minecraft.text.Text.literal(
-                "§6" + v.title() + " §8— страница " + shown + "/" + v.pages().size()), false);
+                "§6" + v.title() + Lang.t(" §8— страница ") + shown + "/" + v.pages().size()), false);
         source.sendFeedback(() -> net.minecraft.text.Text.literal("§f" + text.get()), false);
         return 1;
     }
@@ -210,34 +211,34 @@ public final class AuthCommands {
                     m.panicLock(ctx.getSource().getPlayerOrThrow());
                     return 1;
                 }))
-                .then(literal("2fa").requires(op).then(literal("reset").then(argument("ник", word()).executes(ctx -> {
+                .then(literal("2fa").requires(op).then(literal("reset").then(argument(Lang.arg("ник"), word()).executes(ctx -> {
                     AuthManager m = BastionAuth.manager();
                     if (m == null) return 0;
-                    m.adminTwoFactorReset(ctx.getSource(), getString(ctx, "ник"));
+                    m.adminTwoFactorReset(ctx.getSource(), getString(ctx, Lang.arg("ник")));
                     return 1;
                 }))))
-                .then(literal("unregister").requires(op).then(argument("ник", word()).executes(ctx -> {
+                .then(literal("unregister").requires(op).then(argument(Lang.arg("ник"), word()).executes(ctx -> {
                     AuthManager m = BastionAuth.manager();
                     if (m == null) return 0;
-                    m.adminUnregister(ctx.getSource(), getString(ctx, "ник"));
+                    m.adminUnregister(ctx.getSource(), getString(ctx, Lang.arg("ник")));
                     return 1;
                 })))
-                .then(literal("unlock").requires(op).then(argument("ник", word()).executes(ctx -> {
+                .then(literal("unlock").requires(op).then(argument(Lang.arg("ник"), word()).executes(ctx -> {
                     AuthManager m = BastionAuth.manager();
                     if (m == null) return 0;
-                    m.adminUnlock(ctx.getSource(), getString(ctx, "ник"));
+                    m.adminUnlock(ctx.getSource(), getString(ctx, Lang.arg("ник")));
                     return 1;
                 })))
-                .then(literal("status").requires(op).then(argument("ник", word()).executes(ctx -> {
+                .then(literal("status").requires(op).then(argument(Lang.arg("ник"), word()).executes(ctx -> {
                     AuthManager m = BastionAuth.manager();
                     if (m == null) return 0;
-                    m.adminStatus(ctx.getSource(), getString(ctx, "ник"));
+                    m.adminStatus(ctx.getSource(), getString(ctx, Lang.arg("ник")));
                     return 1;
                 })))
-                .then(literal("links").requires(op).then(argument("ник", word()).executes(ctx -> {
+                .then(literal("links").requires(op).then(argument(Lang.arg("ник"), word()).executes(ctx -> {
                     AuthManager m = BastionAuth.manager();
                     if (m == null) return 0;
-                    m.adminLinks(ctx.getSource(), getString(ctx, "ник"));
+                    m.adminLinks(ctx.getSource(), getString(ctx, Lang.arg("ник")));
                     return 1;
                 })))
                 .then(literal("sessions").requires(op).then(literal("clear").executes(ctx -> {
@@ -249,12 +250,25 @@ public final class AuthCommands {
                 .then(literal("agreement").requires(op).then(literal("stats").executes(ctx -> {
                     var db = dev.bastionauth.core.AgreementManager.VERSION;
                     ctx.getSource().sendFeedback(() -> net.minecraft.text.Text.literal(
-                            "§7Действующая редакция: §f" + dev.bastionauth.core.AgreementManager.REVISION
-                                    + " §8(" + db + ")§7, томов: §f"
+                            Lang.t("§7Действующая редакция: §f") + dev.bastionauth.core.AgreementManager.REVISION
+                                    + " §8(" + db + Lang.t(")§7, томов: §f")
                                     + dev.bastionauth.core.AgreementManager.volumes().size()
-                                    + "§7, страниц: §f" + dev.bastionauth.core.AgreementManager.totalPages()), false);
+                                    + Lang.t("§7, страниц: §f") + dev.bastionauth.core.AgreementManager.totalPages()), false);
                     return 1;
                 })))
+                .then(literal("lang").requires(op).executes(ctx -> {
+                    AuthManager m = BastionAuth.manager();
+                    if (m == null) return 0;
+                    m.adminLanguage(ctx.getSource(), null);
+                    return 1;
+                }).then(argument(Lang.arg("язык"), word())
+                        .suggests((c, b) -> net.minecraft.command.CommandSource.suggestMatching(Lang.available(), b))
+                        .executes(ctx -> {
+                            AuthManager m = BastionAuth.manager();
+                            if (m == null) return 0;
+                            m.adminLanguage(ctx.getSource(), getString(ctx, Lang.arg("язык")));
+                            return 1;
+                        })))
                 .then(literal("reload").requires(op).executes(ctx -> {
                     AuthManager m = BastionAuth.manager();
                     if (m == null) return 0;

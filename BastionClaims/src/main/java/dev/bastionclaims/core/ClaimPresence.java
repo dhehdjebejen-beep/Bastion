@@ -3,6 +3,7 @@ package dev.bastionclaims.core;
 import dev.bastionclaims.BastionClaims;
 import dev.bastionclaims.model.Claim;
 import dev.bastionclaims.util.Fmt;
+import dev.bastionclaims.util.Lang;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -139,7 +140,7 @@ public final class ClaimPresence {
         if (last == null || now - last > 3000) {
             LAST_ARREST_MSG.put(p.getUuid(), now);
             p.sendMessage(Fmt.text(cfg().message("presence.arrested", c.name,
-                    c.arrestReason == null || c.arrestReason.isBlank() ? "по решению государства" : c.arrestReason)), false);
+                    c.arrestReason == null || c.arrestReason.isBlank() ? Lang.t("по решению государства") : c.arrestReason)), false);
         }
     }
 

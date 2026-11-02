@@ -36,10 +36,10 @@ import java.util.Locale;
  * </ul>
  */
 public enum LinkVerdict {
-    NEW("Не проверена", "&e", "&7Решает оценка связи"),
-    TRUSTED("Доверенная", "&a", "&7Без ограничений между ними; реферальный бонус — одно лицо"),
-    WATCH("Под наблюдением", "&6", "&7Ограничения действуют, связь просмотрена"),
-    ALT("Мультиаккаунт", "&c", "&7Ограничения действуют всегда, без оглядки на оценку");
+    NEW(Lang.k("Не проверена"), "&e", Lang.k("&7Решает оценка связи")),
+    TRUSTED(Lang.k("Доверенная"), "&a", Lang.k("&7Без ограничений между ними; реферальный бонус — одно лицо")),
+    WATCH(Lang.k("Под наблюдением"), "&6", Lang.k("&7Ограничения действуют, связь просмотрена")),
+    ALT(Lang.k("Мультиаккаунт"), "&c", Lang.k("&7Ограничения действуют всегда, без оглядки на оценку"));
 
     private final String label;
     private final String colour;
@@ -51,9 +51,9 @@ public enum LinkVerdict {
         this.effect = effect;
     }
 
-    /** Russian name for the admin UI. */
+    /** Name for the admin UI, in the server language. */
     public String label() {
-        return label;
+        return Lang.t(label);
     }
 
     /** Legacy colour code the label is normally painted in. */
@@ -63,7 +63,7 @@ public enum LinkVerdict {
 
     /** One line describing what this verdict does to the gates. */
     public String effect() {
-        return effect;
+        return Lang.t(effect);
     }
 
     /** True when this verdict alone decides the gate, without consulting the score. */

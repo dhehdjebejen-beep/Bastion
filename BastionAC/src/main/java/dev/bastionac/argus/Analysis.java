@@ -8,6 +8,7 @@ import dev.bastionac.argus.features.Features;
 import dev.bastionac.argus.features.MiningFeatures;
 import dev.bastionac.argus.features.MovementFeatures;
 import dev.bastionac.argus.features.PacketFeatures;
+import dev.bastionac.core.Lang;
 import dev.bastionac.telemetry.SessionData;
 import dev.bastionac.telemetry.TelemetryIO;
 import dev.bastionac.telemetry.TelemetryReader;
@@ -198,7 +199,7 @@ final class Analysis {
             }
         }
         if (dug.size() < 40) {
-            out.sampleNote = "копания мало — мир не читался";
+            out.sampleNote = Lang.t("копания мало — мир не читался");
             return null;
         }
         // Most recent digging first, until the box would be too large.
@@ -233,16 +234,16 @@ final class Analysis {
                     int[] pr = WorldSampler.progressOf(f);
                     if (progress != null && pr != null) {
                         progress.step(pr[0], pr[1]);
-                        progress.detail(pr[2] > 0 ? "ждёт очереди чтения мира (" + pr[2] + ")"
-                                : String.format(java.util.Locale.ROOT, "прочитано %,d из %,d блоков", pr[0], pr[1]));
+                        progress.detail(pr[2] > 0 ? Lang.t("ждёт очереди чтения мира (") + pr[2] + ")"
+                                : String.format(java.util.Locale.ROOT, Lang.t("прочитано %,d из %,d блоков"), pr[0], pr[1]));
                     }
                 }
             }
             out.sampled = w != null;
-            out.sampleNote = w == null ? "мир не прочитан" : "прочитано " + w.volume() + " блоков вокруг туннелей";
+            out.sampleNote = w == null ? Lang.t("мир не прочитан") : Lang.t("прочитано ") + w.volume() + Lang.t(" блоков вокруг туннелей");
             return w;
         } catch (Exception e) {
-            out.sampleNote = "мир не прочитан: " + e.getClass().getSimpleName();
+            out.sampleNote = Lang.t("мир не прочитан: ") + e.getClass().getSimpleName();
             return null;
         }
     }
@@ -255,7 +256,7 @@ final class Analysis {
     private static void step(ArgusProgress p, int i, int n) {
         if (p != null) {
             p.step(i, n);
-            p.detail(n > 1 ? (i + 1) + " из " + n : null);
+            p.detail(n > 1 ? (i + 1) + Lang.t(" из ") + n : null);
         }
     }
 

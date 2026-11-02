@@ -1,5 +1,7 @@
 package dev.bastionclaims.model;
 
+import dev.bastionclaims.util.Lang;
+
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -117,12 +119,13 @@ public final class Claim {
 
     /** What a claim role may do. A member without a role may do all of it. */
     public enum Perm {
-        BUILD("build", "строить и ломать"),
-        CONTAINERS("containers", "сундуки и станки"),
-        DOORS("doors", "двери, кнопки, рычаги"),
-        ENTITIES("entities", "существа и рамки");
+        BUILD("build", Lang.k("строить и ломать")),
+        CONTAINERS("containers", Lang.k("сундуки и станки")),
+        DOORS("doors", Lang.k("двери, кнопки, рычаги")),
+        ENTITIES("entities", Lang.k("существа и рамки"));
 
         public final String key;
+        /** Russian; shown through {@link Lang#t}. */
         public final String label;
 
         Perm(String key, String label) {

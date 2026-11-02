@@ -1,5 +1,9 @@
 package dev.bastionac.argus;
 
+
+
+import dev.bastionac.core.Lang;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -14,29 +18,39 @@ public final class CaseFile {
     public enum Status { COLLECTING, QUEUED, ANALYZING, ANALYZED, CLOSED }
 
     public enum Verdict {
-        NONE("ещё не разобрано", "&7"),
-        INSUFFICIENT("мало данных", "&7"),
-        CLEAN("чисто", "&a"),
-        SUSPECT("подозрительно", "&e"),
-        GUILTY("виновен", "&c");
+        NONE(Lang.k("ещё не разобрано"), "&7"),
+        INSUFFICIENT(Lang.k("мало данных"), "&7"),
+        CLEAN(Lang.k("чисто"), "&a"),
+        SUSPECT(Lang.k("подозрительно"), "&e"),
+        GUILTY(Lang.k("виновен"), "&c");
 
-        public final String label;
+        private final String ru;
         public final String colour;
 
-        Verdict(String label, String colour) {
-            this.label = label;
+        Verdict(String ru, String colour) {
+            this.ru = ru;
             this.colour = colour;
+        }
+
+        /** In the server language. */
+        public String label() {
+            return Lang.t(ru);
         }
     }
 
     /** The owner's own call — the ground truth Argus calibrates on. */
     public enum Label {
-        NONE("без решения"), CHEATER("читер"), CLEAN("не читер"), UNSURE("неясно");
+        NONE(Lang.k("без решения")), CHEATER(Lang.k("читер")), CLEAN(Lang.k("не читер")), UNSURE(Lang.k("неясно"));
 
-        public final String label;
+        private final String ru;
 
-        Label(String label) {
-            this.label = label;
+        Label(String ru) {
+            this.ru = ru;
+        }
+
+        /** In the server language. */
+        public String label() {
+            return Lang.t(ru);
         }
     }
 
@@ -165,7 +179,7 @@ public final class CaseFile {
             return String.join(", ", s);
         }
         return f.format(java.time.Instant.ofEpochMilli(first)) + " … " + f.format(java.time.Instant.ofEpochMilli(last))
-                + " (" + total + " раз)";
+                + " (" + total + Lang.t(" раз)");
     }
 
     /** First, last and a few spread between: what a row keeps of a feature's moments. */

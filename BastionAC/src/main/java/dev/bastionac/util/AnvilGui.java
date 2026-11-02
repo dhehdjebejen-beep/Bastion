@@ -1,6 +1,7 @@
 package dev.bastionac.util;
 
 import dev.bastionac.core.Alerts;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.TextFmt;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.NbtComponent;
@@ -91,8 +92,8 @@ public final class AnvilGui extends AnvilScreenHandler {
     public void updateResult() {
         String cur = text == null ? "" : text;
         ItemStack result = prop();
-        String shown = cur.isEmpty() ? "&8(введите значение)" : "&f" + cur;
-        result.set(DataComponentTypes.CUSTOM_NAME, TextFmt.literal("&a✔ Применить: " + shown).styled(s -> s.withItalic(false)));
+        String shown = cur.isEmpty() ? Lang.t("&8(введите значение)") : "&f" + cur;
+        result.set(DataComponentTypes.CUSTOM_NAME, TextFmt.literal(Lang.t("&a✔ Применить: ") + shown).styled(s -> s.withItalic(false)));
         if (this.output != null) {
             this.output.setStack(0, result);
         }

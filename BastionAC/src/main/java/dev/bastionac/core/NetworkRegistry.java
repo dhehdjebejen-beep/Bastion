@@ -262,7 +262,7 @@ public final class NetworkRegistry {
             BastionAC.LOGGER.warn("[NET] {} joined from the subnet of banned {} ({}, {} ago)",
                     player.getGameProfile().name(), rec.name, rec.maskedIp, ago);
             Alerts.sendNetSignal(player.getGameProfile().name(), player.getUuid(), rec.name,
-                    "join с подсети недавнего бана", rec.maskedIp + ", " + ago + " назад");
+                    Lang.t("join с подсети недавнего бана"), rec.maskedIp + ", " + ago + Lang.t(" назад"));
         }
     }
 
@@ -336,12 +336,12 @@ public final class NetworkRegistry {
 
     static String ago(long deltaMs) {
         long s = Math.max(0, deltaMs) / 1000;
-        if (s < 60) return s + "с";
+        if (s < 60) return s + Lang.t("с");
         long m = s / 60;
-        if (m < 60) return m + "м";
+        if (m < 60) return m + Lang.t("м");
         long h = m / 60;
-        if (h < 24) return h + "ч";
-        return (h / 24) + "д";
+        if (h < 24) return h + Lang.t("ч");
+        return (h / 24) + Lang.t("д");
     }
 
     /** Public wrapper for the admin UI (same formatting, visible name). */

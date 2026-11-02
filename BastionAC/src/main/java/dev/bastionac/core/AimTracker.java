@@ -98,7 +98,7 @@ public final class AimTracker {
         int hits = 0;
         for (int i = 0; i < d.aimRingFill; i++) if (d.aimRing[i]) hits++;
         return String.format(java.util.Locale.ROOT,
-                "взгляд точно в центр хитбокса в %d из %d ударов (сейчас %.2f°)", hits, d.aimRingFill, err);
+                Lang.t("взгляд точно в центр хитбокса в %d из %d ударов (сейчас %.2f°)"), hits, d.aimRingFill, err);
     }
 
     /** Whether a new rotation, after a flick to the target, came back to where it was. */

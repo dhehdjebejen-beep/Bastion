@@ -1322,8 +1322,8 @@ public final class AuthManager {
                 String lastLogin = user.lastLoginAt() > 0 ? TIME_FORMAT.format(Instant.ofEpochMilli(user.lastLoginAt())) : "—";
                 String lastIp = user.lastIpMasked() == null ? "?" : user.lastIpMasked();
                 String locked = user.lockedUntil() > now
-                        ? "до " + TIME_FORMAT.format(Instant.ofEpochMilli(user.lockedUntil()))
-                        : "нет";
+                        ? Lang.t("до ") + TIME_FORMAT.format(Instant.ofEpochMilli(user.lockedUntil()))
+                        : Lang.t("нет");
                 replyLater(source, "admin.status", user.username(), created, lastLogin, lastIp,
                         user.failedAttempts(), locked);
             } catch (SQLException e) {
@@ -1705,12 +1705,37 @@ public final class AuthManager {
         reply(source, "admin.sessionsCleared", n);
     }
 
+    /** {@code /auth lang [code]}: shows the server language, or switches it and writes it to config.json. */
+    public void adminLanguage(ServerCommandSource source, String code) {
+        if (code == null) {
+            replyLine(source, String.format(Lang.t("&7Язык BastionAuth: &f%s &8(доступны: %s)"),
+                    Lang.code(), String.join(", ", Lang.available())));
+            return;
+        }
+        if (!Lang.use(code, w -> BastionAuth.LOGGER.warn("{}", w))) {
+            replyLine(source, String.format(Lang.t("&cЯзыка &f%s&c нет. Доступны: &f%s"),
+                    Lang.normalize(code), String.join(", ", Lang.available())));
+            return;
+        }
+        AuthConfig c = cfg;
+        c.language = Lang.code();
+        submitAdmin(source, () -> {
+            try {
+                c.save(configFile);
+            } catch (Exception e) {
+                BastionAuth.LOGGER.warn("Could not save the language to config.json", e);
+            }
+        });
+        replyLine(source, String.format(Lang.t("&aЯзык BastionAuth: &f%s"), Lang.code()));
+    }
+
     public void adminReload(ServerCommandSource source) {
         submitAdmin(source, () -> {
             try {
                 AuthConfig fresh = AuthConfig.loadOrCreate(configFile, w -> BastionAuth.LOGGER.warn("{}", w));
                 server.execute(() -> {
                     this.cfg = fresh;
+                    if (!Lang.use(fresh.language, w -> BastionAuth.LOGGER.warn("{}", w))) fresh.language = Lang.code();
                     hasher.reconfigure(fresh.hashing.usePepper, new PasswordHasher.Params(
                             fresh.hashing.memoryKib, fresh.hashing.iterations, fresh.hashing.parallelism),
                             fresh.hashing.legacyPepperFallback);
@@ -1972,13 +1997,13 @@ public final class AuthManager {
         }
         send(p, "twofa.backup.tail");
         try {
-            StringBuilder page = new StringBuilder("Резервные коды 2FA\n\n");
+            StringBuilder page = new StringBuilder(Lang.t("Резервные коды 2FA\n\n"));
             for (String c : codes) page.append(c).append("\n");
-            page.append("\nКаждый работает один раз.\nНе показывайте никому.");
+            page.append(Lang.t("\nКаждый работает один раз.\nНе показывайте никому."));
             ItemStack book = new ItemStack(net.minecraft.item.Items.WRITTEN_BOOK);
             book.set(net.minecraft.component.DataComponentTypes.WRITTEN_BOOK_CONTENT,
                     new net.minecraft.component.type.WrittenBookContentComponent(
-                            net.minecraft.text.RawFilteredPair.of("Резервные коды"), "BastionAuth", 0,
+                            net.minecraft.text.RawFilteredPair.of(Lang.t("Резервные коды")), "BastionAuth", 0,
                             java.util.List.of(net.minecraft.text.RawFilteredPair.of(Text.literal(page.toString()))), true));
             if (!p.getInventory().insertStack(book)) p.dropItem(book, false);
         } catch (Throwable t) {
@@ -2150,22 +2175,22 @@ public final class AuthManager {
             java.util.List<String> lines = new java.util.ArrayList<>();
             for (Database.AuditRow r : rows) {
                 String what = switch (r.event()) {
-                    case "LOGIN_OK" -> "вход по паролю" + ("new device".equals(r.detail()) ? " (новое устройство)" : "");
-                    case "SESSION_RESUME" -> "вход по сессии";
-                    case "LOGIN_FAIL" -> "неверный пароль";
-                    case "2FA_FAIL" -> "неверный код 2FA";
-                    case "2FA_ENABLED" -> "2FA включена";
-                    case "2FA_DISABLED" -> "2FA выключена";
-                    case "2FA_BACKUP_USED" -> "использован резервный код";
-                    case "CHANGEPW" -> "смена пароля";
-                    case "CHANGEPW_FAIL" -> "смена пароля: неверный старый";
-                    case "CODEWORD_SET" -> "кодовое слово задано";
-                    case "CODEWORD_REMOVED" -> "кодовое слово снято";
-                    case "CODEWORD_FAIL" -> "неверное кодовое слово";
-                    case "LOGOUT" -> "выход";
-                    case "PANIC_LOCK" -> "аккаунт заблокирован вами";
-                    case "ADMIN_UNLOCK" -> "разблокирован администрацией";
-                    case "REGISTER" -> "регистрация";
+                    case "LOGIN_OK" -> Lang.t("вход по паролю") + ("new device".equals(r.detail()) ? Lang.t(" (новое устройство)") : "");
+                    case "SESSION_RESUME" -> Lang.t("вход по сессии");
+                    case "LOGIN_FAIL" -> Lang.t("неверный пароль");
+                    case "2FA_FAIL" -> Lang.t("неверный код 2FA");
+                    case "2FA_ENABLED" -> Lang.t("2FA включена");
+                    case "2FA_DISABLED" -> Lang.t("2FA выключена");
+                    case "2FA_BACKUP_USED" -> Lang.t("использован резервный код");
+                    case "CHANGEPW" -> Lang.t("смена пароля");
+                    case "CHANGEPW_FAIL" -> Lang.t("смена пароля: неверный старый");
+                    case "CODEWORD_SET" -> Lang.t("кодовое слово задано");
+                    case "CODEWORD_REMOVED" -> Lang.t("кодовое слово снято");
+                    case "CODEWORD_FAIL" -> Lang.t("неверное кодовое слово");
+                    case "LOGOUT" -> Lang.t("выход");
+                    case "PANIC_LOCK" -> Lang.t("аккаунт заблокирован вами");
+                    case "ADMIN_UNLOCK" -> Lang.t("разблокирован администрацией");
+                    case "REGISTER" -> Lang.t("регистрация");
                     default -> null;
                 };
                 if (what == null) continue;
@@ -2329,9 +2354,9 @@ public final class AuthManager {
     static String humanWait(long ms) {
         long min = Math.max(1, (ms + 59_999) / 60_000);
         long d = min / 1440, h = (min % 1440) / 60, m = min % 60;
-        if (d > 0) return d + " д" + (h > 0 ? " " + h + " ч" : "");
-        if (h > 0) return h + " ч" + (m > 0 ? " " + m + " мин" : "");
-        return m + " мин";
+        if (d > 0) return d + Lang.t(" д") + (h > 0 ? " " + h + Lang.t(" ч") : "");
+        if (h > 0) return h + Lang.t(" ч") + (m > 0 ? " " + m + Lang.t(" мин") : "");
+        return m + Lang.t(" мин");
     }
 
     private void sendLater(ServerPlayerEntity player, PlayerAuthState st, String key, Object... args) {
@@ -2346,6 +2371,13 @@ public final class AuthManager {
         ServerPlayerEntity p = source.getPlayer();
         if (p != null) ChatGate.speak(p, () -> source.sendFeedback(() -> text(key, args), false));
         else source.sendFeedback(() -> text(key, args), false);
+    }
+
+    private void replyLine(ServerCommandSource source, String line) {
+        Text t = Text.literal(AuthConfig.colorize(line));
+        ServerPlayerEntity p = source.getPlayer();
+        if (p != null) ChatGate.speak(p, () -> source.sendFeedback(() -> t, false));
+        else source.sendFeedback(() -> t, false);
     }
 
     /** The line above what a player missed while on the login screen. */

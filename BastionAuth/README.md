@@ -114,6 +114,7 @@ sequenceDiagram
 | `/связи` (`/links`) — the queue of undecided links; `/связи <name>` | Account links and their verdicts |
 | `/связи доверять\|наблюдать\|мульти\|сброс <a> <b> [note]`, `/связи доверять-все <name>` | Record a verdict on a pair, or trust all of an account's links |
 | `/auth reload` | Reload the config |
+| `/auth lang [ru\|en]` | Language of everything the mod says; overrides in `config/bastionauth/lang/<code>.json` |
 
 ## Technical reference
 

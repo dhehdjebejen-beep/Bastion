@@ -7,6 +7,7 @@ import dev.bastionac.core.BanManager;
 import dev.bastionac.core.CheckType;
 import dev.bastionac.core.HistoryManager;
 import dev.bastionac.core.HitboxHistory;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.PlayerData;
 import dev.bastionac.core.ShadowTelemetry;
 import dev.bastionac.core.TextFmt;
@@ -307,7 +308,7 @@ public final class BastionAC implements DedicatedServerModInitializer {
             java.nio.file.Path dump = dev.bastionac.core.PlayerContextBuffer.snapshot(player,
                     type.key + " " + String.format(java.util.Locale.ROOT, "%.1f", vl) + " — " + details);
             dev.bastionac.core.AcJournal.write("dump", d.name, player.getUuidAsString(), type.key, vl,
-                    dump == null ? "контекст пуст — дамп не записан" : dump.getFileName().toString(), null);
+                    dump == null ? Lang.t("контекст пуст — дамп не записан") : dump.getFileName().toString(), null);
         }
         MinecraftServer srv = server;
         if (srv != null && vl >= alertVl
@@ -359,13 +360,13 @@ public final class BastionAC implements DedicatedServerModInitializer {
         if (d != null) d.kickedByAc = true;
         LOGGER.warn("[KICK] {} kicked by check {}", name, type.key);
         dev.bastionac.telemetry.Telemetry.acAction(player.getUuid(), dev.bastionac.telemetry.TelemetryFormat.ACT_KICK,
-                "кик по проверке " + type.key);
-        HistoryManager.recordPunishment(HistoryManager.Kind.KICK, player.getUuid(), name, type.key, 0, "авто-кик по VL");
+                Lang.t("кик по проверке ") + type.key);
+        HistoryManager.recordPunishment(HistoryManager.Kind.KICK, player.getUuid(), name, type.key, 0, Lang.t("авто-кик по VL"));
         if (m.announceKickToEveryone) {
             srv.getPlayerManager().broadcast(
-                    TextFmt.applied(m.kickBroadcast, Map.of("name", name, "check", type.key)), false);
+                    TextFmt.applied(Lang.t(m.kickBroadcast), Map.of("name", name, "check", type.key)), false);
         }
-        String screen = m.revealCheckToPlayer ? m.kickScreen + "\n&8(" + type.key + ")" : m.kickScreen;
+        String screen = m.revealCheckToPlayer ? Lang.t(m.kickScreen) + "\n&8(" + type.key + ")" : Lang.t(m.kickScreen);
         player.networkHandler.disconnect(TextFmt.applied(screen, Map.of("name", name)));
     }
 
@@ -379,11 +380,12 @@ public final class BastionAC implements DedicatedServerModInitializer {
     public static void reloadConfig(Consumer<String> feedback) {
         try {
             config = ACConfig.loadOrCreate(configFile, warning -> LOGGER.warn("{}", warning));
+            applyLanguage();
             applyChainPolicy();
-            feedback.accept("§a[BAC] Конфигурация перезагружена");
+            feedback.accept(Lang.t("§a[BAC] Конфигурация перезагружена"));
         } catch (Exception e) {
             LOGGER.error("Config reload failed", e);
-            feedback.accept("§c[BAC] Ошибка перезагрузки: " + e.getMessage());
+            feedback.accept(Lang.t("§c[BAC] Ошибка перезагрузки: ") + e.getMessage());
         }
     }
 
@@ -404,6 +406,22 @@ public final class BastionAC implements DedicatedServerModInitializer {
         }
     }
 
+    /** Switches to the configured language; a language that does not exist leaves the current one. */
+    private static void applyLanguage() {
+        if (!Lang.use(config.language, w -> LOGGER.warn("{}", w))) config.language = Lang.code();
+    }
+
+    /**
+     * Switches the language live and writes it to config.json. Returns false
+     * when there is no such language.
+     */
+    public static boolean setLanguage(String code) {
+        if (!Lang.use(code, w -> LOGGER.warn("{}", w))) return false;
+        config.language = Lang.code();
+        saveConfig();
+        return true;
+    }
+
     /** Resets a player's accumulated violation levels (admin action). */
     public static boolean clearViolations(ServerPlayerEntity player) {
         PlayerData d = DATA.get(player.getUuid());
@@ -419,12 +437,19 @@ public final class BastionAC implements DedicatedServerModInitializer {
 
     @Override
     public void onInitializeServer() {
+        // The language comes first: command argument names are translated
+        // when the commands are registered, before the server starts.
+        Path langDir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
+        Lang.setDir(langDir);
+        Lang.use(ACConfig.peekLanguage(langDir.resolve("config.json")), w -> LOGGER.warn("{}", w));
+
         ServerLifecycleEvents.SERVER_STARTING.register(srv -> {
             try {
                 Path dir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
                 Files.createDirectories(dir);
                 configFile = dir.resolve("config.json");
                 config = ACConfig.loadOrCreate(configFile, warning -> LOGGER.warn("{}", warning));
+                applyLanguage();
                 dev.bastionac.core.FreezeManager.load(dir);
             } catch (Exception e) {
                 LOGGER.error("Failed to load config, using defaults", e);
@@ -532,6 +557,8 @@ public final class BastionAC implements DedicatedServerModInitializer {
             PlayerData leaving = DATA.get(player.getUuid());
             String sessionFile = dev.bastionac.telemetry.Telemetry.currentFile(player.getUuid());
             dev.bastionac.telemetry.Telemetry.detach(player.getUuid());
+            dev.bastionac.core.EspShield.forget(player);
+            dev.bastionac.core.OreShield.forget(player);
             dev.bastionac.argus.Argus.onDisconnect(player.getUuid(), player.getGameProfile().name(), sessionFile);
             dev.bastionac.core.EntityKnowledge.forget(player.getUuid());
             dev.bastionac.core.FreezeManager.onDisconnect(player);
@@ -575,9 +602,16 @@ public final class BastionAC implements DedicatedServerModInitializer {
         // see a huge single-packet jump. Reset and grant a solid grace here —
         // this is what killed the "BigMove on End exit" false positive.
         ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) -> {
+            // Anti-ESP starts from nothing in the new world, as viewer and as target. Answers cached
+            // in a minigame arena (where the shield shows everyone) must not carry over and show a
+            // player through walls for the few ticks until the next judgement.
+            dev.bastionac.core.EspShield.forget(player);
             PlayerData d = DATA.get(player.getUuid());
             if (d == null) return;
-            d.respawnGraceUntil = tick + 100;
+            // A minigame arena holds its players frozen at the start (Hunger Games) and moves them
+            // about with its own teleports; the first half-minute there gave Timer alerts (02.11).
+            String ns = destination.getRegistryKey().getValue().getNamespace();
+            d.respawnGraceUntil = tick + (ns.equals("hideseek") || ns.equals("hungergames") ? 600 : 100);
             d.lastWorld = destination;
             d.teleportPending = false;
             d.timer.requestReset();
@@ -609,6 +643,8 @@ public final class BastionAC implements DedicatedServerModInitializer {
             dev.bastionac.argus.Argus.tick(srv, tick);
             if (tick % 20 == 0) dev.bastionac.core.EntityKnowledge.sweep();
             dev.bastionac.core.FreezeManager.tick(srv, tick);
+            dev.bastionac.core.EspShield.tick(srv, tick);
+            dev.bastionac.core.OreShield.tick(srv, tick);
 
             // Staff-presence feed for the evasion tracker: every admin join
             // or approach arms the "collapse" watch on busy players. Cheap —

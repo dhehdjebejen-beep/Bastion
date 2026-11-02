@@ -3,6 +3,7 @@ package dev.bastionac.gui;
 import dev.bastionac.BastionAC;
 import dev.bastionac.config.ACConfig;
 import dev.bastionac.core.CheckType;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.TextFmt;
 import dev.bastionac.util.AnvilGui;
 import dev.bastionac.util.ChestGui;
@@ -21,33 +22,41 @@ final class ACSettingsMenu {
 
     static void openGeneral(ServerPlayerEntity admin) {
         ACConfig.General g = BastionAC.config().general;
-        ChestGui gui = new ChestGui(TextFmt.literal("&8[&cBAC&8] &7Общие настройки"), 6);
+        ChestGui gui = new ChestGui(TextFmt.literal(Lang.t("&8[&cBAC&8] &7Общие настройки")), 6);
 
-        toggle(gui, 10, Items.BELL, "Алерты опам (по умолч.)", g.alertsToOps,
+        toggle(gui, 10, Items.BELL, Lang.t("Алерты опам (по умолч.)"), g.alertsToOps,
                 () -> { g.alertsToOps = !g.alertsToOps; saveAnd(admin, () -> openGeneral(admin)); });
-        toggle(gui, 11, Items.ENDER_PEARL, "Сетбэк (откат назад)", g.setbackEnabled,
+        toggle(gui, 11, Items.ENDER_PEARL, Lang.t("Сетбэк (откат назад)"), g.setbackEnabled,
                 () -> { g.setbackEnabled = !g.setbackEnabled; saveAnd(admin, () -> openGeneral(admin)); });
-        toggle(gui, 12, Items.FEATHER, "Мгновенный сетбэк", g.instantMovementSetback,
+        toggle(gui, 12, Items.FEATHER, Lang.t("Мгновенный сетбэк"), g.instantMovementSetback,
                 () -> { g.instantMovementSetback = !g.instantMovementSetback; saveAnd(admin, () -> openGeneral(admin)); });
-        toggle(gui, 13, Items.IRON_DOOR, "Кик по VL (мастер)", g.kickEnabled,
+        toggle(gui, 13, Items.IRON_DOOR, Lang.t("Кик по VL (мастер)"), g.kickEnabled,
                 () -> { g.kickEnabled = !g.kickEnabled; saveAnd(admin, () -> openGeneral(admin)); });
-        toggle(gui, 14, Items.WRITABLE_BOOK, "Лог нарушений в консоль", g.logViolationsToConsole,
+        toggle(gui, 14, Items.WRITABLE_BOOK, Lang.t("Лог нарушений в консоль"), g.logViolationsToConsole,
                 () -> { g.logViolationsToConsole = !g.logViolationsToConsole; saveAnd(admin, () -> openGeneral(admin)); });
 
-        numInt(gui, 19, admin, Items.CLOCK, "Кулдаун алертов (сек)", g.alertCooldownSeconds, 1, 1, 300,
+        numInt(gui, 19, admin, Items.CLOCK, Lang.t("Кулдаун алертов (сек)"), g.alertCooldownSeconds, 1, 1, 300,
                 v -> g.alertCooldownSeconds = v, () -> openGeneral(admin));
-        numInt(gui, 20, admin, Items.REPEATER, "Мин. интервал сетбэка (тики)", g.setbackMinIntervalTicks, 1, 1, 100,
+        numInt(gui, 20, admin, Items.REPEATER, Lang.t("Мин. интервал сетбэка (тики)"), g.setbackMinIntervalTicks, 1, 1, 100,
                 v -> g.setbackMinIntervalTicks = v, () -> openGeneral(admin));
-        numInt(gui, 21, admin, Items.SHIELD, "Грейс после входа (тики)", g.joinGraceTicks, 10, 20, 1200,
+        numInt(gui, 21, admin, Items.SHIELD, Lang.t("Грейс после входа (тики)"), g.joinGraceTicks, 10, 20, 1200,
                 v -> g.joinGraceTicks = v, () -> openGeneral(admin));
-        numDouble(gui, 22, admin, Items.SUGAR, "Допуск скорости (×)", g.speedToleranceMultiplier, 0.05, 0.5, 5.0,
+        numDouble(gui, 22, admin, Items.SUGAR, Lang.t("Допуск скорости (×)"), g.speedToleranceMultiplier, 0.05, 0.5, 5.0,
                 v -> g.speedToleranceMultiplier = v, () -> openGeneral(admin));
-        numInt(gui, 23, admin, Items.COMPASS, "Timer: мин. интервал (мс)", g.timerMinIntervalMs, 1, 10, 49,
+        numInt(gui, 23, admin, Items.COMPASS, Lang.t("Timer: мин. интервал (мс)"), g.timerMinIntervalMs, 1, 10, 49,
                 v -> g.timerMinIntervalMs = v, () -> openGeneral(admin));
-        numInt(gui, 24, admin, Items.DIAMOND_SWORD, "Потолок CPS (ударов/сек)", g.maxCps, 1, 10, 20,
+        numInt(gui, 24, admin, Items.DIAMOND_SWORD, Lang.t("Потолок CPS (ударов/сек)"), g.maxCps, 1, 10, 20,
                 v -> g.maxCps = v, () -> openGeneral(admin));
 
-        gui.button(49, GuiItems.back("в панель"), () -> ACPanel.open(admin));
+        gui.set(16, GuiItems.item(Items.GLOBE_BANNER_PATTERN, Lang.t("&b🌐 Язык: &f") + Lang.displayName(Lang.code()),
+                        Lang.t("&7Алерты, меню и отчёты Аргуса"), Lang.t("&7на всём сервере."),
+                        Lang.t("&8➜ клик — следующий язык")),
+                (p, t) -> {
+                    BastionAC.setLanguage(Lang.next());
+                    openGeneral(admin);
+                });
+
+        gui.button(49, GuiItems.back(Lang.t("в панель")), () -> ACPanel.open(admin));
         gui.fill(GuiItems.filler());
         gui.open(admin);
     }
@@ -56,7 +65,7 @@ final class ACSettingsMenu {
 
     static void openChecks(ServerPlayerEntity admin) {
         ACConfig cfg = BastionAC.config();
-        ChestGui gui = new ChestGui(TextFmt.literal("&8[&cBAC&8] &7Проверки &8(&f" + CheckType.values().length + "&8)"), 6);
+        ChestGui gui = new ChestGui(TextFmt.literal(Lang.t("&8[&cBAC&8] &7Проверки &8(&f") + CheckType.values().length + "&8)"), 6);
         int slot = 0;
         for (CheckType type : CheckType.values()) {
             ACConfig.CheckCfg c = cfg.check(type.key);
@@ -65,33 +74,33 @@ final class ACSettingsMenu {
                             "&7alertVl &f" + fmt(c.alertVl) + " &8· &7mitigate &f" + disp(c.mitigateVl)
                                     + " &8· &7kick &f" + disp(c.kickVl),
                             "&7weight &f" + fmt(c.weight) + " &8· &7decay &f" + fmt(c.decayPerSecond),
-                            "&8➜ редактировать"),
+                            Lang.t("&8➜ редактировать")),
                     () -> openCheckEditor(admin, type));
         }
-        gui.button(49, GuiItems.back("в панель"), () -> ACPanel.open(admin));
+        gui.button(49, GuiItems.back(Lang.t("в панель")), () -> ACPanel.open(admin));
         gui.fill(GuiItems.filler());
         gui.open(admin);
     }
 
     static void openCheckEditor(ServerPlayerEntity admin, CheckType type) {
         ACConfig.CheckCfg c = BastionAC.config().check(type.key);
-        ChestGui gui = new ChestGui(TextFmt.literal("&8[&cBAC&8] &7Проверка &f" + type.key), 5);
+        ChestGui gui = new ChestGui(TextFmt.literal(Lang.t("&8[&cBAC&8] &7Проверка &f") + type.key), 5);
 
-        toggle(gui, 4, c.enabled ? Items.LIME_WOOL : Items.RED_WOOL, "Проверка включена", c.enabled,
+        toggle(gui, 4, c.enabled ? Items.LIME_WOOL : Items.RED_WOOL, Lang.t("Проверка включена"), c.enabled,
                 () -> { c.enabled = !c.enabled; saveAnd(admin, () -> openCheckEditor(admin, type)); });
 
-        numDouble(gui, 19, admin, Items.GOLD_NUGGET, "weight (вес нарушения)", c.weight, 0.5, 0.1, 50,
+        numDouble(gui, 19, admin, Items.GOLD_NUGGET, Lang.t("weight (вес нарушения)"), c.weight, 0.5, 0.1, 50,
                 v -> c.weight = v, () -> openCheckEditor(admin, type));
-        numDouble(gui, 20, admin, Items.YELLOW_DYE, "alertVl (порог алерта)", c.alertVl, 0.5, 0.5, 1000,
+        numDouble(gui, 20, admin, Items.YELLOW_DYE, Lang.t("alertVl (порог алерта)"), c.alertVl, 0.5, 0.5, 1000,
                 v -> c.alertVl = v, () -> openCheckEditor(admin, type));
-        numDouble(gui, 21, admin, Items.ENDER_PEARL, "mitigateVl (сетбэк, 0=выкл)", c.mitigateVl, 0.5, 0, 1000,
+        numDouble(gui, 21, admin, Items.ENDER_PEARL, Lang.t("mitigateVl (сетбэк, 0=выкл)"), c.mitigateVl, 0.5, 0, 1000,
                 v -> c.mitigateVl = v, () -> openCheckEditor(admin, type));
-        numDouble(gui, 22, admin, Items.IRON_DOOR, "kickVl (кик, 0=выкл)", c.kickVl, 0.5, 0, 1000,
+        numDouble(gui, 22, admin, Items.IRON_DOOR, Lang.t("kickVl (кик, 0=выкл)"), c.kickVl, 0.5, 0, 1000,
                 v -> c.kickVl = v, () -> openCheckEditor(admin, type));
-        numDouble(gui, 23, admin, Items.CLOCK, "decayPerSecond (спад VL/сек)", c.decayPerSecond, 0.05, 0.05, 100,
+        numDouble(gui, 23, admin, Items.CLOCK, Lang.t("decayPerSecond (спад VL/сек)"), c.decayPerSecond, 0.05, 0.05, 100,
                 v -> c.decayPerSecond = v, () -> openCheckEditor(admin, type));
 
-        gui.button(40, GuiItems.back("к списку проверок"), () -> openChecks(admin));
+        gui.button(40, GuiItems.back(Lang.t("к списку проверок")), () -> openChecks(admin));
         gui.fill(GuiItems.filler());
         gui.open(admin);
     }
@@ -100,18 +109,18 @@ final class ACSettingsMenu {
 
     static void openPunishment(ServerPlayerEntity admin) {
         ACConfig.Punishment p = BastionAC.config().punishment;
-        ChestGui gui = new ChestGui(TextFmt.literal("&8[&cBAC&8] &7Наказания"), 6);
+        ChestGui gui = new ChestGui(TextFmt.literal(Lang.t("&8[&cBAC&8] &7Наказания")), 6);
 
-        toggle(gui, 10, Items.NETHERITE_SWORD, "Авто-темп-бан", p.autoTempbanEnabled,
+        toggle(gui, 10, Items.NETHERITE_SWORD, Lang.t("Авто-темп-бан"), p.autoTempbanEnabled,
                 () -> { p.autoTempbanEnabled = !p.autoTempbanEnabled; saveAnd(admin, () -> openPunishment(admin)); });
-        toggle(gui, 11, Items.BELL, "Оповещать о бане всех", p.broadcastBan,
+        toggle(gui, 11, Items.BELL, Lang.t("Оповещать о бане всех"), p.broadcastBan,
                 () -> { p.broadcastBan = !p.broadcastBan; saveAnd(admin, () -> openPunishment(admin)); });
 
-        numInt(gui, 19, admin, Items.PAPER, "Алертов до бана", p.alertsToBan, 1, 1, 100,
+        numInt(gui, 19, admin, Items.PAPER, Lang.t("Алертов до бана"), p.alertsToBan, 1, 1, 100,
                 v -> p.alertsToBan = v, () -> openPunishment(admin));
-        numInt(gui, 20, admin, Items.CLOCK, "Окно алертов (мин)", p.alertWindowMinutes, 5, 1, 1440,
+        numInt(gui, 20, admin, Items.CLOCK, Lang.t("Окно алертов (мин)"), p.alertWindowMinutes, 5, 1, 1440,
                 v -> p.alertWindowMinutes = v, () -> openPunishment(admin));
-        numInt(gui, 21, admin, Items.COMPASS, "История банов (часы)", p.banHistoryHours, 6, 1, 8760,
+        numInt(gui, 21, admin, Items.COMPASS, Lang.t("История банов (часы)"), p.banHistoryHours, 6, 1, 8760,
                 v -> p.banHistoryHours = v, () -> openPunishment(admin));
 
         // Escalation ladder (edit existing steps in place).
@@ -120,16 +129,16 @@ final class ACSettingsMenu {
             for (int i = 0; i < p.banStepsHours.size() && slot <= 34; i++, slot++) {
                 final int idx = i;
                 int val = p.banStepsHours.get(i) == null ? 1 : p.banStepsHours.get(i);
-                numInt(gui, slot, admin, Items.IRON_BARS, "Ступень " + (i + 1) + " (часы)", val, 1, 1, 8760,
+                numInt(gui, slot, admin, Items.IRON_BARS, Lang.t("Ступень ") + (i + 1) + Lang.t(" (часы)"), val, 1, 1, 8760,
                         v -> p.banStepsHours.set(idx, v), () -> openPunishment(admin));
             }
         }
-        gui.button(16, GuiItems.item(Items.BOOK, "&7Исключённые из бана проверки",
+        gui.button(16, GuiItems.item(Items.BOOK, Lang.t("&7Исключённые из бана проверки"),
                 "&f" + (BastionAC.config().punishment.banExcludedChecks == null ? "—"
                         : String.join(", ", BastionAC.config().punishment.banExcludedChecks)),
-                "&8Правится в config.json"), () -> {});
+                Lang.t("&8Правится в config.json")), () -> {});
 
-        gui.button(49, GuiItems.back("в панель"), () -> ACPanel.open(admin));
+        gui.button(49, GuiItems.back(Lang.t("в панель")), () -> ACPanel.open(admin));
         gui.fill(GuiItems.filler());
         gui.open(admin);
     }
@@ -137,15 +146,15 @@ final class ACSettingsMenu {
     // ------------------------------------------------------------------ widgets
 
     private static void toggle(ChestGui gui, int slot, Item icon, String name, boolean value, Runnable onFlip) {
-        gui.set(slot, GuiItems.item(icon, (value ? "&a" : "&c") + name + ": " + (value ? "&aВКЛ" : "&cВЫКЛ"),
-                "&8➜ клик — переключить"), (p, t) -> onFlip.run());
+        gui.set(slot, GuiItems.item(icon, (value ? "&a" : "&c") + name + ": " + (value ? Lang.t("&aВКЛ") : Lang.t("&cВЫКЛ")),
+                Lang.t("&8➜ клик — переключить")), (p, t) -> onFlip.run());
     }
 
     private static void numInt(ChestGui gui, int slot, ServerPlayerEntity admin, Item icon, String label,
                                int value, int step, int min, int max, IntConsumer setter, Runnable reopen) {
         gui.set(slot, GuiItems.item(icon, "&e" + label,
-                        "&fЗначение: &a" + value,
-                        "&8ЛКМ +" + step + " · ПКМ −" + step, "&8Shift — ввести точно"),
+                        Lang.t("&fЗначение: &a") + value,
+                        Lang.t("&8ЛКМ +") + step + Lang.t(" · ПКМ −") + step, Lang.t("&8Shift — ввести точно")),
                 (p, t) -> {
                     if (t.shift()) {
                         AnvilGui.open(admin, "&7" + label, String.valueOf(value), s -> {
@@ -167,8 +176,8 @@ final class ACSettingsMenu {
     private static void numDouble(ChestGui gui, int slot, ServerPlayerEntity admin, Item icon, String label,
                                   double value, double step, double min, double max, DoubleConsumer setter, Runnable reopen) {
         gui.set(slot, GuiItems.item(icon, "&e" + label,
-                        "&fЗначение: &a" + disp(value),
-                        "&8ЛКМ +" + fmt(step) + " · ПКМ −" + fmt(step), "&8Shift — ввести точно"),
+                        Lang.t("&fЗначение: &a") + disp(value),
+                        Lang.t("&8ЛКМ +") + fmt(step) + Lang.t(" · ПКМ −") + fmt(step), Lang.t("&8Shift — ввести точно")),
                 (p, t) -> {
                     if (t.shift()) {
                         AnvilGui.open(admin, "&7" + label, fmt(value), s -> {
@@ -198,7 +207,7 @@ final class ACSettingsMenu {
     private static String fmt(double v) { return String.format(Locale.ROOT, "%.2f", v); }
 
     /** Threshold display: "выкл" for a disabled (≤0) threshold. */
-    private static String disp(double v) { return v <= 0 ? "выкл" : fmt(v); }
+    private static String disp(double v) { return v <= 0 ? Lang.t("выкл") : fmt(v); }
 
     private ACSettingsMenu() {}
 }

@@ -1,5 +1,6 @@
 package dev.bastionclaims.core;
 
+import dev.bastionclaims.util.Lang;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.block.BlockState;
 import net.minecraft.registry.Registries;
@@ -44,10 +45,10 @@ public final class MaxCoreBridge {
      */
     public static String stateLine(ServerPlayerEntity p) {
         resolve();
-        if (isActive == null) return "&8Режим стройки: мод MaxCore не отвечает";
+        if (isActive == null) return Lang.t("&8Режим стройки: мод MaxCore не отвечает");
         return isBuilding(p)
-                ? "&e⚠ Режим стройки: &cВКЛ&e — хранилища и сундуки закрывает ОН, не приват"
-                : "&7Режим стройки: &aВЫКЛ";
+                ? Lang.t("&e⚠ Режим стройки: &cВКЛ&e — хранилища и сундуки закрывает ОН, не приват")
+                : Lang.t("&7Режим стройки: &aВЫКЛ");
     }
 
     /** Whether this player is currently in MaxCore's build mode. */

@@ -119,7 +119,7 @@ public final class BanManager {
 
         int hours = banHours(priorBans, cfg.banStepsHours);
         long until = now + hours * 3_600_000L;
-        String reason = TextFmt.strip(cfg.banReason);
+        String reason = TextFmt.strip(Lang.t(cfg.banReason));
         noteBanNetwork(uuid, name, player);
 
         MinecraftServer srv = server;
@@ -130,16 +130,16 @@ public final class BanManager {
                         entry, new Date(now), "BastionAC", new Date(until), reason));
                 ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
                 if (online != null && online.networkHandler != null) {
-                    online.networkHandler.disconnect(TextFmt.literal(cfg.banReason
-                            + "\n&7Срок: &f" + formatDuration(hours)));
+                    online.networkHandler.disconnect(TextFmt.literal(Lang.t(cfg.banReason)
+                            + Lang.t("\n&7Срок: &f") + formatDuration(hours)));
                 }
                 if (cfg.broadcastBan) {
                     srv.getPlayerManager().broadcast(TextFmt.literal(
-                            "&8[&cBAC&8] &e" + name + " &7заблокирован автоматически на &f" + formatDuration(hours)), false);
+                            "&8[&cBAC&8] &e" + name + Lang.t(" &7заблокирован автоматически на &f") + formatDuration(hours)), false);
                 }
             });
         }
-        HistoryManager.recordPunishment(HistoryManager.Kind.TEMPBAN, uuid, name, null, hours, "авто-бан по алертам");
+        HistoryManager.recordPunishment(HistoryManager.Kind.TEMPBAN, uuid, name, null, hours, Lang.t("авто-бан по алертам"));
         BastionAC.LOGGER.warn("[TEMPBAN] {} banned for {}h (prior bans in window: {})", name, hours, priorBans);
     }
 
@@ -187,7 +187,7 @@ public final class BanManager {
         int hours = banHours(priorBans, cfg.banStepsHours);
         final int fHours = hours;
         long until = now + hours * 3_600_000L;
-        String reason = "BastionAC: цепочка нарушений (" + (kinds == null || kinds.isEmpty() ? "несколько проверок" : kinds) + ")";
+        String reason = Lang.t("BastionAC: цепочка нарушений (") + (kinds == null || kinds.isEmpty() ? Lang.t("несколько проверок") : kinds) + ")";
 
         // Network context FIRST: the registry entry is what the log line and
         // the admin UI read below — a chain ban must appear on the "Network"
@@ -201,11 +201,11 @@ public final class BanManager {
             ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
             if (online != null && online.networkHandler != null) {
                 online.networkHandler.disconnect(TextFmt.literal(
-                        "&c&lВы заблокированы.\n&7Причина: подтверждённая цепочка нарушений.\n&7Обжалование: официальный канал MaxCora."));
+                        Lang.t("&c&lВы заблокированы.\n&7Причина: подтверждённая цепочка нарушений.\n&7Обжалование: официальный канал MaxCora.")));
             }
             if (cfg.broadcastBan) {
                 srv.getPlayerManager().broadcast(TextFmt.literal(
-                        "&8[&cBAC&8] &e" + name + " &7заблокирован по цепочке атак на &f"
+                        "&8[&cBAC&8] &e" + name + Lang.t(" &7заблокирован по цепочке атак на &f")
                                 + formatDuration(fHours)), false);
             }
         });
@@ -245,20 +245,20 @@ public final class BanManager {
         srv.execute(() -> {
             PlayerConfigEntry entry = new PlayerConfigEntry(uuid, name);
             srv.getPlayerManager().getUserBanList().add(new BannedPlayerEntry(
-                    entry, new Date(now), "Аргус", new Date(until), "Аргус, дело #" + caseId));
+                    entry, new Date(now), Lang.t("Аргус"), new Date(until), Lang.t("Аргус, дело #") + caseId));
             ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
             if (online != null && online.networkHandler != null) {
                 online.networkHandler.disconnect(TextFmt.literal(
-                        "&c&lВы заблокированы.\n&7Причина: решение аналитической системы защиты (дело #" + caseId + ").\n"
-                                + "&7Срок: &f" + formatDuration(hours) + "\n&7Обжалование: официальный канал MaxCore."));
+                        Lang.t("&c&lВы заблокированы.\n&7Причина: решение аналитической системы защиты (дело #") + caseId + Lang.t(").\n"
+                                + "&7Срок: &f") + formatDuration(hours) + Lang.t("\n&7Обжалование: официальный канал MaxCore.")));
             }
             if (cfg.broadcastBan) {
                 srv.getPlayerManager().broadcast(TextFmt.literal(
-                        "&8[&5Аргус&8] &e" + name + " &7заблокирован по итогам расследования на &f" + formatDuration(hours)), false);
+                        Lang.t("&8[&5Аргус&8] &e") + name + Lang.t(" &7заблокирован по итогам расследования на &f") + formatDuration(hours)), false);
             }
         });
         HistoryManager.recordPunishment(HistoryManager.Kind.ARGUS_BAN, uuid, name, "argus", hours,
-                "дело #" + caseId + " (" + by + "): " + reason);
+                Lang.t("дело #") + caseId + " (" + by + "): " + reason);
         BastionAC.LOGGER.warn("[ARGUSBAN] {} banned {}h on case #{} by {} ({})", name, hours, caseId, by, reason);
     }
 
@@ -277,9 +277,9 @@ public final class BanManager {
         srv.execute(() -> {
             if (player.networkHandler != null) {
                 player.networkHandler.disconnect(TextFmt.literal(
-                        "&cСоединение сброшено защитой сервера.\n&7Причина: " + trigger));
+                        Lang.t("&cСоединение сброшено защитой сервера.\n&7Причина: ") + trigger));
             }
-            Alerts.sendNetSignal(name, uuid, trigger, "кик защитой протокола", detail == null ? trigger : detail);
+            Alerts.sendNetSignal(name, uuid, trigger, Lang.t("кик защитой протокола"), detail == null ? trigger : detail);
         });
         BastionAC.LOGGER.warn("[GUARD-KICK] {} kicked: {} ({})", name, trigger, detail);
     }
@@ -359,7 +359,7 @@ public final class BanManager {
             MinecraftServer srv0 = server;
             if (srv0 != null) srv0.execute(() -> {
                 if (player.networkHandler != null) {
-                    player.networkHandler.disconnect(TextFmt.literal("&cСоединение сброшено защитой сервера (" + trigger + ")."));
+                    player.networkHandler.disconnect(TextFmt.literal(Lang.t("&cСоединение сброшено защитой сервера (") + trigger + ")."));
                 }
             });
             return;
@@ -374,7 +374,7 @@ public final class BanManager {
         UUID uuid = player.getUuid();
         String name = player.getGameProfile().name();
         long now = System.currentTimeMillis();
-        String reason = "BastionAC: катастрофическая угроза — " + trigger
+        String reason = Lang.t("BastionAC: катастрофическая угроза — ") + trigger
                 + (detail == null || detail.isBlank() ? "" : " (" + detail + ")");
 
         MinecraftServer srv = server;
@@ -386,12 +386,12 @@ public final class BanManager {
             ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
             if (online != null && online.networkHandler != null) {
                 online.networkHandler.disconnect(TextFmt.literal(
-                        "&c&lВы заблокированы навсегда.\n&7Причина: попытка нарушить работу сервера.\n"
-                                + "&7Обжалование: официальный канал MaxCora."));
+                        Lang.t("&c&lВы заблокированы навсегда.\n&7Причина: попытка нарушить работу сервера.\n"
+                                + "&7Обжалование: официальный канал MaxCora.")));
             }
             if (cfg.broadcastBan) {
                 srv.getPlayerManager().broadcast(TextFmt.literal(
-                        "&8[&cBAC&8] &e" + name + " &7заблокирован навсегда: угроза работе сервера"), false);
+                        "&8[&cBAC&8] &e" + name + Lang.t(" &7заблокирован навсегда: угроза работе сервера")), false);
             }
         });
         HistoryManager.recordPunishment(HistoryManager.Kind.MANUAL_BAN, uuid, name, null, 0,
@@ -412,7 +412,7 @@ public final class BanManager {
         String name = target.getGameProfile().name();
         long now = System.currentTimeMillis();
         long until = now + hours * 3_600_000L;
-        String reason = "Ручной бан BastionAC (" + by + ")";
+        String reason = Lang.t("Ручной бан BastionAC (") + by + ")";
         noteBanNetwork(uuid, name, target, "manual");
 
         Deque<Long> history = BAN_HISTORY.computeIfAbsent(uuid, u -> new ArrayDeque<>());
@@ -428,12 +428,12 @@ public final class BanManager {
             ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
             if (online != null && online.networkHandler != null) {
                 online.networkHandler.disconnect(TextFmt.literal(
-                        "&cВы заблокированы администрацией.\n&7Срок: &f" + formatDuration(hours)));
+                        Lang.t("&cВы заблокированы администрацией.\n&7Срок: &f") + formatDuration(hours)));
             }
             srv.getPlayerManager().broadcast(TextFmt.literal(
-                    "&8[&cBAC&8] &e" + name + " &7заблокирован администратором на &f" + formatDuration(hours)), false);
+                    "&8[&cBAC&8] &e" + name + Lang.t(" &7заблокирован администратором на &f") + formatDuration(hours)), false);
         });
-        HistoryManager.recordPunishment(HistoryManager.Kind.MANUAL_BAN, uuid, name, null, hours, "админ: " + by);
+        HistoryManager.recordPunishment(HistoryManager.Kind.MANUAL_BAN, uuid, name, null, hours, Lang.t("админ: ") + by);
         BastionAC.LOGGER.warn("[MANUALBAN] {} banned by {} for {}h", name, by, hours);
     }
 
@@ -445,7 +445,7 @@ public final class BanManager {
         boolean was = srv.getPlayerManager().getUserBanList().get(entry) != null;
         srv.getPlayerManager().getUserBanList().remove(entry);
         if (was) {
-            HistoryManager.recordPunishment(HistoryManager.Kind.UNBAN, uuid, name, null, 0, "админ: " + by);
+            HistoryManager.recordPunishment(HistoryManager.Kind.UNBAN, uuid, name, null, 0, Lang.t("админ: ") + by);
             BastionAC.LOGGER.info("[UNBAN] {} unbanned by {}", name, by);
         }
         return was;
@@ -467,9 +467,9 @@ public final class BanManager {
     }
 
     public static String formatDuration(int hours) {
-        if (hours % 168 == 0) return (hours / 168) + " нед.";
-        if (hours % 24 == 0) return (hours / 24) + " дн.";
-        return hours + " ч.";
+        if (hours % 168 == 0) return (hours / 168) + Lang.t(" нед.");
+        if (hours % 24 == 0) return (hours / 24) + Lang.t(" дн.");
+        return hours + Lang.t(" ч.");
     }
 
     // ------------------------------------------------------------------

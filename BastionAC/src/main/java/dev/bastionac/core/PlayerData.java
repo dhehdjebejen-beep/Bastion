@@ -431,6 +431,8 @@ public final class PlayerData {
     public double prevMoveX, prevMoveY, prevMoveZ;
     public double lastDy;
     public boolean lastSupport = true;
+    /** The client's own on-ground flag of the previous move, for the ground-speed check. */
+    public boolean lastPacketGround = true;
     public int airTicks;
     public int hoverStreak;
     public int glideStreak;
@@ -818,6 +820,12 @@ public final class PlayerData {
      *  decaying sprint-carry (honest) from a flat-held excess (real NoSlow).
      *  -1 = no sample yet / the judged run was broken. */
     public double noSlowLastHDist = -1;
+    /** Whether the last move packet ended on the ground (claimed and under the feet), for NoSlow's vanilla step. */
+    public boolean noSlowLastGround;
+    /** The same, one packet earlier: the friction of a tick comes from where the tick before began. */
+    public boolean noSlowGroundBefore;
+    /** Vanilla's predicted horizontal step of the last judged tick (-1 = none): NoSlow's running prediction. */
+    public double noSlowShadow = -1;
     /** Slowest judged tick of the current item use (-1 = none yet): honest momentum only ever goes down. */
     public double noSlowMinHDist = -1;
 

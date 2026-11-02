@@ -12,6 +12,7 @@ import dev.bastionclaims.model.Claim;
 import dev.bastionclaims.util.AnvilGui;
 import dev.bastionclaims.util.ChestGui;
 import dev.bastionclaims.util.Fmt;
+import dev.bastionclaims.util.Lang;
 import dev.bastionclaims.util.Teleports;
 import dev.bastionclaims.wand.ClaimWand;
 import net.minecraft.component.DataComponentTypes;
@@ -56,16 +57,16 @@ public final class ClaimMenu {
         int maxClaims = unlimited ? -1 : cfg().maxClaimsFor(hours);
         long maxBlocks = unlimited ? -1 : cfg().maxBlocksFor(hours);
 
-        ChestGui gui = new ChestGui(Fmt.text("&2🛡 Приваты &8» &7" + owner), 6);
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&2🛡 Приваты &8» &7") + owner), 6);
 
         List<String> lore = new ArrayList<>();
-        lore.add("&7Наиграно: &f" + hours + "ч");
-        lore.add("&7Приватов: &f" + claims.size() + (maxClaims < 0 ? " &8(без лимита)" : "&8/&f" + maxClaims));
-        lore.add(maxBlocks < 0 ? "&7Лимит блоков: &fбез лимита" : "&7Лимит блоков: &f" + maxBlocks);
-        gui.set(4, item(Items.WRITABLE_BOOK, "&aТвои лимиты", lore.toArray(new String[0])), null);
+        lore.add(Lang.t("&7Наиграно: &f") + hours + Lang.t("ч"));
+        lore.add(Lang.t("&7Приватов: &f") + claims.size() + (maxClaims < 0 ? Lang.t(" &8(без лимита)") : "&8/&f" + maxClaims));
+        lore.add(maxBlocks < 0 ? Lang.t("&7Лимит блоков: &fбез лимита") : Lang.t("&7Лимит блоков: &f") + maxBlocks);
+        gui.set(4, item(Items.WRITABLE_BOOK, Lang.t("&aТвои лимиты"), lore.toArray(new String[0])), null);
 
-        gui.set(0, item(Items.WOODEN_AXE, "&b🪓 Получить топор",
-                        "&7Выделить область: ЛКМ + ПКМ", "&8➜ клик"),
+        gui.set(0, item(Items.WOODEN_AXE, Lang.t("&b🪓 Получить топор"),
+                        Lang.t("&7Выделить область: ЛКМ + ПКМ"), Lang.t("&8➜ клик")),
                 pl -> {
                     ClaimWand.Give result = ClaimWand.give(pl, cfg());
                     pl.sendMessage(Fmt.text(result.given()
@@ -81,24 +82,24 @@ public final class ClaimMenu {
             // The full-height button sits in the primary slot when it is the
             // default, so the recommended shape is the one under the cursor.
             gui.set(twoDefault ? 7 : 8, item(Items.GRASS_BLOCK,
-                            "&aСоздать приват &2(во всю высоту)" + (twoDefault ? " &8★" : ""),
-                            "&7Площадь основания: &f" + area + " &7блоков",
-                            "&7От бедрока до неба — погреб и крыша",
-                            "&7тоже под защитой",
-                            "&8➜ клик — ввести название"),
-                    pl -> AnvilGui.open(pl, "&2Название привата (во всю высоту)", "",
+                            Lang.t("&aСоздать приват &2(во всю высоту)") + (twoDefault ? " &8★" : ""),
+                            Lang.t("&7Площадь основания: &f") + area + Lang.t(" &7блоков"),
+                            Lang.t("&7От бедрока до неба — погреб и крыша"),
+                            Lang.t("&7тоже под защитой"),
+                            Lang.t("&8➜ клик — ввести название")),
+                    pl -> AnvilGui.open(pl, Lang.t("&2Название привата (во всю высоту)"), "",
                             name -> finishCreate(pl, name, true)));
             gui.set(twoDefault ? 8 : 7, item(Items.EMERALD_BLOCK,
-                            "&aСоздать приват &2(куб 3D)" + (twoDefault ? "" : " &8★"),
-                            "&7Объём выделения: &f" + vol + " &7блоков",
-                            "&7Ровно по двум точкам — выше и ниже",
-                            "&cне защищено",
-                            "&8➜ клик — ввести название"),
-                    pl -> AnvilGui.open(pl, "&2Название привата (куб 3D)", "",
+                            Lang.t("&aСоздать приват &2(куб 3D)") + (twoDefault ? "" : " &8★"),
+                            Lang.t("&7Объём выделения: &f") + vol + Lang.t(" &7блоков"),
+                            Lang.t("&7Ровно по двум точкам — выше и ниже"),
+                            Lang.t("&cне защищено"),
+                            Lang.t("&8➜ клик — ввести название")),
+                    pl -> AnvilGui.open(pl, Lang.t("&2Название привата (куб 3D)"), "",
                             name -> finishCreate(pl, name, false)));
         } else {
-            gui.set(8, item(Items.GRAY_DYE, "&7Область не выделена",
-                    "&8Возьми топор и отметь 2 угла"), null);
+            gui.set(8, item(Items.GRAY_DYE, Lang.t("&7Область не выделена"),
+                    Lang.t("&8Возьми топор и отметь 2 угла")), null);
         }
 
         int pages = Math.max(1, (claims.size() + PER_PAGE - 1) / PER_PAGE);
@@ -109,32 +110,42 @@ public final class ClaimMenu {
             gui.set(slot++, claimIcon(c), pl -> openClaim(pl, c.id));
         }
         if (claims.isEmpty()) {
-            gui.set(22, item(Items.BOOK, "&7У тебя пока нет приватов",
-                    "&8Получи топор, отметь углы,", "&8затем нажми «Создать»"), null);
+            gui.set(22, item(Items.BOOK, Lang.t("&7У тебя пока нет приватов"),
+                    Lang.t("&8Получи топор, отметь углы,"), Lang.t("&8затем нажми «Создать»")), null);
         }
         if (pages > 1) {
             int prev = shown - 1, next = shown + 1;
             if (shown > 0) {
-                gui.set(46, item(Items.ARROW, "&7← Пред. страница",
-                        "&8" + (shown + 1) + " из " + pages, "&8▸ нажми"), pl -> open(pl, prev));
+                gui.set(46, item(Items.ARROW, Lang.t("&7← Пред. страница"),
+                        "&8" + (shown + 1) + Lang.t(" из ") + pages, Lang.t("&8▸ нажми")), pl -> open(pl, prev));
             }
             if (next < pages) {
-                gui.set(52, item(Items.ARROW, "&7След. страница →",
-                        "&8" + (shown + 1) + " из " + pages, "&8▸ нажми"), pl -> open(pl, next));
+                gui.set(52, item(Items.ARROW, Lang.t("&7След. страница →"),
+                        "&8" + (shown + 1) + Lang.t(" из ") + pages, Lang.t("&8▸ нажми")), pl -> open(pl, next));
             }
         }
 
-        gui.set(49, item(Items.KNOWLEDGE_BOOK, "&e❓ Как пользоваться приватами",
-                "&7Гайд: создание, флаги, лимиты, команды", "&8➜ открыть"), ClaimMenu::openHelp);
+        gui.set(49, item(Items.KNOWLEDGE_BOOK, Lang.t("&e❓ Как пользоваться приватами"),
+                Lang.t("&7Гайд: создание, флаги, лимиты, команды"), Lang.t("&8➜ открыть")), ClaimMenu::openHelp);
 
         if (maxCoreLoaded()) {
-            gui.set(45, item(Items.COMPASS, "&9◀ Приложение МАХ",
-                    "&7Вернуться в главное меню сервера", "&8▸ нажми"), ClaimMenu::backToApp);
+            gui.set(45, item(Items.COMPASS, Lang.t("&9◀ Приложение МАХ"),
+                    Lang.t("&7Вернуться в главное меню сервера"), Lang.t("&8▸ нажми")), ClaimMenu::backToApp);
         }
 
         if (ProtectionService.isOp(p)) {
-            gui.set(53, item(Items.ENDER_EYE, "&c⚙ Все приваты сервера",
-                    "&7Управление любым приватом (админ)", "&8➜ клик"), pl -> openAll(pl, 0));
+            gui.set(53, item(Items.ENDER_EYE, Lang.t("&c⚙ Все приваты сервера"),
+                    Lang.t("&7Управление любым приватом (админ)"), Lang.t("&8➜ клик")), pl -> openAll(pl, 0));
+            gui.set(51, item(Items.GLOBE_BANNER_PATTERN, Lang.t("&b🌐 Язык: &f") + Lang.displayName(Lang.code()),
+                    Lang.t("&7Для всех сообщений и меню приватов"), Lang.t("&7на всём сервере."),
+                    Lang.t("&8➜ клик — следующий язык")), pl -> {
+                        try {
+                            BastionClaims.setLanguage(Lang.next());
+                        } catch (Exception e) {
+                            BastionClaims.LOGGER.warn("Could not save the language to config.json", e);
+                        }
+                        open(pl);
+                    });
         }
 
         gui.fill(filler());
@@ -144,91 +155,91 @@ public final class ClaimMenu {
     // ------------------------------------------------------------------ help / guide
 
     public static void openHelp(ServerPlayerEntity p) {
-        ChestGui gui = new ChestGui(Fmt.text("&2🛡 Приваты &8» &7Как пользоваться"), 6);
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&2🛡 Приваты &8» &7Как пользоваться")), 6);
 
-        gui.set(4, item(Items.WRITABLE_BOOK, "&aГайд по приватам",
-                "&7Приват — это защищённая зона.",
-                "&7Внутри строить и открывать сундуки",
-                "&7можешь только ты и доверенные."), null);
+        gui.set(4, item(Items.WRITABLE_BOOK, Lang.t("&aГайд по приватам"),
+                Lang.t("&7Приват — это защищённая зона."),
+                Lang.t("&7Внутри строить и открывать сундуки"),
+                Lang.t("&7можешь только ты и доверенные.")), null);
 
-        gui.set(19, item(Items.WOODEN_AXE, "&b1. Как создать приват",
-                "&7• Возьми топор: &f/claim wand&7 (или кнопка)",
-                "&7• &fЛКМ&7 по блоку — 1-й угол",
-                "&7• &fПКМ&7 по блоку — 2-й угол",
-                "&7• Нажми «Создать» в меню или &f/claim create <имя>"), null);
+        gui.set(19, item(Items.WOODEN_AXE, Lang.t("&b1. Как создать приват"),
+                Lang.t("&7• Возьми топор: &f/claim wand&7 (или кнопка)"),
+                Lang.t("&7• &fЛКМ&7 по блоку — 1-й угол"),
+                Lang.t("&7• &fПКМ&7 по блоку — 2-й угол"),
+                Lang.t("&7• Нажми «Создать» в меню или &f/claim create <имя>")), null);
 
-        gui.set(20, item(Items.GRASS_BLOCK, "&b2. Форма привата",
-                "&aВо всю высоту&7 — от бедрока до неба,",
-                "&7лимит по площади. Это то, что нужно почти всегда:",
-                "&7погреб и крыша защищены тоже.",
-                "&8   &f/claim create2d <имя>",
-                "&aКуб 3D&7 — ровно по двум точкам, лимит по объёму.",
-                "&8   &f/claim create3d <имя>",
-                "&8Обычный &f/claim create&8 делает "
-                        + (cfg().fullHeightByDefault ? "во всю высоту." : "куб 3D.")), null);
+        gui.set(20, item(Items.GRASS_BLOCK, Lang.t("&b2. Форма привата"),
+                Lang.t("&aВо всю высоту&7 — от бедрока до неба,"),
+                Lang.t("&7лимит по площади. Это то, что нужно почти всегда:"),
+                Lang.t("&7погреб и крыша защищены тоже."),
+                Lang.t("&8   &f/claim create2d <имя>"),
+                Lang.t("&aКуб 3D&7 — ровно по двум точкам, лимит по объёму."),
+                Lang.t("&8   &f/claim create3d <имя>"),
+                Lang.t("&8Обычный &f/claim create&8 делает ")
+                        + (cfg().fullHeightByDefault ? Lang.t("во всю высоту.") : Lang.t("куб 3D."))), null);
 
         List<String> limits = new ArrayList<>();
-        limits.add("&7Лимиты растут с наигранным временем:");
+        limits.add(Lang.t("&7Лимиты растут с наигранным временем:"));
         for (ClaimConfig.Tier t : cfg().progression.tiers) {
-            limits.add("&f" + t.minHours + "ч+ &7→ &f" + t.maxClaims + " прив. &7по &f" + t.maxBlocksPerClaim + " &7блоков");
+            limits.add("&f" + t.minHours + Lang.t("ч+ &7→ &f") + t.maxClaims + Lang.t(" прив. &7по &f") + t.maxBlocksPerClaim + Lang.t(" &7блоков"));
         }
-        limits.add("&8У операторов лимитов нет.");
-        gui.set(21, item(Items.CLOCK, "&b3. Лимиты и часы", limits.toArray(new String[0])), null);
+        limits.add(Lang.t("&8У операторов лимитов нет."));
+        gui.set(21, item(Items.CLOCK, Lang.t("&b3. Лимиты и часы"), limits.toArray(new String[0])), null);
 
-        gui.set(22, item(Items.REDSTONE, "&b4. Флаги привата",
-                "&fpvp&7 — можно ли драться внутри",
-                "&fmobs&7 — грифинг мобами (криперы)",
-                "&fmobdmg&7 — урон игроку от мобов",
-                "&fexplosions&7 — взрывы ТНТ ломают блоки",
-                "&ffluids&7 — жидкости затекают извне",
-                "&fpistons&7 — поршни извне двигают блоки",
-                "&fhoppers&7 — воронки извне лезут в сундуки",
-                "&fcontainers&8/&fdoors&7 — доступ гостям",
-                "&8Всё ВЫКЛ = приват защищён. Меню или /claim flag"), null);
+        gui.set(22, item(Items.REDSTONE, Lang.t("&b4. Флаги привата"),
+                Lang.t("&fpvp&7 — можно ли драться внутри"),
+                Lang.t("&fmobs&7 — грифинг мобами (криперы)"),
+                Lang.t("&fmobdmg&7 — урон игроку от мобов"),
+                Lang.t("&fexplosions&7 — взрывы ТНТ ломают блоки"),
+                Lang.t("&ffluids&7 — жидкости затекают извне"),
+                Lang.t("&fpistons&7 — поршни извне двигают блоки"),
+                Lang.t("&fhoppers&7 — воронки извне лезут в сундуки"),
+                Lang.t("&fcontainers&8/&fdoors&7 — доступ гостям"),
+                Lang.t("&8Всё ВЫКЛ = приват защищён. Меню или /claim flag")), null);
 
-        gui.set(23, head(p.getGameProfile().name(), "&b5. Пользователи привата",
-                "&7Дай друзьям строить в привате:",
-                "&f/claim add <ник>&7 (стоя внутри)",
-                "&7или кнопка-голова в меню привата.",
-                "&7Убрать: &f/claim remove <ник>",
-                "&8Пользователь строит, но НЕ управляет приватом:",
-                "&8удалить, переименовать и передать может только владелец."), null);
+        gui.set(23, head(p.getGameProfile().name(), Lang.t("&b5. Пользователи привата"),
+                Lang.t("&7Дай друзьям строить в привате:"),
+                Lang.t("&f/claim add <ник>&7 (стоя внутри)"),
+                Lang.t("&7или кнопка-голова в меню привата."),
+                Lang.t("&7Убрать: &f/claim remove <ник>"),
+                Lang.t("&8Пользователь строит, но НЕ управляет приватом:"),
+                Lang.t("&8удалить, переименовать и передать может только владелец.")), null);
 
-        gui.set(24, item(Items.ENDER_PEARL, "&b6. Управление",
-                "&7Открой &f/claim&7 → выбери приват:",
-                "&7телепорт, флаги, доверенные, удаление.",
-                "&8Инфо о привате под ногами: &f/claim info"), null);
+        gui.set(24, item(Items.ENDER_PEARL, Lang.t("&b6. Управление"),
+                Lang.t("&7Открой &f/claim&7 → выбери приват:"),
+                Lang.t("&7телепорт, флаги, доверенные, удаление."),
+                Lang.t("&8Инфо о привате под ногами: &f/claim info")), null);
 
-        gui.set(31, item(Items.PAPER, "&eВсе команды приватов",
-                "&f/claim &7— меню",
-                "&f/claim wand &7— топор для выделения",
-                "&f/claim create <имя> &8/ &fcreate2d <имя>",
-                "&f/claim create2d &8· &fcreate3d &8— форма привата",
-                "&f/claim list &8· &finfo &8· &frename <имя>",
-                "&f/claim add/remove <ник> &7— пользователи",
+        gui.set(31, item(Items.PAPER, Lang.t("&eВсе команды приватов"),
+                Lang.t("&f/claim &7— меню"),
+                Lang.t("&f/claim wand &7— топор для выделения"),
+                Lang.t("&f/claim create <имя> &8/ &fcreate2d <имя>"),
+                Lang.t("&f/claim create2d &8· &fcreate3d &8— форма привата"),
+                Lang.t("&f/claim list &8· &finfo &8· &frename <имя>"),
+                Lang.t("&f/claim add/remove <ник> &7— пользователи"),
                 "&f/claim addzone &8· &fzones &8· &fdelzone <n>",
-                "&f/claim borders &7— показать границы частицами",
-                "&f/claim flag <флаг> on|off",
-                "&f/claim transfer <ник> &7— отдать приват насовсем",
-                "&f/claim delete &7(с подтверждением)"), null);
+                Lang.t("&f/claim borders &7— показать границы частицами"),
+                Lang.t("&f/claim flag <флаг> on|off"),
+                Lang.t("&f/claim transfer <ник> &7— отдать приват насовсем"),
+                Lang.t("&f/claim delete &7(с подтверждением)")), null);
 
         if (ProtectionService.isOp(p)) {
-            gui.set(33, item(Items.DIAMOND_PICKAXE, "&c⚙ WorldEdit &8(только операторы)",
-                    "&7Тот же топор, но для правки мира:",
-                    "&f/we set <блок> &8· &freplace <из> на <в>",
+            gui.set(33, item(Items.DIAMOND_PICKAXE, Lang.t("&c⚙ WorldEdit &8(только операторы)"),
+                    Lang.t("&7Тот же топор, но для правки мира:"),
+                    Lang.t("&f/we set <блок> &8· &freplace <из> на <в>"),
                     "&f/we copy &8· &fpaste &8· &frotate &8· &fflip",
-                    "&f/we stack <раз> &8· &fmove <блоков>",
+                    Lang.t("&f/we stack <раз> &8· &fmove <блоков>"),
                     "&f/we undo &8· &fredo",
-                    "&8Полный список: &f/we"), null);
-            gui.set(29, item(Items.COMMAND_BLOCK, "&c⚙ Чужие приваты &8(только операторы)",
-                    "&f/claims here &7— управление приватом под ногами",
-                    "&f/claims manage <ник> <название>",
-                    "&f/claims flag <ник> <флаг> on|off <название>",
-                    "&f/claims delete <ник> <название>",
-                    "&7Или: меню → «Все приваты сервера» → клик"), null);
+                    Lang.t("&8Полный список: &f/we")), null);
+            gui.set(29, item(Items.COMMAND_BLOCK, Lang.t("&c⚙ Чужие приваты &8(только операторы)"),
+                    Lang.t("&f/claims here &7— управление приватом под ногами"),
+                    Lang.t("&f/claims manage <ник> <название>"),
+                    Lang.t("&f/claims flag <ник> <флаг> on|off <название>"),
+                    Lang.t("&f/claims delete <ник> <название>"),
+                    Lang.t("&7Или: меню → «Все приваты сервера» → клик")), null);
         }
 
-        gui.set(49, item(Items.ARROW, "&7← Назад"), ClaimMenu::open);
+        gui.set(49, item(Items.ARROW, Lang.t("&7← Назад")), ClaimMenu::open);
         gui.fill(filler());
         gui.open(p);
     }
@@ -245,70 +256,70 @@ public final class ClaimMenu {
         Claim c = find(p, claimId);
         if (c == null) { open(p); return; }
         boolean foreign = !c.isOwner(p.getUuid());
-        ChestGui gui = new ChestGui(Fmt.text((foreign ? "&c⚙ Чужой приват &8» &7" : "&2🛡 Приват &8» &7") + c.name), 4);
+        ChestGui gui = new ChestGui(Fmt.text((foreign ? Lang.t("&c⚙ Чужой приват &8» &7") : Lang.t("&2🛡 Приват &8» &7")) + c.name), 4);
 
         gui.set(4, claimIcon(c), null);
         if (foreign) {
             // An operator managing someone else's land: every button below acts
             // on the stranger's claim, so the screen says so in plain words.
-            gui.set(0, head(c.owner, "&c⚠ Владелец: &f" + c.owner,
-                    "&7Ты управляешь чужим приватом",
-                    "&7правами оператора: флаги, пользователи,",
-                    "&7передача и удаление действуют на него."), null);
+            gui.set(0, head(c.owner, Lang.t("&c⚠ Владелец: &f") + c.owner,
+                    Lang.t("&7Ты управляешь чужим приватом"),
+                    Lang.t("&7правами оператора: флаги, пользователи,"),
+                    Lang.t("&7передача и удаление действуют на него.")), null);
         }
 
-        gui.set(9, item(Items.ENDER_PEARL, "&aТелепорт к привату",
-                        "&7Безопасная точка внутри", "&8➜ клик"),
+        gui.set(9, item(Items.ENDER_PEARL, Lang.t("&aТелепорт к привату"),
+                        Lang.t("&7Безопасная точка внутри"), Lang.t("&8➜ клик")),
                 pl -> {
                     pl.closeHandledScreen();
                     ServerWorld w = resolve(pl, c.dim);
                     if (w == null) return;
                     if (Teleports.toClaimSafely(pl, w, c)) {
-                        pl.sendMessage(Fmt.text("&aТелепорт к привату &f" + c.name + " 🛡"), false);
+                        pl.sendMessage(Fmt.text(Lang.t("&aТелепорт к привату &f") + c.name + " 🛡"), false);
                     } else {
-                        pl.sendMessage(Fmt.text("&cВнутри привата негде встать — всё заполнено. "
-                                + "&7Освободи место и повтори."), false);
+                        pl.sendMessage(Fmt.text(Lang.t("&cВнутри привата негде встать — всё заполнено. "
+                                + "&7Освободи место и повтори.")), false);
                     }
                 });
 
         // Row 2 — behaviour flags (ВКЛ = разрешено). Default is "protected" (ВЫКЛ).
-        gui.set(10, flagIcon(c.allowFireSpread ? Items.CAMPFIRE : Items.FLINT_AND_STEEL, "Огонь", c.allowFireSpread),
-                pl -> { ClaimManager.setFireSpread(c, !c.allowFireSpread); openClaim(pl, claimId); });
-        gui.set(11, flagIcon(c.allowPvp ? Items.DIAMOND_SWORD : Items.SHIELD, "PvP", c.allowPvp),
-                pl -> { ClaimManager.setPvp(c, !c.allowPvp); openClaim(pl, claimId); });
-        gui.set(12, flagIcon(c.allowMobGriefing ? Items.TNT : Items.GRASS_BLOCK, "Мобгриф", c.allowMobGriefing),
-                pl -> { ClaimManager.setMobGriefing(c, !c.allowMobGriefing); openClaim(pl, claimId); });
-        gui.set(13, flagIcon(c.allowMobDamage ? Items.ZOMBIE_HEAD : Items.GOLDEN_APPLE, "Урон от мобов", c.allowMobDamage),
-                pl -> { ClaimManager.setMobDamage(c, !c.allowMobDamage); openClaim(pl, claimId); });
-        gui.set(14, flagIcon(Items.TNT_MINECART, "Взрывы (ТНТ)", c.allowExplosions),
-                pl -> { ClaimManager.setExplosions(c, !c.allowExplosions); openClaim(pl, claimId); });
-        gui.set(15, flagIcon(Items.WATER_BUCKET, "Затекание жидкостей", c.allowFluidFlow),
-                pl -> { ClaimManager.setFluidFlow(c, !c.allowFluidFlow); openClaim(pl, claimId); });
-        gui.set(16, flagIcon(Items.PISTON, "Поршни извне", c.allowPistons),
-                pl -> { ClaimManager.setPistons(c, !c.allowPistons); openClaim(pl, claimId); });
-        gui.set(17, flagIcon(Items.HOPPER, "Воронки извне", c.allowHoppers),
-                pl -> { ClaimManager.setHoppers(c, !c.allowHoppers); openClaim(pl, claimId); });
+        gui.set(10, flagIcon(p, "fire", c.allowFireSpread ? Items.CAMPFIRE : Items.FLINT_AND_STEEL, Lang.t("Огонь"), c.allowFireSpread),
+                pl -> { if (flagLocked(pl, "fire")) return; ClaimManager.setFireSpread(c, !c.allowFireSpread); openClaim(pl, claimId); });
+        gui.set(11, flagIcon(p, "pvp", c.allowPvp ? Items.DIAMOND_SWORD : Items.SHIELD, "PvP", c.allowPvp),
+                pl -> { if (flagLocked(pl, "pvp")) return; ClaimManager.setPvp(c, !c.allowPvp); openClaim(pl, claimId); });
+        gui.set(12, flagIcon(p, "mobgrief", c.allowMobGriefing ? Items.TNT : Items.GRASS_BLOCK, Lang.t("Мобгриф"), c.allowMobGriefing),
+                pl -> { if (flagLocked(pl, "mobgrief")) return; ClaimManager.setMobGriefing(c, !c.allowMobGriefing); openClaim(pl, claimId); });
+        gui.set(13, flagIcon(p, "mobdmg", c.allowMobDamage ? Items.ZOMBIE_HEAD : Items.GOLDEN_APPLE, Lang.t("Урон от мобов"), c.allowMobDamage),
+                pl -> { if (flagLocked(pl, "mobdmg")) return; ClaimManager.setMobDamage(c, !c.allowMobDamage); openClaim(pl, claimId); });
+        gui.set(14, flagIcon(p, "explosions", Items.TNT_MINECART, Lang.t("Взрывы (ТНТ)"), c.allowExplosions),
+                pl -> { if (flagLocked(pl, "explosions")) return; ClaimManager.setExplosions(c, !c.allowExplosions); openClaim(pl, claimId); });
+        gui.set(15, flagIcon(p, "fluids", Items.WATER_BUCKET, Lang.t("Затекание жидкостей"), c.allowFluidFlow),
+                pl -> { if (flagLocked(pl, "fluids")) return; ClaimManager.setFluidFlow(c, !c.allowFluidFlow); openClaim(pl, claimId); });
+        gui.set(16, flagIcon(p, "pistons", Items.PISTON, Lang.t("Поршни извне"), c.allowPistons),
+                pl -> { if (flagLocked(pl, "pistons")) return; ClaimManager.setPistons(c, !c.allowPistons); openClaim(pl, claimId); });
+        gui.set(17, flagIcon(p, "hoppers", Items.HOPPER, Lang.t("Воронки извне"), c.allowHoppers),
+                pl -> { if (flagLocked(pl, "hoppers")) return; ClaimManager.setHoppers(c, !c.allowHoppers); openClaim(pl, claimId); });
 
         // Row 3 — guest access + trusted players.
-        gui.set(20, flagIcon(Items.CHEST, "Гости: сундуки и станки", c.guestContainers),
-                pl -> { ClaimManager.setGuestContainers(c, !c.guestContainers); openClaim(pl, claimId); });
-        gui.set(21, flagIcon(Items.OAK_DOOR, "Гости: двери/кнопки", c.guestDoors),
-                pl -> { ClaimManager.setGuestDoors(c, !c.guestDoors); openClaim(pl, claimId); });
-        gui.set(22, flagIcon(Items.LEAD, "Гости: существа", c.guestEntities),
-                pl -> { ClaimManager.setGuestEntities(c, !c.guestEntities); openClaim(pl, claimId); });
-        gui.set(23, head(p.getGameProfile().name(), "&fПользователи привата",
-                        "&7Сейчас: &f" + (c.members.isEmpty() ? "никого" : c.members.size()),
-                        "&7Могут строить и открывать сундуки.",
-                        "&8Управлять приватом — только владелец.",
-                        "&8➜ клик — выбрать из онлайна"),
+        gui.set(20, flagIcon(p, "containers", Items.CHEST, Lang.t("Гости: сундуки и станки"), c.guestContainers),
+                pl -> { if (flagLocked(pl, "containers")) return; ClaimManager.setGuestContainers(c, !c.guestContainers); openClaim(pl, claimId); });
+        gui.set(21, flagIcon(p, "doors", Items.OAK_DOOR, Lang.t("Гости: двери/кнопки"), c.guestDoors),
+                pl -> { if (flagLocked(pl, "doors")) return; ClaimManager.setGuestDoors(c, !c.guestDoors); openClaim(pl, claimId); });
+        gui.set(22, flagIcon(p, "entities", Items.LEAD, Lang.t("Гости: существа"), c.guestEntities),
+                pl -> { if (flagLocked(pl, "entities")) return; ClaimManager.setGuestEntities(c, !c.guestEntities); openClaim(pl, claimId); });
+        gui.set(23, head(p.getGameProfile().name(), Lang.t("&fПользователи привата"),
+                        Lang.t("&7Сейчас: &f") + (c.members.isEmpty() ? Lang.t("никого") : c.members.size()),
+                        Lang.t("&7Могут строить и открывать сундуки."),
+                        Lang.t("&8Управлять приватом — только владелец."),
+                        Lang.t("&8➜ клик — выбрать из онлайна")),
                 pl -> openTrust(pl, claimId));
 
         int roleCount = c.roles == null ? 0 : c.roles.size();
-        gui.set(24, item(Items.NAME_TAG, "&fРоли привата &8(" + roleCount + ")",
-                        "&7Наборы прав для пользователей:",
-                        "&7стройка, сундуки, двери, существа.",
-                        "&8Без роли пользователь может всё.",
-                        "&8➜ клик — роли"),
+        gui.set(24, item(Items.NAME_TAG, Lang.t("&fРоли привата &8(") + roleCount + ")",
+                        Lang.t("&7Наборы прав для пользователей:"),
+                        Lang.t("&7стройка, сундуки, двери, существа."),
+                        Lang.t("&8Без роли пользователь может всё."),
+                        Lang.t("&8➜ клик — роли")),
                 pl -> openRoles(pl, claimId));
 
         // Zones: one claim can be several cuboids, so a base does not have to
@@ -316,13 +327,13 @@ public final class ClaimMenu {
         Selection sel = Selection.of(p.getUuid());
         boolean ready = sel.complete() && c.dim.equals(sel.dim);
         gui.set(25, item(ready ? Items.EMERALD_BLOCK : Items.GRAY_DYE,
-                        "&a➕ Добавить зону &8(зон: " + c.zoneCount() + "/" + cfg().maxZonesPerClaim + ")",
-                        "&7Приват может состоять из нескольких кубов.",
-                        "&7Выдели топором новый кусок и нажми здесь —",
-                        "&7он станет частью ЭТОГО привата, а не новым.",
-                        ready ? "&aВыделение готово: " + sel.sizeX() + "×" + sel.sizeY() + "×" + sel.sizeZ()
-                              : "&cСначала выдели область топором в этом же мире",
-                        "&8➜ клик"),
+                        Lang.t("&a➕ Добавить зону &8(зон: ") + c.zoneCount() + "/" + cfg().maxZonesPerClaim + ")",
+                        Lang.t("&7Приват может состоять из нескольких кубов."),
+                        Lang.t("&7Выдели топором новый кусок и нажми здесь —"),
+                        Lang.t("&7он станет частью ЭТОГО привата, а не новым."),
+                        ready ? Lang.t("&aВыделение готово: ") + sel.sizeX() + "×" + sel.sizeY() + "×" + sel.sizeZ()
+                              : Lang.t("&cСначала выдели область топором в этом же мире"),
+                        Lang.t("&8➜ клик")),
                 pl -> {
                     Claim fresh = find(pl, claimId);
                     if (fresh == null) { open(pl); return; }
@@ -331,13 +342,13 @@ public final class ClaimMenu {
                     openClaim(pl, claimId);
                 });
 
-        gui.set(27, item(Items.ARROW, "&7← Назад"), ClaimMenu::open);
-        gui.set(31, item(Items.WRITABLE_BOOK, "&e📜 Передать приват",
-                        "&7Отдать другому игроку насовсем.",
-                        "&cТы потеряешь доступ.",
-                        "&8➜ клик — выбрать игрока"),
+        gui.set(27, item(Items.ARROW, Lang.t("&7← Назад")), ClaimMenu::open);
+        gui.set(31, item(Items.WRITABLE_BOOK, Lang.t("&e📜 Передать приват"),
+                        Lang.t("&7Отдать другому игроку насовсем."),
+                        Lang.t("&cТы потеряешь доступ."),
+                        Lang.t("&8➜ клик — выбрать игрока")),
                 pl -> openTransfer(pl, claimId));
-        gui.set(35, item(Items.BARRIER, "&cУдалить приват", "&8➜ клик — подтвердить"),
+        gui.set(35, item(Items.BARRIER, Lang.t("&cУдалить приват"), Lang.t("&8➜ клик — подтвердить")),
                 pl -> openDeleteConfirm(pl, claimId));
 
         gui.fill(filler());
@@ -347,8 +358,8 @@ public final class ClaimMenu {
     private static void openDeleteConfirm(ServerPlayerEntity p, String claimId) {
         Claim c = find(p, claimId);
         if (c == null) { open(p); return; }
-        ChestGui gui = new ChestGui(Fmt.text("&cУдалить приват &7" + c.name + "&c?"), 3);
-        gui.set(11, item(Items.LIME_WOOL, "&aДа, удалить", "&8Отменить нельзя"),
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&cУдалить приват &7") + c.name + "&c?"), 3);
+        gui.set(11, item(Items.LIME_WOOL, Lang.t("&aДа, удалить"), Lang.t("&8Отменить нельзя")),
                 pl -> {
                     // Re-resolve instead of using the captured claim: ownership
                     // can change between opening this screen and confirming.
@@ -359,7 +370,7 @@ public final class ClaimMenu {
                     pl.sendMessage(Fmt.text(cfg().message("delete.success", name)), false);
                     open(pl);
                 });
-        gui.set(15, item(Items.RED_WOOL, "&cНет, оставить"), pl -> openClaim(pl, claimId));
+        gui.set(15, item(Items.RED_WOOL, Lang.t("&cНет, оставить")), pl -> openClaim(pl, claimId));
         gui.fill(filler());
         gui.open(p);
     }
@@ -369,13 +380,13 @@ public final class ClaimMenu {
     private static void openTransfer(ServerPlayerEntity p, String claimId) {
         Claim c = find(p, claimId);
         if (c == null) { open(p); return; }
-        ChestGui gui = new ChestGui(Fmt.text("&e📜 Передать &8» &7" + c.name), 6);
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&e📜 Передать &8» &7") + c.name), 6);
 
-        gui.set(4, item(Items.WRITABLE_BOOK, "&eКому передать приват «" + c.name + "»?",
-                "&7Новый владелец получает всё:",
-                "&7блоки, сундуки, флаги, доверенных.",
-                "&cТы теряешь доступ полностью.",
-                "&8Игрок должен быть в сети."), null);
+        gui.set(4, item(Items.WRITABLE_BOOK, Lang.t("&eКому передать приват «") + c.name + "»?",
+                Lang.t("&7Новый владелец получает всё:"),
+                Lang.t("&7блоки, сундуки, флаги, доверенных."),
+                Lang.t("&cТы теряешь доступ полностью."),
+                Lang.t("&8Игрок должен быть в сети.")), null);
 
         int slot = 9;
         for (ServerPlayerEntity online : p.getEntityWorld().getServer().getPlayerManager().getPlayerList()) {
@@ -384,18 +395,18 @@ public final class ClaimMenu {
             String n = online.getGameProfile().name();
             String problem = ClaimService.transferProblem(online, c);
             if (problem != null) {
-                gui.set(slot++, head(n, "&8" + n, "&cНе может принять:", "&8" + Fmt.strip(problem)), null);
+                gui.set(slot++, head(n, "&8" + n, Lang.t("&cНе может принять:"), "&8" + Fmt.strip(problem)), null);
             } else {
-                gui.set(slot++, head(n, "&f" + n, "&8➜ клик — передать этому игроку"),
+                gui.set(slot++, head(n, "&f" + n, Lang.t("&8➜ клик — передать этому игроку")),
                         pl -> openTransferConfirm(pl, claimId, n));
             }
         }
         if (slot == 9) {
-            gui.set(22, item(Items.BOOK, "&7Больше никого нет в сети",
-                    "&8Передать можно только игроку онлайн"), null);
+            gui.set(22, item(Items.BOOK, Lang.t("&7Больше никого нет в сети"),
+                    Lang.t("&8Передать можно только игроку онлайн")), null);
         }
 
-        gui.set(49, item(Items.ARROW, "&7← Назад"), pl -> openClaim(pl, claimId));
+        gui.set(49, item(Items.ARROW, Lang.t("&7← Назад")), pl -> openClaim(pl, claimId));
         gui.fill(filler());
         gui.open(p);
     }
@@ -403,10 +414,10 @@ public final class ClaimMenu {
     private static void openTransferConfirm(ServerPlayerEntity p, String claimId, String targetName) {
         Claim c = find(p, claimId);
         if (c == null) { open(p); return; }
-        ChestGui gui = new ChestGui(Fmt.text("&eПередать &7" + c.name + "&e игроку " + targetName + "?"), 3);
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&eПередать &7") + c.name + Lang.t("&e игроку ") + targetName + "?"), 3);
 
-        gui.set(11, item(Items.LIME_WOOL, "&aДа, передать",
-                        "&cОтменить будет нельзя —", "&cтолько новый владелец сможет вернуть"),
+        gui.set(11, item(Items.LIME_WOOL, Lang.t("&aДа, передать"),
+                        Lang.t("&cОтменить будет нельзя —"), Lang.t("&cтолько новый владелец сможет вернуть")),
                 pl -> {
                     Claim fresh = find(pl, claimId);
                     ServerPlayerEntity target = pl.getEntityWorld().getServer()
@@ -425,7 +436,7 @@ public final class ClaimMenu {
                     ClaimCommands.doTransfer(pl, fresh, target);
                     pl.closeHandledScreen();
                 });
-        gui.set(15, item(Items.RED_WOOL, "&cНет, оставить себе"), pl -> openClaim(pl, claimId));
+        gui.set(15, item(Items.RED_WOOL, Lang.t("&cНет, оставить себе")), pl -> openClaim(pl, claimId));
         gui.fill(filler());
         gui.open(p);
     }
@@ -435,16 +446,16 @@ public final class ClaimMenu {
     private static void openTrust(ServerPlayerEntity p, String claimId) {
         Claim c = find(p, claimId);
         if (c == null) { open(p); return; }
-        ChestGui gui = new ChestGui(Fmt.text("&2🛡 Пользователи &8» &7" + c.name), 6);
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&2🛡 Пользователи &8» &7") + c.name), 6);
 
         // Row 0: current users — click a head to pick a role or remove.
         int slot = 0;
         for (String m : new ArrayList<>(c.members)) {
             if (slot >= 9) break;
-            String role = c.roleOf(Claim.offlineUuid(m));
+            String role = c.roleOf(ClaimManager.memberUuid(c, m));
             gui.set(slot++, head(m, "&a" + m,
-                            "&7Роль: &f" + (role == null ? "полный пользователь" : role),
-                            "&8ЛКМ — роль или убрать"),
+                            Lang.t("&7Роль: &f") + (role == null ? Lang.t("полный пользователь") : role),
+                            Lang.t("&8ЛКМ — роль или убрать")),
                     pl -> openMember(pl, claimId, m));
         }
 
@@ -454,14 +465,14 @@ public final class ClaimMenu {
             if (slot >= 45) break;
             String n = online.getGameProfile().name();
             if (c.isOwner(online.getUuid()) || c.isMember(online.getUuid())) continue;
-            gui.set(slot++, head(n, "&f" + n, "&aЛКМ — выдать доступ"),
+            gui.set(slot++, head(n, "&f" + n, Lang.t("&aЛКМ — выдать доступ")),
                     pl -> { ClaimManager.addMember(c, n, online.getUuid()); openTrust(pl, claimId); });
         }
         if (slot == 9 && c.members.isEmpty()) {
-            gui.set(22, item(Items.BOOK, "&7Нет игроков онлайн", "&8Добавить оффлайн: &f/claim add <ник>"), null);
+            gui.set(22, item(Items.BOOK, Lang.t("&7Нет игроков онлайн"), Lang.t("&8Добавить оффлайн: &f/claim add <ник>")), null);
         }
 
-        gui.set(49, item(Items.ARROW, "&7← Назад"), pl -> openClaim(pl, claimId));
+        gui.set(49, item(Items.ARROW, Lang.t("&7← Назад")), pl -> openClaim(pl, claimId));
         gui.fill(filler());
         gui.open(p);
     }
@@ -471,13 +482,13 @@ public final class ClaimMenu {
     private static void openMember(ServerPlayerEntity p, String claimId, String member) {
         Claim c = find(p, claimId);
         if (c == null) { open(p); return; }
-        java.util.UUID uuid = Claim.offlineUuid(member);
+        java.util.UUID uuid = ClaimManager.memberUuid(c, member);
         String current = c.roleOf(uuid);
         ChestGui gui = new ChestGui(Fmt.text("&2🛡 " + member + " &8» &7" + c.name), 3);
-        gui.set(4, head(member, "&f" + member, "&7Роль: &f" + (current == null ? "полный пользователь" : current)), null);
-        gui.set(9, item(current == null ? Items.NETHER_STAR : Items.EMERALD, "&aПолный пользователь",
-                        "&7Может всё, что и владелец,", "&7кроме управления приватом.",
-                        current == null ? "&a✔ выбрано" : "&8➜ клик"),
+        gui.set(4, head(member, "&f" + member, Lang.t("&7Роль: &f") + (current == null ? Lang.t("полный пользователь") : current)), null);
+        gui.set(9, item(current == null ? Items.NETHER_STAR : Items.EMERALD, Lang.t("&aПолный пользователь"),
+                        Lang.t("&7Может всё, что и владелец,"), Lang.t("&7кроме управления приватом."),
+                        current == null ? Lang.t("&a✔ выбрано") : Lang.t("&8➜ клик")),
                 pl -> { ClaimManager.setMemberRole(c, uuid, null); openMember(pl, claimId, member); });
         int slot = 10;
         if (c.roles != null) {
@@ -486,13 +497,13 @@ public final class ClaimMenu {
                 String r = e.getKey();
                 boolean on = r.equals(current);
                 gui.set(slot++, item(on ? Items.NETHER_STAR : Items.NAME_TAG, "&f" + r,
-                                Fmt.strip(ClaimCommands.permsText(e.getValue())), on ? "&a✔ выбрано" : "&8➜ клик — выдать"),
+                                Fmt.strip(ClaimCommands.permsText(e.getValue())), on ? Lang.t("&a✔ выбрано") : Lang.t("&8➜ клик — выдать")),
                         pl -> { ClaimManager.setMemberRole(c, uuid, r); openMember(pl, claimId, member); });
             }
         }
-        gui.set(22, item(Items.BARRIER, "&cУбрать из пользователей", "&8➜ клик"),
+        gui.set(22, item(Items.BARRIER, Lang.t("&cУбрать из пользователей"), Lang.t("&8➜ клик")),
                 pl -> { ClaimManager.removeMember(c, member); openTrust(pl, claimId); });
-        gui.set(18, item(Items.ARROW, "&7← Назад"), pl -> openTrust(pl, claimId));
+        gui.set(18, item(Items.ARROW, Lang.t("&7← Назад")), pl -> openTrust(pl, claimId));
         gui.fill(filler());
         gui.open(p);
     }
@@ -500,13 +511,13 @@ public final class ClaimMenu {
     private static void openRoles(ServerPlayerEntity p, String claimId) {
         Claim c = find(p, claimId);
         if (c == null) { open(p); return; }
-        ChestGui gui = new ChestGui(Fmt.text("&2🛡 Роли &8» &7" + c.name), 4);
-        gui.set(4, item(Items.WRITABLE_BOOK, "&aКак работают роли",
-                "&7Роль — набор прав внутри привата.",
-                "&7Пользователь с ролью может только то,",
-                "&7что она разрешает (и что гостям).",
-                "&7Без роли — полный пользователь.",
-                "&8/claim add <ник> <роль>"), null);
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&2🛡 Роли &8» &7") + c.name), 4);
+        gui.set(4, item(Items.WRITABLE_BOOK, Lang.t("&aКак работают роли"),
+                Lang.t("&7Роль — набор прав внутри привата."),
+                Lang.t("&7Пользователь с ролью может только то,"),
+                Lang.t("&7что она разрешает (и что гостям)."),
+                Lang.t("&7Без роли — полный пользователь."),
+                Lang.t("&8/claim add <ник> <роль>")), null);
         int slot = 9;
         if (c.roles != null) {
             for (var e : c.roles.entrySet()) {
@@ -515,26 +526,26 @@ public final class ClaimMenu {
                 long holders = c.memberRoles == null ? 0 : c.memberRoles.values().stream().filter(r::equals).count();
                 gui.set(slot++, item(Items.NAME_TAG, "&f" + r,
                                 Fmt.strip(ClaimCommands.permsText(e.getValue())),
-                                "&7Пользователей: &f" + holders, "&8➜ клик — настроить"),
+                                Lang.t("&7Пользователей: &f") + holders, Lang.t("&8➜ клик — настроить")),
                         pl -> openRole(pl, claimId, r));
             }
         }
         boolean full = c.roles != null && c.roles.size() >= ClaimManager.MAX_ROLES;
-        gui.set(31, item(full ? Items.GRAY_DYE : Items.EMERALD_BLOCK, full ? "&7Ролей максимум" : "&a➕ Создать роль",
-                        full ? "&8Удали лишнюю" : "&8➜ клик — ввести название"),
-                full ? null : pl -> AnvilGui.open(pl, "&2Название роли", "", name -> {
+        gui.set(31, item(full ? Items.GRAY_DYE : Items.EMERALD_BLOCK, full ? Lang.t("&7Ролей максимум") : Lang.t("&a➕ Создать роль"),
+                        full ? Lang.t("&8Удали лишнюю") : Lang.t("&8➜ клик — ввести название")),
+                full ? null : pl -> AnvilGui.open(pl, Lang.t("&2Название роли"), "", name -> {
                     String clean = ClaimCommands.cleanRoleNamePublic(name);
                     Claim fresh = find(pl, claimId);
                     if (fresh == null) { open(pl); return; }
                     if (clean == null || !ClaimManager.createRole(fresh, clean)) {
-                        pl.sendMessage(Fmt.text("&cНе вышло: 1–16 символов (буквы, цифры, _ -), без повторов, не больше "
-                                + ClaimManager.MAX_ROLES + " ролей."), false);
+                        pl.sendMessage(Fmt.text(Lang.t("&cНе вышло: 1–16 символов (буквы, цифры, _ -), без повторов, не больше ")
+                                + ClaimManager.MAX_ROLES + Lang.t(" ролей.")), false);
                         openRoles(pl, claimId);
                         return;
                     }
                     openRole(pl, claimId, clean);
                 }));
-        gui.set(27, item(Items.ARROW, "&7← Назад"), pl -> openClaim(pl, claimId));
+        gui.set(27, item(Items.ARROW, Lang.t("&7← Назад")), pl -> openClaim(pl, claimId));
         gui.fill(filler());
         gui.open(p);
     }
@@ -544,19 +555,19 @@ public final class ClaimMenu {
         String r = c == null ? null : c.findRole(role);
         if (r == null) { if (c != null) openRoles(p, claimId); else open(p); return; }
         List<String> perms = c.roleGrants(r);
-        ChestGui gui = new ChestGui(Fmt.text("&2🛡 Роль &8» &f" + r), 3);
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&2🛡 Роль &8» &f") + r), 3);
         int slot = 10;
         Item[] icons = {Items.IRON_PICKAXE, Items.CHEST, Items.OAK_DOOR, Items.LEAD};
         int i = 0;
         for (Claim.Perm perm : Claim.Perm.values()) {
             boolean on = perms != null && perms.contains(perm.key);
-            gui.set(slot, flagIcon(icons[i++], perm.label, on),
+            gui.set(slot, flagIcon(icons[i++], Lang.t(perm.label), on),
                     pl -> { ClaimManager.setRolePerm(c, r, perm, !on); openRole(pl, claimId, r); });
             slot += 2;
         }
-        gui.set(22, item(Items.BARRIER, "&cУдалить роль", "&7Её пользователи снова станут полными", "&8➜ клик"),
+        gui.set(22, item(Items.BARRIER, Lang.t("&cУдалить роль"), Lang.t("&7Её пользователи снова станут полными"), Lang.t("&8➜ клик")),
                 pl -> { ClaimManager.deleteRole(c, r); openRoles(pl, claimId); });
-        gui.set(18, item(Items.ARROW, "&7← К ролям"), pl -> openRoles(pl, claimId));
+        gui.set(18, item(Items.ARROW, Lang.t("&7← К ролям")), pl -> openRoles(pl, claimId));
         gui.fill(filler());
         gui.open(p);
     }
@@ -571,7 +582,7 @@ public final class ClaimMenu {
         int pages = Math.max(1, (all.size() + perPage - 1) / perPage);
         page = Math.max(0, Math.min(page, pages - 1));
 
-        ChestGui gui = new ChestGui(Fmt.text("&c⚙ Все приваты &8» &7стр. " + (page + 1) + "/" + pages), 6);
+        ChestGui gui = new ChestGui(Fmt.text(Lang.t("&c⚙ Все приваты &8» &7стр. ") + (page + 1) + "/" + pages), 6);
         int start = page * perPage;
         for (int i = 0; i < perPage && start + i < all.size(); i++) {
             Claim c = all.get(start + i);
@@ -580,16 +591,16 @@ public final class ClaimMenu {
             // here. A click now opens the same management screen the owner
             // gets (flags, users, transfer, delete); teleport is its first button.
             gui.set(i, item(c.arrested ? Items.IRON_BARS : Items.GRASS_BLOCK, "&a" + c.name + " &8· &f" + c.owner,
-                            "&7" + (c.fullHeight ? "площадь " + c.area() + " (2D)" : "объём " + c.volume() + " (3D)"),
+                            "&7" + (c.fullHeight ? Lang.t("площадь ") + c.area() + " (2D)" : Lang.t("объём ") + c.volume() + " (3D)"),
                             "&7" + c.minX + " " + c.minY + " " + c.minZ + " &8(" + c.dim.replace("minecraft:", "") + ")",
-                            "&8➜ клик — управление (флаги, удаление, телепорт)"),
+                            Lang.t("&8➜ клик — управление (флаги, удаление, телепорт)")),
                     pl -> openClaim(pl, c.id));
         }
         int prev = page - 1, next = page + 1;
-        if (page > 0) gui.set(45, item(Items.ARROW, "&7← Пред. страница"), pl -> openAll(pl, prev));
-        gui.set(49, item(Items.BARRIER, "&7← В меню"), ClaimMenu::open);
-        if (next < pages) gui.set(53, item(Items.ARROW, "&7След. страница →"), pl -> openAll(pl, next));
-        if (all.isEmpty()) gui.set(22, item(Items.BOOK, "&7На сервере нет приватов"), null);
+        if (page > 0) gui.set(45, item(Items.ARROW, Lang.t("&7← Пред. страница")), pl -> openAll(pl, prev));
+        gui.set(49, item(Items.BARRIER, Lang.t("&7← В меню")), ClaimMenu::open);
+        if (next < pages) gui.set(53, item(Items.ARROW, Lang.t("&7След. страница →")), pl -> openAll(pl, next));
+        if (all.isEmpty()) gui.set(22, item(Items.BOOK, Lang.t("&7На сервере нет приватов")), null);
 
         gui.fill(filler());
         gui.open(p);
@@ -613,7 +624,7 @@ public final class ClaimMenu {
                     .invoke(null, p);
         } catch (ReflectiveOperationException e) {
             p.closeHandledScreen();
-            p.sendMessage(Fmt.text("&7Главное меню: &f/max"), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Главное меню: &f/max")), false);
         }
     }
 
@@ -631,26 +642,42 @@ public final class ClaimMenu {
 
     private static ItemStack claimIcon(Claim c) {
         if (c.arrested) {
-            return item(Items.IRON_BARS, "&4⛔ " + c.name + " &8(арест)",
-                    "&cАрестован: &7" + (c.arrestReason == null || c.arrestReason.isBlank()
-                            ? "по решению государства" : c.arrestReason),
-                    "&7Вход, стройка и сундуки закрыты",
-                    "&7до снятия ареста. Долг: &f/tax",
-                    c.fullHeight ? "&7Площадь: &f" + c.area() + " &7блоков &8(во всю высоту)"
-                                 : "&7Объём: &f" + c.volume() + " &7блоков &8(3D)",
-                    "&8➜ управление");
+            return item(Items.IRON_BARS, "&4⛔ " + c.name + Lang.t(" &8(арест)"),
+                    Lang.t("&cАрестован: &7") + (c.arrestReason == null || c.arrestReason.isBlank()
+                            ? Lang.t("по решению государства") : c.arrestReason),
+                    Lang.t("&7Вход, стройка и сундуки закрыты"),
+                    Lang.t("&7до снятия ареста. Долг: &f/tax"),
+                    c.fullHeight ? Lang.t("&7Площадь: &f") + c.area() + Lang.t(" &7блоков &8(во всю высоту)")
+                                 : Lang.t("&7Объём: &f") + c.volume() + Lang.t(" &7блоков &8(3D)"),
+                    Lang.t("&8➜ управление"));
         }
         return item(Items.GRASS_BLOCK, "&a" + c.name,
-                c.fullHeight ? "&7Площадь: &f" + c.area() + " &7блоков &8(во всю высоту)"
-                             : "&7Объём: &f" + c.volume() + " &7блоков &8(3D)",
-                "&7Размер: &f" + c.sizeX() + "x" + c.sizeY() + "x" + c.sizeZ(),
+                c.fullHeight ? Lang.t("&7Площадь: &f") + c.area() + Lang.t(" &7блоков &8(во всю высоту)")
+                             : Lang.t("&7Объём: &f") + c.volume() + Lang.t(" &7блоков &8(3D)"),
+                Lang.t("&7Размер: &f") + c.sizeX() + "x" + c.sizeY() + "x" + c.sizeZ(),
                 "&7" + c.minX + " " + c.minY + " " + c.minZ + " &8(" + c.dim.replace("minecraft:", "") + ")",
-                "&8➜ управление");
+                Lang.t("&8➜ управление"));
     }
 
+    /** A toggle anyone who reached the screen may switch (role permissions). */
     private static ItemStack flagIcon(Item icon, String name, boolean on) {
-        return item(icon, (on ? "&a" : "&c") + name + ": " + (on ? "&aВКЛ" : "&cВЫКЛ"),
-                "&8➜ клик — переключить");
+        return item(icon, (on ? "&a" : "&c") + name + ": " + (on ? Lang.t("&aВКЛ") : Lang.t("&cВЫКЛ")),
+                Lang.t("&8➜ клик — переключить"));
+    }
+
+    private static ItemStack flagIcon(ServerPlayerEntity viewer, String key, Item icon, String name, boolean on) {
+        String state = (on ? "&a" : "&c") + name + ": " + (on ? Lang.t("&aВКЛ") : Lang.t("&cВЫКЛ"));
+        if (!ClaimCommands.maySetFlag(viewer, key)) {
+            return item(icon, state, Lang.t("&8🔒 Меняет только администрация"));
+        }
+        return item(icon, state, Lang.t("&8➜ клик — переключить"));
+    }
+
+    /** Refuses, with a message, a flag the player may not switch. */
+    private static boolean flagLocked(ServerPlayerEntity p, String key) {
+        if (ClaimCommands.maySetFlag(p, key)) return false;
+        p.sendMessage(Fmt.text(Lang.t("&cЭтот флаг меняет только администрация.")), false);
+        return true;
     }
 
     private static ServerWorld resolve(ServerPlayerEntity p, String dim) {

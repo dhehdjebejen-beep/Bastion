@@ -100,7 +100,7 @@ public final class InfoShield {
         if (packet instanceof PlaySoundS2CPacket sound && g.hideSoundOrigins) {
             return loudSound(to, sound);
         }
-        return packet;
+        return OreShield.rewrite(to, packet);
     }
 
     // ------------------------------------------------------------------ health

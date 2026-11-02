@@ -122,13 +122,13 @@ public final class FreezeManager {
         Entry e = new Entry();
         e.name = target.getGameProfile().name();
         e.by = by;
-        e.reason = reason == null || reason.isBlank() ? "проверка модератором" : reason;
+        e.reason = reason == null || reason.isBlank() ? Lang.t("проверка модератором") : reason;
         e.since = System.currentTimeMillis();
         boolean fresh = FROZEN.put(target.getUuid(), e) == null;
         save();
         hold(target, BastionAC.data(target));
-        target.sendMessage(Text.literal("§b❄ Вы заморожены модератором. §7Причина: §f" + e.reason
-                + "\n§7Не выходите из игры — выход будет замечен. Писать можно в личные сообщения."), false);
+        target.sendMessage(Text.literal(Lang.t("§b❄ Вы заморожены модератором. §7Причина: §f") + e.reason
+                + Lang.t("\n§7Не выходите из игры — выход будет замечен. Писать можно в личные сообщения.")), false);
         title(target);
         BastionAC.LOGGER.warn("[FREEZE] {} frozen by {}: {}", e.name, by, e.reason);
         return fresh;
@@ -141,9 +141,9 @@ public final class FreezeManager {
         ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);
         if (p != null) {
             release(p);
-            p.networkHandler.sendPacket(new TitleS2CPacket(Text.literal("§a✔ Заморозка снята")));
-            p.networkHandler.sendPacket(new SubtitleS2CPacket(Text.literal("§7Можно двигаться")));
-            p.sendMessage(Text.literal("§a[BAC] Заморозка снята. Спасибо за терпение."), false);
+            p.networkHandler.sendPacket(new TitleS2CPacket(Text.literal(Lang.t("§a✔ Заморозка снята"))));
+            p.networkHandler.sendPacket(new SubtitleS2CPacket(Text.literal(Lang.t("§7Можно двигаться"))));
+            p.sendMessage(Text.literal(Lang.t("§a[BAC] Заморозка снята. Спасибо за терпение.")), false);
         }
         BastionAC.LOGGER.warn("[FREEZE] {} unfrozen by {}", e.name, by);
         return true;
@@ -237,8 +237,8 @@ public final class FreezeManager {
 
     private static void title(ServerPlayerEntity p) {
         p.networkHandler.sendPacket(new TitleFadeS2CPacket(0, 50, 10));
-        p.networkHandler.sendPacket(new TitleS2CPacket(Text.literal("§b❄ Вы заморожены")));
-        p.networkHandler.sendPacket(new SubtitleS2CPacket(Text.literal("§7Ожидайте модератора, не выходите из игры")));
+        p.networkHandler.sendPacket(new TitleS2CPacket(Text.literal(Lang.t("§b❄ Вы заморожены"))));
+        p.networkHandler.sendPacket(new SubtitleS2CPacket(Text.literal(Lang.t("§7Ожидайте модератора, не выходите из игры"))));
     }
 
     // ------------------------------------------------------------------ hooks
@@ -267,9 +267,9 @@ public final class FreezeManager {
         if (e == null) return;
         MODS_ON.remove(player.getUuid());
         hold(player, BastionAC.data(player));
-        player.sendMessage(Text.literal("§b❄ Вы всё ещё заморожены. §7Причина: §f" + e.reason), false);
+        player.sendMessage(Text.literal(Lang.t("§b❄ Вы всё ещё заморожены. §7Причина: §f") + e.reason), false);
         title(player);
-        Alerts.sendNetSignal(e.name, player.getUuid(), e.by, "зашёл замороженным", e.reason);
+        Alerts.sendNetSignal(e.name, player.getUuid(), e.by, Lang.t("зашёл замороженным"), e.reason);
     }
 
     /** Leaving while frozen is what staff want to know about. */
@@ -281,7 +281,7 @@ public final class FreezeManager {
         Entry e = FROZEN.get(player.getUuid());
         if (e == null) return;
         BastionAC.LOGGER.warn("[FREEZE] {} left while frozen (by {}, {})", e.name, e.by, e.reason);
-        Alerts.sendNetSignal(e.name, player.getUuid(), e.by, "§cвышел во время заморозки", e.reason);
+        Alerts.sendNetSignal(e.name, player.getUuid(), e.by, Lang.t("§cвышел во время заморозки"), e.reason);
     }
 
     /** Commands a staff-frozen player may still use: talking to staff. */

@@ -152,6 +152,28 @@ class ACConfigTest {
         assertEquals(3, cfg.argus.reanalyzeMinutes, "old default moves");
     }
 
+    /** v16: instant setbacks go off once; the thresholds and the alwaysMitigate list are left as they were. */
+    @Test
+    void v16TurnsInstantSetbacksOffAndKeepsThresholds(@TempDir Path dir) throws Exception {
+        Path file = dir.resolve("config.json");
+        Files.writeString(file, """
+                {
+                  "general": { "configVersion": 15, "instantMovementSetback": true },
+                  "checks": { "speed": { "enabled": true, "weight": 1.0, "alertVl": 6.0, "mitigateVl": 8.0, "kickVl": 15.0, "decayPerSecond": 0.75 } },
+                  "proactive": { "enabled": true, "alwaysMitigate": ["speed", "fly", "spider"] }
+                }
+                """, StandardCharsets.UTF_8);
+        ACConfig cfg = ACConfig.loadOrCreate(file, w -> {});
+        assertEquals(16, cfg.general.configVersion);
+        assertFalse(cfg.general.instantMovementSetback);
+        assertEquals(8.0, cfg.check("speed").mitigateVl);
+        assertTrue(cfg.proactive.alwaysMitigate.contains("spider"));
+        // An admin who switches it back on afterwards keeps it on.
+        String text = Files.readString(file, StandardCharsets.UTF_8).replace("\"instantMovementSetback\": false", "\"instantMovementSetback\": true");
+        Files.writeString(file, text, StandardCharsets.UTF_8);
+        assertTrue(ACConfig.loadOrCreate(file, w -> {}).general.instantMovementSetback);
+    }
+
     /** v15 (3.3.1): the info shield and the dead-player guard reach existing configs; InteractWalls joins, out of the ban. */
     @Test
     void v15TurnsOnTheShieldAndAddsInteractWalls(@TempDir Path dir) throws Exception {
@@ -163,7 +185,7 @@ class ACConfigTest {
                 }
                 """, StandardCharsets.UTF_8);
         ACConfig cfg = ACConfig.loadOrCreate(file, w -> {});
-        assertEquals(15, cfg.general.configVersion);
+        assertEquals(ACConfig.CONFIG_VERSION, cfg.general.configVersion);
         assertTrue(cfg.general.hideOtherPlayersHealth);
         assertTrue(cfg.general.hideOtherPlayersEquipmentDetails);
         assertTrue(cfg.general.hideSoundOrigins);

@@ -61,14 +61,14 @@ public final class Alerts {
                 + " &8(" + pos.getX() + " " + pos.getY() + " " + pos.getZ() + ") &8[&bTP&8]");
 
         MutableText hover = TextFmt.literal(
-                "&7Проверка: &f" + type.key + "\n"
-                + "&7Детали: &f" + details + "\n"
-                + "&7VL: &f" + String.format("%.1f", vl) + "\n"
-                + "&7Коорд: &f" + String.format(java.util.Locale.ROOT, "%.2f %.2f %.2f",
+                Lang.t("&7Проверка: &f") + type.key + Lang.t("\n"
+                + "&7Детали: &f") + details + "\n"
+                + "&7VL: &f" + String.format("%.1f", vl) + Lang.t("\n"
+                + "&7Коорд: &f") + String.format(java.util.Locale.ROOT, "%.2f %.2f %.2f",
                         suspect.getX(), suspect.getY(), suspect.getZ())
-                + " &8(" + suspect.getEntityWorld().getRegistryKey().getValue().getPath() + ")\n"
-                + "&7Пинг: &f" + ping + " мс\n"
-                + "&8Клик — телепорт к игроку");
+                + " &8(" + suspect.getEntityWorld().getRegistryKey().getValue().getPath() + Lang.t(")\n"
+                + "&7Пинг: &f") + ping + Lang.t(" мс\n"
+                + "&8Клик — телепорт к игроку"));
 
         MutableText clickable = (MutableText) line.styled(s -> s
                 .withClickEvent(new ClickEvent.RunCommand("/tp " + name))
@@ -92,13 +92,13 @@ public final class Alerts {
         if (srv == null) return;
         String alertPrefix = BastionAC.config().messages.alertPrefix;
         MutableText line = TextFmt.literal(alertPrefix + " &8[&#" + grade + "&8] &e"
-                + name + " &7» цепочка атак");
+                + name + Lang.t(" &7» цепочка атак"));
         MutableText hover = TextFmt.literal(
-                "&7Игрок: &f" + name + "\n"
-                + "&7UUID: &8" + uuid + "\n"
-                + "&7Оценка: &f" + grade + "\n\n"
-                + "&7Цепочка (по стадиям):\n&f" + chainText + "\n\n"
-                + "&8Контекст сохранён в дампе (logs/bastionac/dumps)");
+                Lang.t("&7Игрок: &f") + name + "\n"
+                + "&7UUID: &8" + uuid + Lang.t("\n"
+                + "&7Оценка: &f") + grade + Lang.t("\n\n"
+                + "&7Цепочка (по стадиям):\n&f") + chainText + Lang.t("\n\n"
+                + "&8Контекст сохранён в дампе (logs/bastionac/dumps)"));
         MutableText clickable = (MutableText) line.styled(s -> s
                 .withHoverEvent(new HoverEvent.ShowText(hover)));
         for (ServerPlayerEntity op : srv.getPlayerManager().getPlayerList()) {
@@ -121,10 +121,10 @@ public final class Alerts {
         MutableText line = TextFmt.literal(alertPrefix + " &8[&dNET&8] &e" + name
                 + " &7» " + what + " &8(&f" + relatedName + "&8)");
         MutableText hover = TextFmt.literal(
-                "&7Игрок: &f" + name + "\n"
-                + "&7Связь: &f" + relatedName + "\n"
-                + "&7Детали: &f" + detail + "\n\n"
-                + "&8Сигнал для персонала — сам по себе не наказание");
+                Lang.t("&7Игрок: &f") + name + Lang.t("\n"
+                + "&7Связь: &f") + relatedName + Lang.t("\n"
+                + "&7Детали: &f") + detail + Lang.t("\n\n"
+                + "&8Сигнал для персонала — сам по себе не наказание"));
         MutableText clickable = (MutableText) line.styled(s ->
                 s.withHoverEvent(new HoverEvent.ShowText(hover)));
         for (ServerPlayerEntity op : srv.getPlayerManager().getPlayerList()) {
@@ -143,16 +143,16 @@ public final class Alerts {
         MinecraftServer srv = BastionAC.server();
         if (srv == null) return;
         String alertPrefix = BastionAC.config().messages.alertPrefix;
-        MutableText line = TextFmt.literal(alertPrefix + " &8[&5Аргус&8] &e" + name + " &7» "
+        MutableText line = TextFmt.literal(alertPrefix + Lang.t(" &8[&5Аргус&8] &e") + name + " &7» "
                 + (guilty ? "&c" : "&e") + verdict + " &8(" + String.format(java.util.Locale.ROOT, "%.0f%%", score * 100)
-                + ") &8[&dдело #" + caseId + "&8]");
-        StringBuilder hover = new StringBuilder("&7Игрок: &f" + name + "\n&7Дело: &f#" + caseId + "\n");
+                + Lang.t(") &8[&dдело #") + caseId + "&8]");
+        StringBuilder hover = new StringBuilder(Lang.t("&7Игрок: &f") + name + Lang.t("\n&7Дело: &f#") + caseId + "\n");
         int n = 0;
         for (String f : findings) {
             if (n++ >= 6) break;
             hover.append("&7• &f").append(f).append("\n");
         }
-        hover.append("\n&8Клик — открыть дело");
+        hover.append(Lang.t("\n&8Клик — открыть дело"));
         MutableText clickable = (MutableText) line.styled(s -> s
                 .withClickEvent(new ClickEvent.RunCommand("/bac argus case " + caseId))
                 .withHoverEvent(new HoverEvent.ShowText(TextFmt.literal(hover.toString()))));
@@ -166,11 +166,11 @@ public final class Alerts {
         MinecraftServer srv = BastionAC.server();
         if (srv == null) return;
         String alertPrefix = BastionAC.config().messages.alertPrefix;
-        MutableText line = TextFmt.literal(alertPrefix + " &8[&5Аргус&8] &e" + name + " &7» " + outcome
-                + " &8[&dдело #" + caseId + "&8]");
+        MutableText line = TextFmt.literal(alertPrefix + Lang.t(" &8[&5Аргус&8] &e") + name + " &7» " + outcome
+                + Lang.t(" &8[&dдело #") + caseId + "&8]");
         MutableText clickable = (MutableText) line.styled(s -> s
                 .withClickEvent(new ClickEvent.RunCommand("/bac argus case " + caseId))
-                .withHoverEvent(new HoverEvent.ShowText(TextFmt.literal("&8Клик — открыть дело"))));
+                .withHoverEvent(new HoverEvent.ShowText(TextFmt.literal(Lang.t("&8Клик — открыть дело")))));
         for (ServerPlayerEntity op : srv.getPlayerManager().getPlayerList()) {
             if (isAdmin(op) && isEnabledFor(op)) op.sendMessage(clickable, false);
         }
@@ -191,13 +191,13 @@ public final class Alerts {
         MutableText line = TextFmt.literal(alertPrefix + " &8[&bX-ray&8] &e" + name + " &7» "
                 + (verdict ? "&c" : "&e") + what + " &8[&bTP&8]");
         MutableText hover = TextFmt.literal(
-                "&7Игрок: &f" + name + "\n"
-                + "&7Находка: &f" + what + (where.isEmpty() ? "" : " &8(" + where + ")") + "\n"
-                + "&7Сессия: &f" + stats + "\n"
-                + "&7Коорд: &f" + pos.getX() + " " + pos.getY() + " " + pos.getZ() + "\n\n"
-                + (verdict ? "&7Вердикт по форме копания. " : "&7Одна скрытая руда — намёк, не доказательство. ")
-                + "&7Аргус разберёт сессию сам.\n"
-                + "&8Клик — телепорт к игроку");
+                Lang.t("&7Игрок: &f") + name + Lang.t("\n"
+                + "&7Находка: &f") + what + (where.isEmpty() ? "" : " &8(" + where + ")") + Lang.t("\n"
+                + "&7Сессия: &f") + stats + Lang.t("\n"
+                + "&7Коорд: &f") + pos.getX() + " " + pos.getY() + " " + pos.getZ() + "\n\n"
+                + (verdict ? Lang.t("&7Вердикт по форме копания. ") : Lang.t("&7Одна скрытая руда — намёк, не доказательство. "))
+                + Lang.t("&7Аргус разберёт сессию сам.\n"
+                + "&8Клик — телепорт к игроку"));
         MutableText clickable = (MutableText) line.styled(s -> s
                 .withClickEvent(new ClickEvent.RunCommand("/tp " + name))
                 .withHoverEvent(new HoverEvent.ShowText(hover)));

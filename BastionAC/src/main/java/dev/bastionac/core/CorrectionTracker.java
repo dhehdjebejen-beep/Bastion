@@ -57,7 +57,10 @@ public final class CorrectionTracker {
             World world = player.getEntityWorld();
             double cx = packet.getX(player.getX()), cy = packet.getY(player.getY()), cz = packet.getZ(player.getZ());
             Box claimed = player.getDimensions(player.getPose()).getBoxAt(cx, cy, cz).contract(1.0E-5);
-            boolean collides = !world.isSpaceEmpty(player, claimed);
+            // Blocks only. Entity collision (a boat in the water, a frozen Прятки prop the client never
+            // saw as solid) also refuses the move, but a re-send of the blocks cannot fix that loop, and
+            // 02.11 it was reported as Phase "into Water" and "into a Moss Block".
+            boolean collides = !world.isBlockSpaceEmpty(player, claimed);
             BlockPos feet = BlockPos.ofFloored(cx, cy - 0.01, cz);
             int feetState = Block.getRawIdFromState(world.getBlockState(feet));
             Telemetry.correction(player, collides ? TelemetryFormat.CORR_COLLIDE : TelemetryFormat.CORR_OTHER,
@@ -86,14 +89,14 @@ public final class CorrectionTracker {
                 int ping = player.networkHandler == null ? 0 : Math.max(0, player.networkHandler.getLatency());
                 d.corrResyncAtMs = now + ping + 200;
                 Telemetry.acAction(player.getUuid(), TelemetryFormat.ACT_RESYNC,
-                        "блоки у ног отправлены заново после " + d.corrCollideStreak + " откатов");
+                        Lang.t("блоки у ног отправлены заново после ") + d.corrCollideStreak + Lang.t(" откатов"));
             } else if (collides && d.corrResynced && now >= d.corrResyncAtMs) {
                 d.corrAfterResync++;
                 if (d.corrAfterResync == EPISODE_AFTER_RESYNC && now - d.corrReportedMs > 60_000) {
                     d.corrReportedMs = now;
                     String block = world.getBlockState(feet).getBlock().getName().getString();
                     String detail = String.format(java.util.Locale.ROOT,
-                            "клиент %d раз подряд уходит в блок (%s) у %d %d %d, хотя блоки ему отправлены заново — Phase/NoClip или зависший клиент",
+                            Lang.t("клиент %d раз подряд уходит в блок (%s) у %d %d %d, хотя блоки ему отправлены заново — Phase/NoClip или зависший клиент"),
                             d.corrCollideStreak, block, MathHelper.floor(sx), MathHelper.floor(sy), MathHelper.floor(sz));
                     AcJournal.write("episode", d.name, player.getUuidAsString(), "phase", 0, detail, null);
                     AttackChainDetector.probe(new ChainPlayerAdapter(player), "phase", detail);
@@ -104,7 +107,7 @@ public final class CorrectionTracker {
             // over and over): worth a look, not a verdict.
             if (!collides && d.corrStreak == 40 && now - d.corrReportedMs > 60_000) {
                 d.corrReportedMs = now;
-                String detail = "сервер 40 раз подряд отклонил движение («слишком быстро/неверно»), не из-за блоков";
+                String detail = Lang.t("сервер 40 раз подряд отклонил движение («слишком быстро/неверно»), не из-за блоков");
                 AcJournal.write("episode", d.name, player.getUuidAsString(), "correction", 0, detail, null);
                 dev.bastionac.argus.Argus.signal(player, dev.bastionac.argus.Signal.Kind.CORRECTION_LOOP, detail);
             }

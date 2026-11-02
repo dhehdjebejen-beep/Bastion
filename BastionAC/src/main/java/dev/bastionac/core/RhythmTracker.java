@@ -81,16 +81,16 @@ public final class RhythmTracker {
         /** Russian one-liner for the staff alert. */
         public String describe() {
             StringBuilder sb = new StringBuilder();
-            if (constant) sb.append("постоянный интервал");
+            if (constant) sb.append(Lang.t("постоянный интервал"));
             if (periodic) {
                 if (sb.length() > 0) sb.append(" + ");
-                sb.append(String.format(Locale.ROOT, "шаблон с периодом %d (%.0f%%)", period, periodScore * 100));
+                sb.append(String.format(Locale.ROOT, Lang.t("шаблон с периодом %d (%.0f%%)"), period, periodScore * 100));
             }
             if (bounded) {
                 if (sb.length() > 0) sb.append(" + ");
-                sb.append("джиттер меньше тика");
+                sb.append(Lang.t("джиттер меньше тика"));
             }
-            return sb + String.format(Locale.ROOT, ": %.0f мс, σ=%.1f, разброс %.2f", mean, sd, spread);
+            return sb + String.format(Locale.ROOT, Lang.t(": %.0f мс, σ=%.1f, разброс %.2f"), mean, sd, spread);
         }
     }
 

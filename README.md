@@ -62,9 +62,9 @@ server — players join with an unmodified client and install nothing.
 
 | Module | Version | In one line |
 |---|---|---|
-| [**BastionAuth**](BastionAuth) | 1.13.0 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP, client profile and launcher installation. Before the password the player waits in spectator mode, away from their real location, and gets empty chunks instead of the world. |
-| [**BastionClaims**](BastionClaims) | 1.20.0 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers and crafters, explosions, fire, projectiles, falling blocks, griefing mobs, allays, copper golems, portals, fishing rods, sculk. Member roles inside a claim. Also includes an operator WorldEdit with undo. |
-| [**BastionAC**](BastionAC) | 3.5.0-beta | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Full session telemetry and **Argus**, an analytical investigation that reads a player's session and returns a verdict; its model is trained in Argus Lab on synthetic and real sessions and looks at the worst fight of a session (cheats switched on for one fight). 3.5 beta adds a **proactive mode**: the checks only raise signals and Argus's verdict switches the sanctions on within seconds. Exploits (book/NBT bombs, creative smuggling, packet floods) are blocked at the protocol. |
+| [**BastionAuth**](BastionAuth) | 1.14.0 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP, client profile and launcher installation. Before the password the player waits in spectator mode, away from their real location, and gets empty chunks instead of the world. |
+| [**BastionClaims**](BastionClaims) | 1.21.0 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers and crafters, explosions, fire, projectiles, falling blocks, griefing mobs, allays, copper golems, portals, fishing rods, sculk. Member roles inside a claim, a protected spawn zone, and flags split between owners and staff. Also includes an operator WorldEdit with undo. |
+| [**BastionAC**](BastionAC) | 3.7.0 | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Full session telemetry and **Argus**, an analytical investigation that reads a player's session and returns a verdict; its model is trained in Argus Lab on synthetic and real sessions and looks at the worst fight of a session (cheats switched on for one fight). A **proactive mode** lets the checks only raise signals while Argus's verdict switches the sanctions on within seconds. 3.7 adds an **info shield**: enclosed ores, buried and far storage, players and items behind walls are not sent to the client. Exploits (book/NBT bombs, creative smuggling, packet floods) are blocked at the protocol. |
 
 Each mod works on its own. When they run together, they talk through soft
 reflection bridges, and no mod has a hard dependency on another:
@@ -118,7 +118,8 @@ flowchart LR
   runs once per case on its own thread and pauses when the server is busy.
 - **Proactive, not only reactive.** What a cheat could read is not sent (other
   players' health and gear details, far sound origins, the Nether past its fog,
-  the account before login); what a vanilla client could never send (book and
+  enclosed ores, far storage, players and items behind walls, the account before
+  login); what a vanilla client could never send (book and
   NBT bombs, creative smuggling, floods, clicks through walls) is dropped on the
   spot.
 
@@ -133,7 +134,7 @@ cd BastionAC        # or BastionAuth / BastionClaims
 ```
 
 The version of a mod changes only with new features; every build in between
-gets the next number (`3.5.0-beta+build.4`). The counter is in
+gets the next number (`3.7.0+build.1`). The counter is in
 `<mod>/build.number`, the shared script in [`buildnumber.gradle`](buildnumber.gradle).
 
 To install, put the jar into the server's `mods/` folder next to
@@ -142,7 +143,7 @@ To install, put the jar into the server's `mods/` folder next to
 
 ## Tests
 
-The repository has 383 unit tests: 100 in BastionAuth, 62 in BastionClaims and 221
+The repository has 413 unit tests: 106 in BastionAuth, 72 in BastionClaims and 235
 in BastionAC. Run them with `./gradlew test` in a module folder.
 The Argus model is trained and measured on the Argus Lab bench
 (`./gradlew argusLab` in `BastionAC`).

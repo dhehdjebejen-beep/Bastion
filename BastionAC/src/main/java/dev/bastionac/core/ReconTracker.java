@@ -139,7 +139,7 @@ public final class ReconTracker {
                 st.streak = 0;
                 AttackChainDetector.recon(new ChainPlayerAdapter(player), "esp-tracking",
                         String.format(java.util.Locale.ROOT,
-                                "ведение %s сквозь стену %.1f бл, dot≥%.2f, %d подряд",
+                                Lang.t("ведение %s сквозь стену %.1f бл, dot≥%.2f, %d подряд"),
                                 st.trackedName, bestDist, AIM_DOT, STREAK_TICKS));
             }
         } else {

@@ -3,6 +3,7 @@ package dev.bastionclaims.core;
 import dev.bastionclaims.BastionClaims;
 import dev.bastionclaims.config.ClaimConfig;
 import dev.bastionclaims.model.Claim;
+import dev.bastionclaims.util.Lang;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.damage.DamageSource;
@@ -83,8 +84,8 @@ public final class ProtectionService {
     /** One line on why the bypass is on for this player, or {@code null} when it is off. */
     public static String bypassReason(ServerPlayerEntity player) {
         if (!bypassesProtection(player)) return null;
-        if (hasExplicitBypass(player)) return "включён командой /claim bypass — она же выключает";
-        return "ты оператор, а в config.json стоит opBypassProtection=true; /claim bypass выключит обход для тебя";
+        if (hasExplicitBypass(player)) return Lang.t("включён командой /claim bypass — она же выключает");
+        return Lang.t("ты оператор, а в config.json стоит opBypassProtection=true; /claim bypass выключит обход для тебя");
     }
 
     public static void forget(UUID player) {

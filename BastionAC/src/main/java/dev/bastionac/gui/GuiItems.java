@@ -1,6 +1,7 @@
 package dev.bastionac.gui;
 
 import com.mojang.authlib.GameProfile;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.TextFmt;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.LoreComponent;
@@ -58,18 +59,18 @@ final class GuiItems {
     }
 
     static ItemStack back(String where) {
-        return item(Items.ARROW, "&7← Назад", "&8" + where);
+        return item(Items.ARROW, Lang.t("&7← Назад"), "&8" + where);
     }
 
     /** Compact "time ago" for history entries. */
     static String ago(long deltaMs) {
         long s = Math.max(0, deltaMs) / 1000;
-        if (s < 60) return s + "с";
+        if (s < 60) return s + Lang.t("с");
         long m = s / 60;
-        if (m < 60) return m + "м";
+        if (m < 60) return m + Lang.t("м");
         long h = m / 60;
-        if (h < 24) return h + "ч";
-        return (h / 24) + "д";
+        if (h < 24) return h + Lang.t("ч");
+        return (h / 24) + Lang.t("д");
     }
 
     static String stamp(long epochMs) {

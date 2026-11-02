@@ -329,12 +329,12 @@ public final class AttackChainDetector {
         StringBuilder sb = new StringBuilder();
         sb.append(verdict == Verdict.WATCH ? "[CHAIN-WATCH] " : "[CHAIN-BURNED] ");
         Set<String> alerts = chain.alertKinds(now);
-        sb.append(chain.name).append(": ").append(alerts.size()).append(" разных проверок на уровне алерта ")
-                .append(alerts).append(", событий ").append(chain.events.size());
+        sb.append(chain.name).append(": ").append(alerts.size()).append(Lang.t(" разных проверок на уровне алерта "))
+                .append(alerts).append(Lang.t(", событий ")).append(chain.events.size());
         int recon = chain.contextCount(Stage.RECON, now);
         int evasion = chain.contextCount(Stage.EVASION, now);
         if (recon > 0 || evasion > 0) {
-            sb.append(" — контекст: recon ").append(recon).append(", evasion ").append(evasion);
+            sb.append(Lang.t(" — контекст: recon ")).append(recon).append(", evasion ").append(evasion);
         }
         sb.append(" — ");
         int n = 0;

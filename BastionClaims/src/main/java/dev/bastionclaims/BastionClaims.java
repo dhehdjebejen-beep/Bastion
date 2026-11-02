@@ -8,6 +8,7 @@ import dev.bastionclaims.core.ClaimEvents;
 import dev.bastionclaims.core.ClaimManager;
 import dev.bastionclaims.core.ProtectionService;
 import dev.bastionclaims.core.WorldEdit;
+import dev.bastionclaims.util.Lang;
 import net.fabricmc.api.DedicatedServerModInitializer;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -41,11 +42,34 @@ public final class BastionClaims implements DedicatedServerModInitializer {
     public static void reloadConfig() throws IOException {
         if (configFile == null) return;
         config = ClaimConfig.loadOrCreate(configFile, w -> LOGGER.warn("{}", w));
+        applyLanguage();
+    }
+
+    /** Switches to the configured language; a language that does not exist leaves the current one. */
+    private static void applyLanguage() {
+        if (!Lang.use(config.language, w -> LOGGER.warn("{}", w))) config.language = Lang.code();
+    }
+
+    /**
+     * Switches the language live and writes it to config.json. Returns false
+     * when there is no such language.
+     */
+    public static boolean setLanguage(String code) throws IOException {
+        if (!Lang.use(code, w -> LOGGER.warn("{}", w))) return false;
+        config.language = Lang.code();
+        if (configFile != null) config.save(configFile);
+        return true;
     }
 
     @Override
     public void onInitializeServer() {
         LOGGER.info("BastionClaims loading...");
+
+        // The language comes first: command argument names are translated
+        // when the commands are registered, before the server starts.
+        Path langDir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
+        Lang.setDir(langDir);
+        Lang.use(ClaimConfig.peekLanguage(langDir.resolve("config.json")), w -> LOGGER.warn("{}", w));
 
         ServerLifecycleEvents.SERVER_STARTING.register(server -> {
             try {
@@ -53,6 +77,7 @@ public final class BastionClaims implements DedicatedServerModInitializer {
                 Files.createDirectories(dir);
                 configFile = dir.resolve("config.json");
                 config = ClaimConfig.loadOrCreate(configFile, w -> LOGGER.warn("{}", w));
+                applyLanguage();
                 ClaimManager.init(dir);
                 LOGGER.info("BastionClaims ready ({} claim(s), {} tier(s))",
                         ClaimManager.all().size(), config.progression.tiers.size());
@@ -106,6 +131,10 @@ public final class BastionClaims implements DedicatedServerModInitializer {
             WorldEdit.markOffline(id);
         });
 
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            ClaimManager.attach(server);
+            ClaimManager.repairOrphanMembers();
+        });
         ServerLifecycleEvents.SERVER_STOPPING.register(server -> ClaimManager.saveNow());
 
         LOGGER.info("BastionClaims loaded");

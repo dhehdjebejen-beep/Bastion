@@ -2,6 +2,7 @@ package dev.bastionac.gui;
 
 import dev.bastionac.core.AttackChainDetector;
 import dev.bastionac.core.HistoryManager;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.TextFmt;
 import dev.bastionac.util.ChestGui;
 import net.minecraft.item.Items;
@@ -22,27 +23,27 @@ final class ACChainMenu {
     /** Human-readable stage names for the lore. */
     private static String stageName(AttackChainDetector.Stage s) {
         return switch (s) {
-            case RECON -> "разведка";
-            case PROBE -> "проба";
-            case EXPLOIT -> "эксплойт";
-            case EVASION -> "уклонение";
+            case RECON -> Lang.t("разведка");
+            case PROBE -> Lang.t("проба");
+            case EXPLOIT -> Lang.t("эксплойт");
+            case EVASION -> Lang.t("уклонение");
         };
     }
 
     private static String kindName(String kind) {
         return switch (kind) {
-            case "fly" -> "полёт";
-            case "speed" -> "скорость";
-            case "noslow" -> "без замедления";
-            case "bigmove" -> "рывок";
-            case "reach" -> "дистанция удара";
-            case "timer" -> "таймер";
+            case "fly" -> Lang.t("полёт");
+            case "speed" -> Lang.t("скорость");
+            case "noslow" -> Lang.t("без замедления");
+            case "bigmove" -> Lang.t("рывок");
+            case "reach" -> Lang.t("дистанция удара");
+            case "timer" -> Lang.t("таймер");
             case "blink" -> "blink";
             case "xray" -> "xray";
-            case "esp-tracking" -> "ведение сквозь стены";
-            case "staff-toggle" -> "отключение при стаффе";
-            case "panic-pause" -> "замирание после алерта";
-            case "relog-during-punishment" -> "релог под наказанием";
+            case "esp-tracking" -> Lang.t("ведение сквозь стены");
+            case "staff-toggle" -> Lang.t("отключение при стаффе");
+            case "panic-pause" -> Lang.t("замирание после алерта");
+            case "relog-during-punishment" -> Lang.t("релог под наказанием");
             default -> kind;
         };
     }
@@ -54,14 +55,14 @@ final class ACChainMenu {
                 .toList();
 
         ChestGui gui = new ChestGui(TextFmt.literal(
-                "&8[&cBAC&8] &7Цепочки атак &8(&f" + chains.size() + "&8 активн., &f"
-                        + burned.size() + "&8 сгор.)"), 6);
+                Lang.t("&8[&cBAC&8] &7Цепочки атак &8(&f") + chains.size() + Lang.t("&8 активн., &f")
+                        + burned.size() + Lang.t("&8 сгор.)")), 6);
 
         if (chains.isEmpty() && burned.isEmpty()) {
-            gui.button(13, GuiItems.item(Items.LIME_DYE, "&aАктивных цепочек нет",
-                    "&7Пограничные флаги, наказания и",
-                    "&7релог-паттерны собираются здесь,",
-                    "&7как только образуют паттерн"), () -> {});
+            gui.button(13, GuiItems.item(Items.LIME_DYE, Lang.t("&aАктивных цепочек нет"),
+                    Lang.t("&7Пограничные флаги, наказания и"),
+                    Lang.t("&7релог-паттерны собираются здесь,"),
+                    Lang.t("&7как только образуют паттерн")), () -> {});
         }
 
         // Active chains: strongest first, one item each.
@@ -76,19 +77,19 @@ final class ACChainMenu {
             java.util.Set<String> eligible = chain.eligibleKinds();
 
             List<String> lore = new java.util.ArrayList<>();
-            lore.add("&7Разных проверок на алерте: &f" + alertKinds.size()
-                    + " &8(к бану идут " + eligible.size() + ")"
-                    + (burnedFlag ? " &c(бан)" : armed ? " &e(на контроле)" : " &7(своя лестница)"));
-            lore.add("&8Событий в окне: " + chain.rawScore);
+            lore.add(Lang.t("&7Разных проверок на алерте: &f") + alertKinds.size()
+                    + Lang.t(" &8(к бану идут ") + eligible.size() + ")"
+                    + (burnedFlag ? Lang.t(" &c(бан)") : armed ? Lang.t(" &e(на контроле)") : Lang.t(" &7(своя лестница)")));
+            lore.add(Lang.t("&8Событий в окне: ") + chain.rawScore);
             // Module breakdown — which checks reached alert level.
-            StringBuilder mods = new StringBuilder("&8Проверки: ");
+            StringBuilder mods = new StringBuilder(Lang.t("&8Проверки: "));
             boolean firstMod = true;
             for (String kind : alertKinds) {
                 if (!firstMod) mods.append(" &8/");
                 firstMod = false;
                 mods.append(eligible.contains(kind) ? "&c" : "&7").append(kindName(kind));
             }
-            if (alertKinds.isEmpty()) mods.append("&7только пробы/контекст");
+            if (alertKinds.isEmpty()) mods.append(Lang.t("&7только пробы/контекст"));
             lore.add(mods.toString());
             int from = Math.max(0, events.size() - 5);
             for (int i = from; i < events.size(); i++) {
@@ -98,7 +99,7 @@ final class ACChainMenu {
                         + (e.detail() == null || e.detail().isBlank() ? "" : " &8— " + e.detail()));
             }
             String color = burnedFlag ? "&c" : armed ? "&e" : "&7";
-            lore.add("&8Клик — карточка игрока");
+            lore.add(Lang.t("&8Клик — карточка игрока"));
             gui.button(slot++, GuiItems.item(burnedFlag ? Items.TNT : armed ? Items.BLAZE_POWDER : Items.GLOWSTONE_DUST,
                             color + chain.name, lore),
                     () -> ACPlayerMenu.openByName(admin, chain.name));
@@ -109,14 +110,14 @@ final class ACChainMenu {
         for (HistoryManager.Event e : burned) {
             if (bslot > 44) break;
             gui.button(bslot++, GuiItems.item(Items.REDSTONE,
-                    "&c" + e.name + " &7— цепь #" + e.details,
-                    "&7Сгорела: &f" + GuiItems.stamp(e.time) + " &8(" + GuiItems.ago(System.currentTimeMillis() - e.time) + " назад)",
-                    "&7Срок: &f" + e.durationHours + " ч",
-                    "&8Клик — карточка игрока"),
+                    "&c" + e.name + Lang.t(" &7— цепь #") + e.details,
+                    Lang.t("&7Сгорела: &f") + GuiItems.stamp(e.time) + " &8(" + GuiItems.ago(System.currentTimeMillis() - e.time) + Lang.t(" назад)"),
+                    Lang.t("&7Срок: &f") + e.durationHours + Lang.t(" ч"),
+                    Lang.t("&8Клик — карточка игрока")),
                     () -> ACPlayerMenu.openByName(admin, e.name));
         }
 
-        gui.button(49, GuiItems.back("в панель"), () -> ACPanel.open(admin));
+        gui.button(49, GuiItems.back(Lang.t("в панель")), () -> ACPanel.open(admin));
         gui.fill(GuiItems.filler());
         gui.open(admin);
     }

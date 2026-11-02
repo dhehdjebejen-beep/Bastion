@@ -16,6 +16,7 @@ import dev.bastionclaims.core.Selection;
 import dev.bastionclaims.gui.ClaimMenu;
 import dev.bastionclaims.model.Claim;
 import dev.bastionclaims.util.Fmt;
+import dev.bastionclaims.util.Lang;
 import dev.bastionclaims.wand.ClaimWand;
 import net.minecraft.command.CommandSource;
 import net.minecraft.registry.Registries;
@@ -64,49 +65,49 @@ public final class ClaimCommands {
                 // mean, and a 3D box silently leaves their cellar and roof open.
                 // The explicit forms stay for anyone who wants the other shape.
                 .then(literal("create")
-                        .then(argument("название", greedyString()).executes(c -> create(c, null))))
+                        .then(argument(Lang.arg("название"), greedyString()).executes(c -> create(c, null))))
                 .then(literal("create2d")
-                        .then(argument("название", greedyString()).executes(c -> create(c, true))))
+                        .then(argument(Lang.arg("название"), greedyString()).executes(c -> create(c, true))))
                 .then(literal("create3d")
-                        .then(argument("название", greedyString()).executes(c -> create(c, false))))
+                        .then(argument(Lang.arg("название"), greedyString()).executes(c -> create(c, false))))
                 .then(literal("list").executes(ClaimCommands::list))
                 .then(literal("info").executes(ClaimCommands::info))
                 .then(literal("rename")
-                        .then(argument("новое", greedyString()).executes(ClaimCommands::rename)))
+                        .then(argument(Lang.arg("новое"), greedyString()).executes(ClaimCommands::rename)))
                 // "add"/"remove" are the names people reach for; trust/untrust
                 // stay as aliases so nobody's muscle memory breaks. Note it is
                 // deliberately NOT "delete" — that already deletes the claim.
                 .then(literal("add")
-                        .then(argument("игрок", word()).suggests(onlinePlayers())
+                        .then(argument(Lang.arg("игрок"), word()).suggests(onlinePlayers())
                                 .executes(ClaimCommands::trust)
-                                .then(argument("роль", word()).suggests(roleNames())
+                                .then(argument(Lang.arg("роль"), word()).suggests(roleNames())
                                         .executes(ClaimCommands::trust))))
                 .then(literal("remove")
-                        .then(argument("игрок", word()).suggests(members())
+                        .then(argument(Lang.arg("игрок"), word()).suggests(members())
                                 .executes(ClaimCommands::untrust)))
                 .then(literal("trust")
-                        .then(argument("игрок", word()).suggests(onlinePlayers())
+                        .then(argument(Lang.arg("игрок"), word()).suggests(onlinePlayers())
                                 .executes(ClaimCommands::trust)
-                                .then(argument("роль", word()).suggests(roleNames())
+                                .then(argument(Lang.arg("роль"), word()).suggests(roleNames())
                                         .executes(ClaimCommands::trust))))
                 .then(roleTree("role"))
-                .then(roleTree("роль"))
+                .then(roleTree(Lang.t("роль")))
                 .then(literal("untrust")
-                        .then(argument("игрок", word()).suggests(members())
+                        .then(argument(Lang.arg("игрок"), word()).suggests(members())
                                 .executes(ClaimCommands::untrust)))
                 .then(literal("borders").executes(ClaimCommands::borders))
                 .then(literal("why").executes(ClaimCommands::why))
                 .then(literal("почему").executes(ClaimCommands::why))
                 .then(literal("trace").executes(ClaimCommands::trace))
                 .then(literal("flag")
-                        .then(argument("флаг", word()).suggests(flagNames())
-                                .then(argument("значение", word()).suggests(onOff())
+                        .then(argument(Lang.arg("флаг"), word()).suggests(flagNames())
+                                .then(argument(Lang.arg("значение"), word()).suggests(onOff())
                                         .executes(ClaimCommands::flag))))
                 .then(literal("addzone").executes(ClaimCommands::addZone))
                 .then(literal("зона").executes(ClaimCommands::addZone))
                 .then(literal("zones").executes(ClaimCommands::zones))
                 .then(literal("delzone")
-                        .then(argument("номер", integer(1, 64)).executes(ClaimCommands::delZone)))
+                        .then(argument(Lang.arg("номер"), integer(1, 64)).executes(ClaimCommands::delZone)))
                 // Same toggle as /claims bypass. It lives here too because
                 // "/claim bypass" is what everyone actually types, and the
                 // missing "s" just answered "unknown command".
@@ -116,7 +117,7 @@ public final class ClaimCommands {
                         .executes(ClaimCommands::bypass))
                 .then(literal("transfer")
                         .then(literal("confirm").executes(ClaimCommands::transferConfirm))
-                        .then(argument("игрок", word()).suggests(onlinePlayers())
+                        .then(argument(Lang.arg("игрок"), word()).suggests(onlinePlayers())
                                 .executes(ClaimCommands::transferPrompt)))
                 .then(literal("delete")
                         .executes(ClaimCommands::deletePrompt)
@@ -169,7 +170,7 @@ public final class ClaimCommands {
     private static int create(CommandContext<ServerCommandSource> ctx, Boolean fullHeight) throws CommandSyntaxException {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         boolean twoD = fullHeight != null ? fullHeight : cfg().fullHeightByDefault;
-        ClaimService.Result r = ClaimService.tryCreate(p, getString(ctx, "название"), twoD);
+        ClaimService.Result r = ClaimService.tryCreate(p, getString(ctx, Lang.arg("название")), twoD);
         p.sendMessage(Fmt.text(r.message()), false);
         if (r.ok()) ClaimPresence.flash(p, 15_000);   // show what was just claimed
         return r.ok() ? 1 : 0;
@@ -197,7 +198,7 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = claimAtFeet(p);
         if (c == null) {
-            p.sendMessage(Fmt.text("&7Здесь нет привата."), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Здесь нет привата.")), false);
             return 0;
         }
         p.sendMessage(Fmt.text(cfg().message("info.header", c.name, c.owner)), false);
@@ -216,7 +217,7 @@ public final class ClaimCommands {
         p.sendMessage(Fmt.text(cfg().message("info.guest",
                 onOff(c.guestContainers), onOff(c.guestDoors), onOff(c.guestEntities))), false);
         if (c.roles != null && !c.roles.isEmpty()) {
-            p.sendMessage(Fmt.text("&7Роли: " + roleList(c) + " &8(/claim role)"), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Роли: ") + roleList(c) + " &8(/claim role)"), false);
         }
         return 1;
     }
@@ -229,7 +230,7 @@ public final class ClaimCommands {
         if (c == null) return 0;
         String old = c.name;
         // Same anti-spoofing rule as creation — see Fmt.sanitize.
-        String newName = Fmt.sanitize(getString(ctx, "новое"));
+        String newName = Fmt.sanitize(getString(ctx, Lang.arg("новое")));
         if (newName.isEmpty()) return fail(p, "create.noName");
         if (newName.length() > MAX_NAME_LEN) newName = newName.substring(0, MAX_NAME_LEN).trim();
         if (newName.isEmpty()) return fail(p, "create.noName");
@@ -245,18 +246,18 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        String target = getString(ctx, "игрок");
+        String target = getString(ctx, Lang.arg("игрок"));
         if (c.isOwner(target)) return fail(p, "trust.self");
         ServerPlayerEntity onlineTarget = ctx.getSource().getServer().getPlayerManager().getPlayer(target);
         // The UUID mirror is what protection checks go through; the name is
         // display-only. When the player is online their exact UUID is used.
         // Optional role: checked before anything changes, so a typo adds nobody.
-        String role = optionalArg(ctx, "роль");
+        String role = optionalArg(ctx, Lang.t("роль"));
         String roleName = null;
         if (role != null && !role.equalsIgnoreCase("none") && !role.equalsIgnoreCase("нет")) {
             roleName = c.findRole(role);
             if (roleName == null) {
-                p.sendMessage(Fmt.text("&cВ привате нет роли &f" + role + "&c. Роли: " + roleList(c)), false);
+                p.sendMessage(Fmt.text(Lang.t("&cВ привате нет роли &f") + role + Lang.t("&c. Роли: ") + roleList(c)), false);
                 return 0;
             }
         }
@@ -264,18 +265,18 @@ public final class ClaimCommands {
         ClaimManager.addMember(c, target, onlineTarget != null ? onlineTarget.getUuid() : null);
         ClaimManager.setMemberRole(c, targetUuid, roleName);
         p.sendMessage(Fmt.text(cfg().message("trust.added", target, c.name)
-                + (roleName != null ? " &7— роль &f" + roleName : "")), false);
+                + (roleName != null ? Lang.t(" &7— роль &f") + roleName : "")), false);
 
         ServerPlayerEntity online = onlineTarget;
         if (online != null) {
             // Being handed the keys to someone's base is worth a notification.
             online.sendMessage(Fmt.text("&a🛡 &f" + p.getGameProfile().name()
-                    + " &aдал тебе доступ к привату &f" + c.name), false);
+                    + Lang.t(" &aдал тебе доступ к привату &f") + c.name), false);
         } else {
             // Offline names cannot be verified, so at least say so out loud —
             // a typo used to add a player who does not exist, silently.
-            p.sendMessage(Fmt.text("&7Игрок &f" + target + "&7 не в сети — ник не проверить. "
-                    + "&8Если ошибся: &f/claim untrust " + target), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Игрок &f") + target + Lang.t("&7 не в сети — ник не проверить. "
+                    + "&8Если ошибся: &f/claim untrust ") + target), false);
         }
         return 1;
     }
@@ -284,7 +285,7 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        String target = getString(ctx, "игрок");
+        String target = getString(ctx, Lang.arg("игрок"));
         if (ClaimManager.removeMember(c, target)) {
             p.sendMessage(Fmt.text(cfg().message("trust.removed", target, c.name)), false);
             return 1;
@@ -296,11 +297,46 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        String flag = getString(ctx, "флаг").toLowerCase(Locale.ROOT);
-        boolean on = parseOnOff(getString(ctx, "значение"));
-        if (!applyFlag(c, flag, on)) return fail(p, "flag.unknown");
-        p.sendMessage(Fmt.text(cfg().message("flag.set", flag, c.name, on ? "&aВКЛ" : "&cВЫКЛ")), false);
+        String flag = getString(ctx, Lang.arg("флаг")).toLowerCase(Locale.ROOT);
+        boolean on = parseOnOff(getString(ctx, Lang.arg("значение")));
+        if (canonicalFlag(flag) == null) return fail(p, "flag.unknown");
+        if (!maySetFlag(p, flag)) {
+            p.sendMessage(Fmt.text(Lang.t("&cЭтот флаг меняет только администрация. &7Вам доступны: &f")
+                    + String.join(", ", cfg().playerFlags)), false);
+            return 0;
+        }
+        applyFlag(c, flag, on);
+        p.sendMessage(Fmt.text(cfg().message("flag.set", flag, c.name, on ? Lang.t("&aВКЛ") : Lang.t("&cВЫКЛ"))), false);
         return 1;
+    }
+
+    /** The flag's main command name for any of its aliases, or {@code null} when there is no such flag. */
+    public static String canonicalFlag(String flag) {
+        return switch (flag.toLowerCase(Locale.ROOT)) {
+            case "pvp" -> "pvp";
+            case "mobs", "mobgrief" -> "mobgrief";
+            case "mobdmg", "mobdamage" -> "mobdmg";
+            case "explosions", "tnt" -> "explosions";
+            case "fluids", "liquids", "water" -> "fluids";
+            case "pistons", "piston" -> "pistons";
+            case "hoppers", "hopper" -> "hoppers";
+            case "fire", "огонь" -> "fire";
+            case "containers", "chests" -> "containers";
+            case "doors", "buttons" -> "doors";
+            case "entities", "mobs2", "существа" -> "entities";
+            default -> null;
+        };
+    }
+
+    /** Operators switch every flag; an owner only those listed in {@code playerFlags}. */
+    public static boolean maySetFlag(ServerPlayerEntity p, String flag) {
+        if (ProtectionService.isOp(p)) return true;
+        String key = canonicalFlag(flag);
+        if (key == null) return false;
+        for (String allowed : cfg().playerFlags) {
+            if (key.equals(canonicalFlag(allowed))) return true;
+        }
+        return false;
     }
 
     /** Sets one claim flag by its command name; {@code false} when the name is unknown. Shared with {@code /claims flag}. */
@@ -336,17 +372,17 @@ public final class ClaimCommands {
                 .executes(ClaimCommands::roleList)
                 .then(literal("list").executes(ClaimCommands::roleList))
                 .then(literal("create")
-                        .then(argument("роль", word()).executes(ClaimCommands::roleCreate)))
+                        .then(argument(Lang.arg("роль"), word()).executes(ClaimCommands::roleCreate)))
                 .then(literal("delete")
-                        .then(argument("роль", word()).suggests(roleNames()).executes(ClaimCommands::roleDelete)))
+                        .then(argument(Lang.arg("роль"), word()).suggests(roleNames()).executes(ClaimCommands::roleDelete)))
                 .then(literal("perm")
-                        .then(argument("роль", word()).suggests(roleNames())
-                                .then(argument("право", word()).suggests(permNames())
-                                        .then(argument("значение", word()).suggests(onOff())
+                        .then(argument(Lang.arg("роль"), word()).suggests(roleNames())
+                                .then(argument(Lang.arg("право"), word()).suggests(permNames())
+                                        .then(argument(Lang.arg("значение"), word()).suggests(onOff())
                                                 .executes(ClaimCommands::rolePerm)))))
                 .then(literal("give")
-                        .then(argument("игрок", word()).suggests(members())
-                                .then(argument("роль", word()).suggests(roleNamesOrNone())
+                        .then(argument(Lang.arg("игрок"), word()).suggests(members())
+                                .then(argument(Lang.arg("роль"), word()).suggests(roleNamesOrNone())
                                         .executes(ClaimCommands::roleGive))));
     }
 
@@ -354,12 +390,12 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = claimAtFeet(p);
         if (c == null) {
-            p.sendMessage(Fmt.text("&7Здесь нет привата."), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Здесь нет привата.")), false);
             return 0;
         }
-        p.sendMessage(Fmt.text("&6▎ Роли привата &f" + c.name), false);
+        p.sendMessage(Fmt.text(Lang.t("&6▎ Роли привата &f") + c.name), false);
         if (c.roles == null || c.roles.isEmpty()) {
-            p.sendMessage(Fmt.text("&7Ролей нет — все пользователи полные. Создать: &f/claim role create <имя>"), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Ролей нет — все пользователи полные. Создать: &f/claim role create <имя>")), false);
         } else {
             for (var e : c.roles.entrySet()) {
                 p.sendMessage(Fmt.text("&f" + e.getKey() + " &7— " + permsText(e.getValue())), false);
@@ -371,7 +407,7 @@ public final class ClaimCommands {
                 p.sendMessage(Fmt.text("&8  " + nameOfMember(c, uuid) + " → " + role), false);
             }
         }
-        p.sendMessage(Fmt.text("&8Права: build, containers, doors, entities · /claim role perm <роль> <право> on|off"), false);
+        p.sendMessage(Fmt.text(Lang.t("&8Права: build, containers, doors, entities · /claim role perm <роль> <право> on|off")), false);
         return 1;
     }
 
@@ -379,17 +415,17 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        String name = cleanRoleName(getString(ctx, "роль"));
+        String name = cleanRoleName(getString(ctx, Lang.arg("роль")));
         if (name == null) {
-            p.sendMessage(Fmt.text("&cИмя роли: 1–16 символов, буквы, цифры, _ и -."), false);
+            p.sendMessage(Fmt.text(Lang.t("&cИмя роли: 1–16 символов, буквы, цифры, _ и -.")), false);
             return 0;
         }
         if (!ClaimManager.createRole(c, name)) {
-            p.sendMessage(Fmt.text(c.findRole(name) != null ? "&cТакая роль уже есть."
-                    : "&cНе больше " + ClaimManager.MAX_ROLES + " ролей в привате."), false);
+            p.sendMessage(Fmt.text(c.findRole(name) != null ? Lang.t("&cТакая роль уже есть.")
+                    : Lang.t("&cНе больше ") + ClaimManager.MAX_ROLES + Lang.t(" ролей в привате.")), false);
             return 0;
         }
-        p.sendMessage(Fmt.text("&aРоль &f" + name + "&a создана — пока без прав. Добавь: &f/claim role perm "
+        p.sendMessage(Fmt.text(Lang.t("&aРоль &f") + name + Lang.t("&a создана — пока без прав. Добавь: &f/claim role perm ")
                 + name + " <build|containers|doors|entities> on"), false);
         return 1;
     }
@@ -398,12 +434,12 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        String name = getString(ctx, "роль");
+        String name = getString(ctx, Lang.arg("роль"));
         if (!ClaimManager.deleteRole(c, name)) {
-            p.sendMessage(Fmt.text("&cНет роли &f" + name + "&c."), false);
+            p.sendMessage(Fmt.text(Lang.t("&cНет роли &f") + name + "&c."), false);
             return 0;
         }
-        p.sendMessage(Fmt.text("&aРоль &f" + name + "&a удалена; её пользователи снова полные."), false);
+        p.sendMessage(Fmt.text(Lang.t("&aРоль &f") + name + Lang.t("&a удалена; её пользователи снова полные.")), false);
         return 1;
     }
 
@@ -411,13 +447,13 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        String role = c.findRole(getString(ctx, "роль"));
-        Claim.Perm perm = Claim.Perm.parse(getString(ctx, "право"));
-        if (role == null) return failRaw(p, "&cНет такой роли. Роли: " + roleList(c));
-        if (perm == null) return failRaw(p, "&cПраво: build, containers, doors или entities.");
-        boolean on = parseOnOff(getString(ctx, "значение"));
+        String role = c.findRole(getString(ctx, Lang.arg("роль")));
+        Claim.Perm perm = Claim.Perm.parse(getString(ctx, Lang.arg("право")));
+        if (role == null) return failRaw(p, Lang.t("&cНет такой роли. Роли: ") + roleList(c));
+        if (perm == null) return failRaw(p, Lang.t("&cПраво: build, containers, doors или entities."));
+        boolean on = parseOnOff(getString(ctx, Lang.arg("значение")));
         ClaimManager.setRolePerm(c, role, perm, on);
-        p.sendMessage(Fmt.text("&aРоль &f" + role + "&a: " + perm.label + " " + onOff(on)), false);
+        p.sendMessage(Fmt.text(Lang.t("&aРоль &f") + role + "&a: " + Lang.t(perm.label) + " " + onOff(on)), false);
         return 1;
     }
 
@@ -425,30 +461,30 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        String target = getString(ctx, "игрок");
-        String role = getString(ctx, "роль");
+        String target = getString(ctx, Lang.arg("игрок"));
+        String role = getString(ctx, Lang.arg("роль"));
         ServerPlayerEntity online = ctx.getSource().getServer().getPlayerManager().getPlayer(target);
         java.util.UUID uuid = online != null ? online.getUuid() : Claim.offlineUuid(target);
-        if (!c.isMember(uuid)) return failRaw(p, "&f" + target + "&c не пользователь этого привата. Сначала &f/claim add " + target);
+        if (!c.isMember(uuid)) return failRaw(p, "&f" + target + Lang.t("&c не пользователь этого привата. Сначала &f/claim add ") + target);
         boolean none = role.equalsIgnoreCase("none") || role.equalsIgnoreCase("нет");
         if (!ClaimManager.setMemberRole(c, uuid, none ? null : role)) {
-            return failRaw(p, "&cНет роли &f" + role + "&c. Роли: " + roleList(c));
+            return failRaw(p, Lang.t("&cНет роли &f") + role + Lang.t("&c. Роли: ") + roleList(c));
         }
-        p.sendMessage(Fmt.text(none ? "&f" + target + "&a теперь полный пользователь."
-                : "&f" + target + "&a получил роль &f" + c.findRole(role)), false);
+        p.sendMessage(Fmt.text(none ? "&f" + target + Lang.t("&a теперь полный пользователь.")
+                : "&f" + target + Lang.t("&a получил роль &f") + c.findRole(role)), false);
         return 1;
     }
 
     /** "сундуки и станки, двери…" or "без прав". */
     public static String permsText(List<String> perms) {
-        if (perms == null || perms.isEmpty()) return "&8без прав (как гость)";
+        if (perms == null || perms.isEmpty()) return Lang.t("&8без прав (как гость)");
         List<String> out = new java.util.ArrayList<>();
-        for (Claim.Perm perm : Claim.Perm.values()) if (perms.contains(perm.key)) out.add(perm.label);
+        for (Claim.Perm perm : Claim.Perm.values()) if (perms.contains(perm.key)) out.add(Lang.t(perm.label));
         return "&f" + String.join("&7, &f", out);
     }
 
     private static String roleList(Claim c) {
-        return c.roles == null || c.roles.isEmpty() ? "&8нет" : "&f" + String.join("&7, &f", c.roles.keySet());
+        return c.roles == null || c.roles.isEmpty() ? Lang.t("&8нет") : "&f" + String.join("&7, &f", c.roles.keySet());
     }
 
     /** Display name of a member by UUID: the name list mirror, else the UUID itself. */
@@ -504,7 +540,7 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = claimAtFeet(p);
         if (c == null) {
-            p.sendMessage(Fmt.text("&7Здесь нет привата."), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Здесь нет привата.")), false);
             return 0;
         }
         p.sendMessage(Fmt.text(cfg().message("zone.header", c.name, c.zoneCount())), false);
@@ -515,7 +551,7 @@ public final class ClaimCommands {
                     b.sizeX(), c.fullHeight ? "∞" : String.valueOf(b.sizeY()), b.sizeZ(),
                     b.minX, b.minY, b.minZ, c.fullHeight ? b.area() : b.volume())), false);
         }
-        p.sendMessage(Fmt.text("&8Добавить: выдели топором и &f/claim addzone"), false);
+        p.sendMessage(Fmt.text(Lang.t("&8Добавить: выдели топором и &f/claim addzone")), false);
         return 1;
     }
 
@@ -523,7 +559,7 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        int index = getInteger(ctx, "номер");
+        int index = getInteger(ctx, Lang.arg("номер"));
         if (index == 1) return fail(p, "zone.primary");
         if (!ClaimManager.removeZone(c, index)) return fail(p, "zone.notFound", index);
         p.sendMessage(Fmt.text(cfg().message("zone.removed", index, c.name)), false);
@@ -545,63 +581,63 @@ public final class ClaimCommands {
         String dim = ProtectionService.dimOf(p);
         Identifier blockId = Registries.BLOCK.getId(p.getEntityWorld().getBlockState(pos).getBlock());
 
-        p.sendMessage(Fmt.text("&6▎ Разбор доступа"), false);
-        p.sendMessage(Fmt.text("&7Блок: &f" + blockId + " &8("
+        p.sendMessage(Fmt.text(Lang.t("&6▎ Разбор доступа")), false);
+        p.sendMessage(Fmt.text(Lang.t("&7Блок: &f") + blockId + " &8("
                 + pos.getX() + " " + pos.getY() + " " + pos.getZ() + ")"), false);
 
         Claim c = ClaimManager.claimAt(dim, pos.getX(), pos.getY(), pos.getZ());
         if (c == null) {
-            p.sendMessage(Fmt.text("&aЗдесь нет привата — ограничений нет."), false);
+            p.sendMessage(Fmt.text(Lang.t("&aЗдесь нет привата — ограничений нет.")), false);
             return 1;
         }
         String me = p.getGameProfile().name();
-        p.sendMessage(Fmt.text("&7Приват: &f" + c.name + " &8(владелец " + c.owner
-                + ", зон " + c.zoneCount() + ")"), false);
+        p.sendMessage(Fmt.text(Lang.t("&7Приват: &f") + c.name + Lang.t(" &8(владелец ") + c.owner
+                + Lang.t(", зон ") + c.zoneCount() + ")"), false);
         String myRole = c.roleOf(p.getUuid());
-        p.sendMessage(Fmt.text("&7Ты здесь: " + (c.isOwner(p.getUuid()) ? "&aвладелец"
-                : c.isMember(p.getUuid()) ? (myRole == null ? "&aпользователь"
-                        : "&eпользователь с ролью &f" + myRole + " &7(" + permsText(c.roleGrants(myRole)) + "&7)")
-                : "&cгость")), false);
+        p.sendMessage(Fmt.text(Lang.t("&7Ты здесь: ") + (c.isOwner(p.getUuid()) ? Lang.t("&aвладелец")
+                : c.isMember(p.getUuid()) ? (myRole == null ? Lang.t("&aпользователь")
+                        : Lang.t("&eпользователь с ролью &f") + myRole + " &7(" + permsText(c.roleGrants(myRole)) + "&7)")
+                : Lang.t("&cгость"))), false);
         String bypassWhy = ProtectionService.bypassReason(p);
         if (bypassWhy != null) {
-            p.sendMessage(Fmt.text("&e⚠ У тебя активен обход защиты — ты видишь НЕ то, "
-                    + "что видит обычный игрок."), false);
-            p.sendMessage(Fmt.text("&e   Почему: &f" + bypassWhy), false);
+            p.sendMessage(Fmt.text(Lang.t("&e⚠ У тебя активен обход защиты — ты видишь НЕ то, "
+                    + "что видит обычный игрок.")), false);
+            p.sendMessage(Fmt.text(Lang.t("&e   Почему: &f") + bypassWhy), false);
         }
 
         ProtectionService.Interaction cat = ClaimEvents.classify(p.getEntityWorld(), pos);
         String catRu = switch (cat) {
-            case CONTAINER -> "сундук/станок";
-            case DOOR -> "дверь/кнопка";
-            case ENTITY -> "существо";
-            case OTHER -> "обычный блок";
+            case CONTAINER -> Lang.t("сундук/станок");
+            case DOOR -> Lang.t("дверь/кнопка");
+            case ENTITY -> Lang.t("существо");
+            case OTHER -> Lang.t("обычный блок");
         };
         String flagLine = switch (cat) {
             case CONTAINER -> "containers = " + onOff(c.guestContainers);
             case DOOR -> "doors = " + onOff(c.guestDoors);
             case ENTITY -> "entities = " + onOff(c.guestEntities);
-            case OTHER -> "&8флагом не открывается — только владелец и пользователи";
+            case OTHER -> Lang.t("&8флагом не открывается — только владелец и пользователи");
         };
-        p.sendMessage(Fmt.text("&7Категория: &f" + catRu), false);
-        p.sendMessage(Fmt.text("&7Решает флаг: &f" + flagLine), false);
-        p.sendMessage(Fmt.text("&7Защита в конфиге: блоки " + onOff(cfg().protection.blockProtection)
-                + "&7, взаимодействия " + onOff(cfg().protection.interactProtection)), false);
-        p.sendMessage(Fmt.text("&8Все флаги гостей: сундуки " + onOff(c.guestContainers)
-                + "&8, двери " + onOff(c.guestDoors) + "&8, существа " + onOff(c.guestEntities)), false);
+        p.sendMessage(Fmt.text(Lang.t("&7Категория: &f") + catRu), false);
+        p.sendMessage(Fmt.text(Lang.t("&7Решает флаг: &f") + flagLine), false);
+        p.sendMessage(Fmt.text(Lang.t("&7Защита в конфиге: блоки ") + onOff(cfg().protection.blockProtection)
+                + Lang.t("&7, взаимодействия ") + onOff(cfg().protection.interactProtection)), false);
+        p.sendMessage(Fmt.text(Lang.t("&8Все флаги гостей: сундуки ") + onOff(c.guestContainers)
+                + Lang.t("&8, двери ") + onOff(c.guestDoors) + Lang.t("&8, существа ") + onOff(c.guestEntities)), false);
 
         Claim blocked = ProtectionService.blockingInteract(p, dim, pos.getX(), pos.getY(), pos.getZ(), cat);
         Claim building = ProtectionService.blockingBuild(p, dim, pos.getX(), pos.getY(), pos.getZ());
         p.sendMessage(Fmt.text(blocked == null
-                ? "&a✔ Приваты, использовать: РАЗРЕШЕНО"
-                : "&c✖ Приваты, использовать: ЗАПРЕЩЕНО"), false);
+                ? Lang.t("&a✔ Приваты, использовать: РАЗРЕШЕНО")
+                : Lang.t("&c✖ Приваты, использовать: ЗАПРЕЩЕНО")), false);
         p.sendMessage(Fmt.text(building == null
-                ? "&a✔ Приваты, ломать и ставить: РАЗРЕШЕНО"
-                : "&c✖ Приваты, ломать и ставить: ЗАПРЕЩЕНО"), false);
+                ? Lang.t("&a✔ Приваты, ломать и ставить: РАЗРЕШЕНО")
+                : Lang.t("&c✖ Приваты, ломать и ставить: ЗАПРЕЩЕНО")), false);
 
         // Everything below is outside this mod's control but decides the same
         // click, so it belongs in the same report.
-        p.sendMessage(Fmt.text("&7Режим игры: &f" + p.getGameMode()
-                + "&7, оператор: " + onOff(ProtectionService.isOp(p))), false);
+        p.sendMessage(Fmt.text(Lang.t("&7Режим игры: &f") + p.getGameMode()
+                + Lang.t("&7, оператор: ") + onOff(ProtectionService.isOp(p))), false);
         p.sendMessage(Fmt.text(dev.bastionclaims.core.MaxCoreBridge.stateLine(p)), false);
 
         // Vanilla's own spawn protection: a radius around the world spawn where
@@ -610,15 +646,15 @@ public final class ClaimCommands {
         // broken claim flag and is exactly what it gets mistaken for.
         if (p.getEntityWorld().getServer().isSpawnProtected(
                 (net.minecraft.server.world.ServerWorld) p.getEntityWorld(), pos, p)) {
-            p.sendMessage(Fmt.text("&c✖ ВАНИЛЬНАЯ ЗАЩИТА СПАВНА блокирует этот блок!"), false);
-            p.sendMessage(Fmt.text("&7Это не приват и не мод. Лечится в &fserver.properties&7: "
-                    + "&fspawn-protection=0&7, затем перезапуск."), false);
+            p.sendMessage(Fmt.text(Lang.t("&c✖ ВАНИЛЬНАЯ ЗАЩИТА СПАВНА блокирует этот блок!")), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Это не приват и не мод. Лечится в &fserver.properties&7: "
+                    + "&fspawn-protection=0&7, затем перезапуск.")), false);
             return 1;
         }
 
         if (blocked == null) {
-            p.sendMessage(Fmt.text("&8Приваты разрешают и защита спавна не мешает. "
-                    + "Если клик всё равно не работает — &f/claim trace&8 и нажми ещё раз."), false);
+            p.sendMessage(Fmt.text(Lang.t("&8Приваты разрешают и защита спавна не мешает. "
+                    + "Если клик всё равно не работает — &f/claim trace&8 и нажми ещё раз.")), false);
         }
         return 1;
     }
@@ -627,8 +663,8 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         boolean on = ClaimEvents.toggleTrace(p);
         p.sendMessage(Fmt.text(on
-                ? "&aТрассировка включена — каждый правый клик пишет своё решение."
-                : "&7Трассировка выключена."), false);
+                ? Lang.t("&aТрассировка включена — каждый правый клик пишет своё решение.")
+                : Lang.t("&7Трассировка выключена.")), false);
         return 1;
     }
 
@@ -652,7 +688,7 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Claim c = ownClaimAtFeet(p);
         if (c == null) return 0;
-        String wanted = getString(ctx, "игрок");
+        String wanted = getString(ctx, Lang.arg("игрок"));
 
         // The new owner must be online: handing a base to a mistyped name would
         // put it beyond anyone's reach.
@@ -678,11 +714,11 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         PendingTransfer pending = PENDING_TRANSFER.remove(p.getUuid());
         if (pending == null) {
-            p.sendMessage(Fmt.text("&7Нечего подтверждать. Встань в свой приват: &f/claim transfer <ник>"), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Нечего подтверждать. Встань в свой приват: &f/claim transfer <ник>")), false);
             return 0;
         }
         if (System.currentTimeMillis() - pending.askedAtMs() > CONFIRM_TTL_MS) {
-            p.sendMessage(Fmt.text("&7Подтверждение просрочено. Повтори &f/claim transfer <ник>&7."), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Подтверждение просрочено. Повтори &f/claim transfer <ник>&7.")), false);
             return 0;
         }
         Claim c = ClaimManager.byId(pending.claimId());
@@ -730,13 +766,13 @@ public final class ClaimCommands {
         ServerPlayerEntity p = ctx.getSource().getPlayerOrThrow();
         Pending pending = PENDING_DELETE.remove(p.getUuid());
         if (pending == null) {
-            p.sendMessage(Fmt.text("&7Нечего подтверждать. Встань в свой приват и напиши &f/claim delete"), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Нечего подтверждать. Встань в свой приват и напиши &f/claim delete")), false);
             return 0;
         }
         // A confirmation typed an hour later is almost certainly not the one the
         // player meant — make them ask again.
         if (System.currentTimeMillis() - pending.askedAtMs() > CONFIRM_TTL_MS) {
-            p.sendMessage(Fmt.text("&7Подтверждение просрочено. Повтори &f/claim delete&7."), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Подтверждение просрочено. Повтори &f/claim delete&7.")), false);
             return 0;
         }
         String id = pending.claimId();
@@ -749,7 +785,7 @@ public final class ClaimCommands {
         // the pending entry must not outlive that change. Operators keep their
         // explicit cross-owner path.
         if (!c.isOwner(p.getUuid()) && !ProtectionService.isOp(p)) {
-            p.sendMessage(Fmt.text("&cВладение приватом изменилось — подтверждение отменено."), false);
+            p.sendMessage(Fmt.text(Lang.t("&cВладение приватом изменилось — подтверждение отменено.")), false);
             return 0;
         }
         String name = c.name;
@@ -773,16 +809,20 @@ public final class ClaimCommands {
     private static Claim ownClaimAtFeet(ServerPlayerEntity p) {
         Claim c = claimAtFeet(p);
         if (c == null) {
-            p.sendMessage(Fmt.text("&7Встань внутри своего привата и повтори команду."), false);
+            p.sendMessage(Fmt.text(Lang.t("&7Встань внутри своего привата и повтори команду.")), false);
+            return null;
+        }
+        if (ClaimManager.isServerZone(c)) {
+            p.sendMessage(Fmt.text(Lang.t("&7Это защита спавна. Её размер задаётся в настройках приватов: &fspawnZone&7.")), false);
             return null;
         }
         if (!c.isOwner(p.getUuid())) {
             if (!ProtectionService.isOp(p)) {
-                p.sendMessage(Fmt.text("&cЭто не твой приват (владелец &f" + c.owner + "&c)."), false);
+                p.sendMessage(Fmt.text(Lang.t("&cЭто не твой приват (владелец &f") + c.owner + "&c)."), false);
                 return null;
             }
-            p.sendMessage(Fmt.text("&e⚠ Это ЧУЖОЙ приват &f" + c.name + "&e — владелец &f" + c.owner
-                    + "&e. Действуешь правами оператора."), false);
+            p.sendMessage(Fmt.text(Lang.t("&e⚠ Это ЧУЖОЙ приват &f") + c.name + Lang.t("&e — владелец &f") + c.owner
+                    + Lang.t("&e. Действуешь правами оператора.")), false);
         }
         return c;
     }
@@ -798,7 +838,7 @@ public final class ClaimCommands {
     }
 
     private static String onOff(boolean on) {
-        return on ? "&aВКЛ" : "&cВЫКЛ";
+        return on ? Lang.t("&aВКЛ") : Lang.t("&cВЫКЛ");
     }
 
     // ------------------------------------------------------------------ suggestions

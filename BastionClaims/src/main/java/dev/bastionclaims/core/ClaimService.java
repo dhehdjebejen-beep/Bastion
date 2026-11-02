@@ -4,6 +4,7 @@ import dev.bastionclaims.BastionClaims;
 import dev.bastionclaims.config.ClaimConfig;
 import dev.bastionclaims.model.Claim;
 import dev.bastionclaims.util.Fmt;
+import dev.bastionclaims.util.Lang;
 import net.minecraft.registry.RegistryKey;
 import net.minecraft.registry.RegistryKeys;
 import net.minecraft.server.MinecraftServer;
@@ -96,7 +97,7 @@ public final class ClaimService {
         if (!sel.complete()) return fail("sel.none");
         if (!sel.dim.equals(c.dim)) return failRaw(cfg().message("sel.diffWorld"));
 
-        if (c.zoneCount() >= cfg().maxZonesPerClaim) {
+        if (c.zoneCount() >= cfg().maxZonesPerClaim && !(ProtectionService.isOp(p) && cfg().opBypassLimits)) {
             return failRaw(cfg().message("zone.limit", cfg().maxZonesPerClaim));
         }
 
@@ -151,11 +152,11 @@ public final class ClaimService {
      */
     public static String selectionHint() {
         boolean twoD = cfg().fullHeightByDefault;
-        String primary = "&aСоздать: &f/claim create <название>";
-        String primaryNote = twoD ? " &8(во всю высоту, от бедрока до неба)" : " &8(куб ровно по двум точкам)";
+        String primary = Lang.t("&aСоздать: &f/claim create <название>");
+        String primaryNote = twoD ? Lang.t(" &8(во всю высоту, от бедрока до неба)") : Lang.t(" &8(куб ровно по двум точкам)");
         String other = twoD
-                ? "&8Нужен куб ровно по точкам: &7/claim create3d <название>"
-                : "&8Нужно во всю высоту: &7/claim create2d <название>";
+                ? Lang.t("&8Нужен куб ровно по точкам: &7/claim create3d <название>")
+                : Lang.t("&8Нужно во всю высоту: &7/claim create2d <название>");
         return primary + primaryNote + "\n" + other;
     }
 
@@ -170,13 +171,13 @@ public final class ClaimService {
         int hours = ProtectionService.playHours(target);
         int maxClaims = cfg().maxClaimsFor(hours);
         if (ClaimManager.countOf(target.getUuid()) >= maxClaims) {
-            return "&cУ игрока &f" + target.getGameProfile().name() + "&c уже максимум приватов ("
-                    + maxClaims + " при " + hours + "ч игры).";
+            return Lang.t("&cУ игрока &f") + target.getGameProfile().name() + Lang.t("&c уже максимум приватов (")
+                    + maxClaims + Lang.t(" при ") + hours + Lang.t("ч игры).");
         }
         long maxBlocks = cfg().maxBlocksFor(hours);
         if (c.cost() > maxBlocks) {
-            return "&cЭтот приват (&f" + c.cost() + "&c блоков) больше лимита игрока &f"
-                    + target.getGameProfile().name() + "&c (&f" + maxBlocks + "&c при " + hours + "ч игры).";
+            return Lang.t("&cЭтот приват (&f") + c.cost() + Lang.t("&c блоков) больше лимита игрока &f")
+                    + target.getGameProfile().name() + "&c (&f" + maxBlocks + Lang.t("&c при ") + hours + Lang.t("ч игры).");
         }
         return null;
     }

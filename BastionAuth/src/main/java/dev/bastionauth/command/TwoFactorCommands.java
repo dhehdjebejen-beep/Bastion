@@ -4,6 +4,7 @@ import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import dev.bastionauth.BastionAuth;
 import dev.bastionauth.core.AuthManager;
+import dev.bastionauth.core.Lang;
 import net.minecraft.server.command.ServerCommandSource;
 
 import static com.mojang.brigadier.arguments.StringArgumentType.getString;
@@ -43,34 +44,34 @@ public final class TwoFactorCommands {
             }));
         }
         for (String w : new String[]{"подтвердить", "confirm"}) {
-            tree.then(literal(w).then(argument("код", word()).executes(ctx -> {
+            tree.then(literal(w).then(argument(Lang.arg("код"), word()).executes(ctx -> {
                 AuthManager m = BastionAuth.manager();
                 if (m == null) return 0;
-                m.twoFaConfirm(ctx.getSource().getPlayerOrThrow(), getString(ctx, "код"));
+                m.twoFaConfirm(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("код")));
                 return 1;
             })));
         }
         for (String w : new String[]{"выключить", "disable", "off"}) {
-            tree.then(literal(w).then(argument("код", word()).executes(ctx -> {
+            tree.then(literal(w).then(argument(Lang.arg("код"), word()).executes(ctx -> {
                 AuthManager m = BastionAuth.manager();
                 if (m == null) return 0;
-                m.twoFaDisable(ctx.getSource().getPlayerOrThrow(), getString(ctx, "код"));
+                m.twoFaDisable(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("код")));
                 return 1;
             })));
         }
         for (String w : new String[]{"коды", "codes"}) {
-            tree.then(literal(w).then(argument("код", word()).executes(ctx -> {
+            tree.then(literal(w).then(argument(Lang.arg("код"), word()).executes(ctx -> {
                 AuthManager m = BastionAuth.manager();
                 if (m == null) return 0;
-                m.twoFaNewBackupCodes(ctx.getSource().getPlayerOrThrow(), getString(ctx, "код"));
+                m.twoFaNewBackupCodes(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("код")));
                 return 1;
             })));
         }
         // The login step: a bare code.
-        tree.then(argument("код", word()).executes(ctx -> {
+        tree.then(argument(Lang.arg("код"), word()).executes(ctx -> {
             AuthManager m = BastionAuth.manager();
             if (m == null) return 0;
-            m.tryCode(ctx.getSource().getPlayerOrThrow(), getString(ctx, "код"));
+            m.tryCode(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("код")));
             return 1;
         }));
         return tree;
@@ -84,25 +85,25 @@ public final class TwoFactorCommands {
             return 1;
         });
         for (String w : new String[]{"установить", "set"}) {
-            tree.then(literal(w).then(argument("слово", word()).executes(ctx -> {
+            tree.then(literal(w).then(argument(Lang.arg("слово"), word()).executes(ctx -> {
                 AuthManager m = BastionAuth.manager();
                 if (m == null) return 0;
-                m.codewordSet(ctx.getSource().getPlayerOrThrow(), getString(ctx, "слово"));
+                m.codewordSet(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("слово")));
                 return 1;
             })));
         }
         for (String w : new String[]{"снять", "remove"}) {
-            tree.then(literal(w).then(argument("слово", word()).executes(ctx -> {
+            tree.then(literal(w).then(argument(Lang.arg("слово"), word()).executes(ctx -> {
                 AuthManager m = BastionAuth.manager();
                 if (m == null) return 0;
-                m.codewordSpeak(ctx.getSource().getPlayerOrThrow(), getString(ctx, "слово"), true);
+                m.codewordSpeak(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("слово")), true);
                 return 1;
             })));
         }
-        tree.then(argument("слово", word()).executes(ctx -> {
+        tree.then(argument(Lang.arg("слово"), word()).executes(ctx -> {
             AuthManager m = BastionAuth.manager();
             if (m == null) return 0;
-            m.codewordSpeak(ctx.getSource().getPlayerOrThrow(), getString(ctx, "слово"), false);
+            m.codewordSpeak(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("слово")), false);
             return 1;
         }));
         return tree;

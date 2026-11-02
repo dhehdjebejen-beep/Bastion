@@ -3,6 +3,7 @@ package dev.bastionac.checks;
 import dev.bastionac.BastionAC;
 import dev.bastionac.core.Action;
 import dev.bastionac.core.CheckType;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.MathUtil;
 import dev.bastionac.core.PlayerData;
 import net.minecraft.entity.Entity;
@@ -125,7 +126,7 @@ public final class VehicleChecks {
                 if (d.vehicleBuffer > 4) {
                     d.vehicleBuffer = 2;
                     if (BastionAC.flag(player, d, CheckType.VEHICLE, String.format(
-                            "%s %.2f бл/пакет (лимит %.2f)", nameOf(vehicle), hDist, limit))) {
+                            Lang.t("%s %.2f бл/пакет (лимит %.2f)"), nameOf(vehicle), hDist, limit))) {
                         action = Action.max(action, Action.SETBACK);
                     }
                 }
@@ -151,7 +152,7 @@ public final class VehicleChecks {
                 if (d.vehicleAirBuffer > 2) {
                     d.vehicleAirBuffer = 1;
                     if (BastionAC.flag(player, d, CheckType.VEHICLE, String.format(
-                            "%s поднимается без опоры: dy=%.3f, %d пакетов в воздухе",
+                            Lang.t("%s поднимается без опоры: dy=%.3f, %d пакетов в воздухе"),
                             nameOf(vehicle), dy, d.vehicleAirTicks))) {
                         action = Action.max(action, Action.SETBACK);
                     }
@@ -168,7 +169,7 @@ public final class VehicleChecks {
             if (d.vehicleHoverBuffer > 4) {
                 d.vehicleHoverBuffer = 2;
                 if (BastionAC.flag(player, d, CheckType.VEHICLE, String.format(
-                        "%s не падает без опоры: dy=%.3f, %d пакетов в воздухе",
+                        Lang.t("%s не падает без опоры: dy=%.3f, %d пакетов в воздухе"),
                         nameOf(vehicle), dy, d.vehicleAirTicks))) {
                     action = Action.max(action, Action.SETBACK);
                 }

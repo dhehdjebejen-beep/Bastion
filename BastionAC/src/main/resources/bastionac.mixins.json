@@ -12,7 +12,13 @@
     "CommonNetworkHandlerAccessor",
     "TrackedHealthAccessor",
     "TrackedAbsorptionAccessor",
-    "NetherViewDistanceMixin"
+    "NetherViewDistanceMixin",
+    "ChunkDataShieldMixin",
+    "ChunkDeltaUpdateAccessor",
+    "ServerWorldShieldMixin",
+    "ChunkLoadingManagerAccessor",
+    "EntityTrackerShieldMixin",
+    "ChunkDataSenderShieldMixin"
   ],
   "injectors": {
     "defaultRequire": 1

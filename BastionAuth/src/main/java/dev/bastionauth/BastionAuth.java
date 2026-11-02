@@ -3,6 +3,7 @@ package dev.bastionauth;
 import dev.bastionauth.command.AuthCommands;
 import dev.bastionauth.config.AuthConfig;
 import dev.bastionauth.core.AuthManager;
+import dev.bastionauth.core.Lang;
 import dev.bastionauth.crypto.Secrets;
 import dev.bastionauth.db.Database;
 import net.fabricmc.api.DedicatedServerModInitializer;
@@ -271,6 +272,12 @@ public final class BastionAuth implements DedicatedServerModInitializer {
 
     @Override
     public void onInitializeServer() {
+        // The language comes first: command argument names are translated
+        // when the commands are registered, before the server starts.
+        Path langDir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
+        Lang.setDir(langDir);
+        Lang.use(AuthConfig.peekLanguage(langDir.resolve("config.json")), w -> LOGGER.warn("{}", w));
+
         ServerLifecycleEvents.SERVER_STARTING.register(server -> {
             try {
                 Path dir = FabricLoader.getInstance().getConfigDir().resolve(MOD_ID);
@@ -278,6 +285,7 @@ public final class BastionAuth implements DedicatedServerModInitializer {
                 Path configFile = dir.resolve("config.json");
                 dev.bastionauth.core.AgreementManager.load();
                 AuthConfig cfg = AuthConfig.loadOrCreate(configFile, warning -> LOGGER.warn("{}", warning));
+                if (!Lang.use(cfg.language, w -> LOGGER.warn("{}", w))) cfg.language = Lang.code();
                 Secrets secrets = Secrets.loadOrCreate(dir.resolve("secret.key"));
                 Database db = new Database(dir.resolve("auth.db"));
                 manager = new AuthManager(server, configFile, cfg, secrets, db);

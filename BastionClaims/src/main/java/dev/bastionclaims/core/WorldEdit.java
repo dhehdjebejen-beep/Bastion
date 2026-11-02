@@ -3,6 +3,7 @@ package dev.bastionclaims.core;
 import dev.bastionclaims.BastionClaims;
 import dev.bastionclaims.model.Claim;
 import dev.bastionclaims.util.Fmt;
+import dev.bastionclaims.util.Lang;
 import dev.bastionclaims.util.Worlds;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
@@ -318,7 +319,7 @@ public final class WorldEdit {
                 BastionClaims.LOGGER.error("WorldEdit job '{}' failed", job.label, ex);
                 queue.clear();
                 it.remove();
-                if (p != null) p.sendMessage(Fmt.text("&cОперация прервана из-за ошибки, смотри консоль."), false);
+                if (p != null) p.sendMessage(Fmt.text(Lang.t("&cОперация прервана из-за ошибки, смотри консоль.")), false);
                 continue;
             }
             if (finished) {
@@ -366,15 +367,15 @@ public final class WorldEdit {
         }
         if (p == null) return;
         String tail = job.undoTooBig
-                ? " &8(слишком много изменений — отменить нельзя)"
-                : " &8(/we undo — отменить)";
-        p.sendMessage(Fmt.text("&a" + job.label + ": изменено &f" + job.changes.size() + "&a блоков." + tail), false);
+                ? Lang.t(" &8(слишком много изменений — отменить нельзя)")
+                : Lang.t(" &8(/we undo — отменить)");
+        p.sendMessage(Fmt.text("&a" + job.label + Lang.t(": изменено &f") + job.changes.size() + Lang.t("&a блоков.") + tail), false);
         if (job.containersWithItems > 0) {
             p.sendMessage(Fmt.text(job.undoTooBig
-                    ? "&c⚠ Затёрто контейнеров с вещами: &f" + job.containersWithItems
-                            + "&c. Шаг слишком большой для истории — их содержимое не вернуть."
-                    : "&e Затёрто контейнеров с вещами: &f" + job.containersWithItems
-                            + "&e. Вещи не выпали — они в истории, &f/we undo&e вернёт их вместе с блоками."), false);
+                    ? Lang.t("&c⚠ Затёрто контейнеров с вещами: &f") + job.containersWithItems
+                            + Lang.t("&c. Шаг слишком большой для истории — их содержимое не вернуть.")
+                    : Lang.t("&e Затёрто контейнеров с вещами: &f") + job.containersWithItems
+                            + Lang.t("&e. Вещи не выпали — они в истории, &f/we undo&e вернёт их вместе с блоками.")), false);
         }
     }
 
@@ -408,7 +409,7 @@ public final class WorldEdit {
                              int minX, int minY, int minZ, int maxX, int maxY, int maxZ,
                              CellOp op, DataOp data, Carry carry) {
         if (busy(p.getUuid())) {
-            return new Result(false, "&cПодожди: предыдущая операция ещё выполняется.");
+            return new Result(false, Lang.t("&cПодожди: предыдущая операция ещё выполняется."));
         }
         long vol = volume(minX, minY, minZ, maxX, maxY, maxZ);
         var cfg = BastionClaims.config().worldEdit;
@@ -417,12 +418,12 @@ public final class WorldEdit {
         if (vol > max) return tooBig(vol, max);
         if (builder) {
             if (!MaxCoreBridge.isBuilding(p)) {
-                return new Result(false, "&cWorldEdit доступен только операторам и строителям в режиме стройки.");
+                return new Result(false, Lang.t("&cWorldEdit доступен только операторам и строителям в режиме стройки."));
             }
             String dim = world.getRegistryKey().getValue().toString();
             if (cfg.buildersOnlyInsideOwnClaim && !insideOwnClaim(p, dim, minX, minY, minZ, maxX, maxY, maxZ)) {
-                return new Result(false, "&cВ режиме стройки WorldEdit работает только внутри твоего привата — "
-                        + "вся область, от угла до угла.");
+                return new Result(false, Lang.t("&cВ режиме стройки WorldEdit работает только внутри твоего привата — "
+                        + "вся область, от угла до угла."));
             }
             CellOp inner = op;
             op = (x, y, z, cur) -> {
@@ -434,7 +435,7 @@ public final class WorldEdit {
         BoxJob job = new BoxJob(p.getUuid(), world, label, minX, minY, minZ, maxX, maxY, maxZ, op, data);
         job.produces = carry;
         enqueue(p.getUuid(), job);
-        return new Result(true, "&7" + label + ": обрабатываю &f" + vol + "&7 блоков…");
+        return new Result(true, "&7" + label + Lang.t(": обрабатываю &f") + vol + Lang.t("&7 блоков…"));
     }
 
     /** True when one zone of a claim the player owns contains the whole cuboid. */
@@ -452,11 +453,11 @@ public final class WorldEdit {
     // ================================================================== undo / redo
 
     public static Result undo(ServerPlayerEntity p, MinecraftServer server, int times) {
-        return pop(p, server, UNDO, true, "Возврат", "&cНечего отменять.", times);
+        return pop(p, server, UNDO, true, Lang.t("Возврат"), Lang.t("&cНечего отменять."), times);
     }
 
     public static Result redo(ServerPlayerEntity p, MinecraftServer server, int times) {
-        return pop(p, server, REDO, false, "Повтор", "&cНечего повторять.", times);
+        return pop(p, server, REDO, false, Lang.t("Повтор"), Lang.t("&cНечего повторять."), times);
     }
 
     /**
@@ -466,7 +467,7 @@ public final class WorldEdit {
      */
     private static Result pop(ServerPlayerEntity p, MinecraftServer server, Map<UUID, Deque<Snapshot>> from,
                               boolean toRedoStack, String label, String emptyMessage, int times) {
-        if (busy(p.getUuid())) return new Result(false, "&cПодожди: предыдущая операция ещё выполняется.");
+        if (busy(p.getUuid())) return new Result(false, Lang.t("&cПодожди: предыдущая операция ещё выполняется."));
         Deque<Snapshot> stack = from.get(p.getUuid());
         if (stack == null || stack.isEmpty()) return new Result(false, emptyMessage);
 
@@ -488,10 +489,10 @@ public final class WorldEdit {
         }
         if (queued == 0) {
             return new Result(false, skippedWorld == null ? emptyMessage
-                    : "&cМир того изменения больше не существует (" + skippedWorld.replace("minecraft:", "") + ").");
+                    : Lang.t("&cМир того изменения больше не существует (") + skippedWorld.replace("minecraft:", "") + ").");
         }
-        String tail = stack.isEmpty() ? "" : " &8(в запасе ещё " + stack.size() + ")";
-        return new Result(true, "&7" + label + ": шагов &f" + queued + "&7, блоков &f" + blocks + "&7…" + tail);
+        String tail = stack.isEmpty() ? "" : Lang.t(" &8(в запасе ещё ") + stack.size() + ")";
+        return new Result(true, "&7" + label + Lang.t(": шагов &f") + queued + Lang.t("&7, блоков &f") + blocks + "&7…" + tail);
     }
 
     public static int undoDepthOf(UUID player) {
@@ -526,8 +527,8 @@ public final class WorldEdit {
     }
 
     private static Result tooBig(long vol, int maxBlocks) {
-        return new Result(false, "&cВыделение слишком большое: &f" + vol + "&c > лимита &f" + maxBlocks
-                + "&c. Уменьши область или подними worldEdit.maxBlocks в конфиге.");
+        return new Result(false, Lang.t("&cВыделение слишком большое: &f") + vol + Lang.t("&c > лимита &f") + maxBlocks
+                + Lang.t("&c. Уменьши область или подними worldEdit.maxBlocks в конфиге."));
     }
 
     public static void forget(UUID player) {

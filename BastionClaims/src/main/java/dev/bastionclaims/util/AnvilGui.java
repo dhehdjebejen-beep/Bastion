@@ -79,8 +79,8 @@ public final class AnvilGui extends AnvilScreenHandler {
     public void updateResult() {
         String cur = text == null ? "" : text;
         ItemStack result = prop();
-        String shown = cur.isEmpty() ? "&8(введите название)" : "&f" + cur;
-        result.set(DataComponentTypes.CUSTOM_NAME, Fmt.text("&a✔ Создать: " + shown).styled(s -> s.withItalic(false)));
+        String shown = cur.isEmpty() ? Lang.t("&8(введите название)") : "&f" + cur;
+        result.set(DataComponentTypes.CUSTOM_NAME, Fmt.text(Lang.t("&a✔ Создать: ") + shown).styled(s -> s.withItalic(false)));
         if (this.output != null) {
             this.output.setStack(0, result);
         }

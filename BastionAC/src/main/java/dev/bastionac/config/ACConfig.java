@@ -2,6 +2,7 @@ package dev.bastionac.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import dev.bastionac.core.Lang;
 import dev.bastionac.util.SafeFiles;
 
 import java.io.IOException;
@@ -26,6 +27,14 @@ import java.util.function.Consumer;
  */
 public final class ACConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+
+    /**
+     * Language of every line the mod writes — alerts, menus, Argus reports:
+     * "ru" (default) or "en", or any {@code <code>.json} placed in
+     * {@code config/bastionac/lang}. Switched live with {@code /bac lang <code>}
+     * or the language button in the general settings.
+     */
+    public String language = "ru";
 
     public General general = new General();
     public Messages messages = new Messages();
@@ -239,10 +248,64 @@ public final class ACConfig {
          * ESP. Lowers load. 0 = off (3.3.1).
          */
         public int netherViewDistance = 6;
+        /**
+         * Ores (and ancient debris) with no open face go out as the stone
+         * around them: X-ray sees only what a player could see. Decided on
+         * the world itself every time a block is sent — chunk, single block,
+         * section update — so no client packet can make the server reveal a
+         * hidden one; a block opening up (mined, blown up, washed out)
+         * reveals its neighbours (3.6).
+         */
+        public boolean hideEnclosedOres = true;
+        /** The same for chests, barrels, ender chests and shulker boxes buried with no open face (3.6). */
+        public boolean hideEnclosedContainers = true;
+        /**
+         * Everything a storage ESP highlights (chests, barrels, shulkers,
+         * ender chests, furnaces, hoppers, dispensers, droppers, brewing
+         * stands, crafters, pots, chiseled bookshelves) goes out disguised
+         * while the player is farther than {@code storageRevealRadius}, and
+         * within it until they see it or come within
+         * {@code storageAlwaysVisibleRadius} (3.6).
+         */
+        public boolean hideFarStorage = true;
+        /** Beyond this distance storage is always disguised (blocks). */
+        public int storageRevealRadius = 48;
+        /** Within this distance storage is always shown, walls or not (blocks). */
+        public int storageAlwaysVisibleRadius = 8;
+        /** How often waiting storage is re-judged for each player (ticks). */
+        public int storageCheckIntervalTicks = 10;
+        /**
+         * Other players are sent to a client only while it could see them:
+         * inside the view cone and not behind solid blocks, or close by
+         * (3.6). Spectators see everyone. Off = vanilla tracking.
+         */
+        public boolean espShield = true;
+        /** Players this close are always sent, whatever the walls and the look (blocks). */
+        public int espAlwaysVisibleRadius = 16;
+        /**
+         * Full angle of the view cone. Vanilla's widest field of view is 110°
+         * vertically, about 137° across on a 16:9 screen and 150° on an
+         * ultrawide; the cone is wider so a turn reveals before it shows.
+         */
+        public int espViewConeDegrees = 200;
+        /** How often each pair is re-judged (ticks). */
+        public int espCheckIntervalTicks = 4;
+        /**
+         * Dropped items are sent only while the player has a clear line of
+         * sight to them, or is within {@code espItemAlwaysVisibleRadius}:
+         * item ESP shows nothing through walls (3.6).
+         */
+        public boolean espShieldItems = true;
+        /** Items this close are always sent (blocks). */
+        public int espItemAlwaysVisibleRadius = 8;
+        /** How often items are re-judged for each player (ticks). */
+        public int espItemCheckIntervalTicks = 10;
+        /** A player out of sight is removed only after this long (ticks): no flicker at corners. */
+        public int espHideDelayTicks = 20;
     }
 
     /** Current schema revision — see {@link General#configVersion}. */
-    public static final int CONFIG_VERSION = 15;
+    public static final int CONFIG_VERSION = 16;
 
     /** Telemetry v2: the per-session recording the analyzer and the owner read. */
     public static final class TelemetryCfg {
@@ -342,8 +405,8 @@ public final class ACConfig {
         /** Show the tripped check to the kicked player (helps cheaters — off by default). */
         public boolean revealCheckToPlayer = false;
 
-        public String kickScreen = "&c&lВы были отключены\n\n&7Система защиты обнаружила недопустимую активность.\n&7Если это ошибка — обратитесь к администрации.";
-        public String kickBroadcast = "&8[&cBAC&8] &e%name% &7отключён системой защиты &8(&7%check%&8)";
+        public String kickScreen = Lang.k("&c&lВы были отключены\n\n&7Система защиты обнаружила недопустимую активность.\n&7Если это ошибка — обратитесь к администрации.");
+        public String kickBroadcast = Lang.k("&8[&cBAC&8] &e%name% &7отключён системой защиты &8(&7%check%&8)");
         public String alertPrefix = "&8[&cBAC&8]";
     }
 
@@ -412,7 +475,7 @@ public final class ACConfig {
         /** Checks whose alerts never count toward the auto-tempban (FP-prone / mod-sensitive). */
         public java.util.List<String> banExcludedChecks = new java.util.ArrayList<>(BAN_EXCLUDED_DEFAULT);
         public boolean broadcastBan = true;
-        public String banReason = "&cАвтоблокировка BastionAC за читы. Если это ошибка — напишите администрации.";
+        public String banReason = Lang.k("&cАвтоблокировка BastionAC за читы. Если это ошибка — напишите администрации.");
 
         /**
          * Unconditional automatic permanent ban. Reserved exclusively for
@@ -606,6 +669,24 @@ public final class ACConfig {
         return cfg;
     }
 
+    /**
+     * Only the {@code language} of a config file, read before the commands are
+     * registered (their argument names are translated once). "ru" when the
+     * file is missing or unreadable.
+     */
+    public static String peekLanguage(Path file) {
+        try {
+            if (!Files.exists(file)) return "ru";
+            com.google.gson.JsonElement e = com.google.gson.JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+            if (e.isJsonObject() && e.getAsJsonObject().has("language")) {
+                return e.getAsJsonObject().get("language").getAsString();
+            }
+        } catch (Exception ignored) {
+            // loadOrCreate reports a broken file properly a moment later
+        }
+        return "ru";
+    }
+
     public static ACConfig loadOrCreate(Path file, Consumer<String> warn) throws IOException {
         ACConfig cfg = null;
         if (Files.exists(file)) {
@@ -646,6 +727,7 @@ public final class ACConfig {
     }
 
     void fillDefaults() {
+        if (language == null || language.isBlank()) language = "ru";
         if (general == null) general = new General();
         if (telemetry == null) telemetry = new TelemetryCfg();
         if (argus == null) argus = new ArgusCfg();
@@ -695,6 +777,13 @@ public final class ACConfig {
                 if (!punishment.banExcludedChecks.contains(key)) {
                     punishment.banExcludedChecks.add(key);
                 }
+            }
+            if (general.configVersion < 16) {
+                // v16 (02.11.2026): instant setbacks off again, on the owner's word. With them on,
+                // every movement check in proactive.alwaysMitigate set a player back on its first
+                // flag, VL 1 — one false flag was enough. Now a setback waits for the check's
+                // mitigateVl, as v12 intended; thresholds and the alwaysMitigate list stay as set.
+                general.instantMovementSetback = false;
             }
             if (general.configVersion < 15) {
                 // v15 (3.3.1): the info shield and the dead-player guard are on

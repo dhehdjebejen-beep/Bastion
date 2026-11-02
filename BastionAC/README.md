@@ -7,6 +7,42 @@ mod. It started as a targeted answer to **Meteor** and its forks and grew into a
 general engine; version 2.24 added a full pass over **Wurst 7**, built from that
 client's own source and defaults.
 
+## New in 3.7
+
+3.6 never reached this repository; everything since 3.5.0-beta is in 3.7.0.
+
+- **Info shield.** What a cheat could read is not sent:
+  - ores and buried storage with no open face go out as the stone around them,
+    decided from the world on every block sent, so no client packet can make the
+    server reveal them; an opened vein is shown whole;
+  - storage blocks (chests, barrels, furnaces, hoppers…) look like stone beyond
+    48 blocks, and nearer until there is a line of sight;
+  - players are sent only inside a 200° view cone with an open line to their
+    hitbox, or within 16 blocks;
+  - dropped items are sent only with a line of sight, or within 8 blocks.
+
+  Everything is set from the game: `/bac shield`. In minigame worlds the player
+  shield is off, and another mod may ask to reveal one viewer–target pair
+  (`EspShield.setReveal`).
+- **Russian or English** for everything the mod says (`/bac lang ru|en`), with
+  overrides in `config/bastionac/lang/<code>.json`.
+- **False flags, traced from session recordings:**
+  - NoSlow follows vanilla physics, since eating does not stop a sprint already
+    started;
+  - FastFall and NoFall are fixed in water-topped shafts, on sprint-hops down a
+    slope and right after a server stall;
+  - HighJump accepts a landing on a block corner, a wall or a snow edge judged
+    from the start of the tick, and a step-up by a hair;
+  - Speed no longer treats ceiling hops in a 2-high tunnel as walking;
+  - Nuker counts only instant breaks.
+- **Setbacks wait for the threshold.** Config schema v16 turns
+  `instantMovementSetback` off once, so a single flag no longer sets a player
+  back. Thresholds are unchanged.
+- **Argus:**
+  - ice slipperiness in the physics replay;
+  - lying down in a bed is not a "teleport on foot";
+  - the X-ray "purity drop" probe ignores coal and copper veins.
+
 ## New in 3.5 beta
 
 - **Builds instead of versions.** The mod version (3.5.0-beta) changes only with
@@ -217,6 +253,10 @@ nothing to read (`InfoShield`, outgoing packets):
 | other players' gear (enchantments, durability, names, shulker contents) | the item's looks only: model, trim, dye, banner, head, glint |
 | global and far sounds — dragon, Wither, End portal, horns (coordinates in the packet) | a point towards the source along the same line: the direction stays, the coordinates go |
 | everything past the Nether fog (terrain, players, mobs for a fog-less client or ESP) | chunks only up to the fog at 96 blocks (`netherViewDistance` 6) |
+| ores and buried chests, barrels, shulkers with no open face (X-ray) | the stone around them, decided from the world on every block sent; an opened vein is shown whole |
+| storage blocks far away (storage ESP) | stone beyond 48 blocks, and nearer until there is a line of sight |
+| players behind walls (player ESP) | not sent outside a 200° view cone or without a line to the hitbox, unless within 16 blocks |
+| dropped items behind walls (item ESP) | not sent without a line of sight, unless within 8 blocks |
 | with BastionAuth: the account before the password (location, inventory, effects, game mode, chat) | limbo above spawn, an empty inventory, a plain survival picture, chat held until login |
 
 **Exploits are blocked at the protocol, on the spot.** Things a vanilla client

@@ -1,5 +1,8 @@
 package dev.bastionac.argus;
 
+
+import dev.bastionac.core.Lang;
+
 import java.util.EnumMap;
 import java.util.Map;
 
@@ -18,22 +21,27 @@ public final class ArgusProgress {
 
     /** The stages of one run, in order. */
     public enum Stage {
-        QUEUED("в очереди"),
-        WAITING_SERVER("ждёт разгрузки сервера"),
-        READING("чтение телеметрии"),
-        MOVEMENT("повтор физики движения"),
-        PACKETS("пакеты и тайминги"),
-        COMBAT("бой и прицел"),
-        CLIENT("клиент и бренд"),
-        WORLD("мир вокруг туннелей"),
-        MINING("добыча и X-ray"),
-        SCORING("оценка и отчёт"),
-        DONE("готово");
+        QUEUED(Lang.k("в очереди")),
+        WAITING_SERVER(Lang.k("ждёт разгрузки сервера")),
+        READING(Lang.k("чтение телеметрии")),
+        MOVEMENT(Lang.k("повтор физики движения")),
+        PACKETS(Lang.k("пакеты и тайминги")),
+        COMBAT(Lang.k("бой и прицел")),
+        CLIENT(Lang.k("клиент и бренд")),
+        WORLD(Lang.k("мир вокруг туннелей")),
+        MINING(Lang.k("добыча и X-ray")),
+        SCORING(Lang.k("оценка и отчёт")),
+        DONE(Lang.k("готово"));
 
-        public final String label;
+        private final String ru;
 
-        Stage(String label) {
-            this.label = label;
+        Stage(String ru) {
+            this.ru = ru;
+        }
+
+        /** In the server language. */
+        public String label() {
+            return Lang.t(ru);
         }
 
         /** Part of the analysis proper (the bar counts these). */

@@ -188,7 +188,10 @@ public final class XrayTracker {
         // generate there, and ancient debris never matches those tags, so
         // the bed-bombing meta is excluded by classification alone.
         d.xrayValuable++;
-        d.xrayWindowOres++;
+        // Coal and copper come in big veins, often open to the air on a hillside: clearing one
+        // after a stretch of tunnelling is no jump in luck. 02.11 a 59-block coal vein at y 61-66
+        // ("скрытых 0") raised four purity-drop warnings. They still count everywhere else.
+        if (!state.isIn(BlockTags.COAL_ORES) && !state.isIn(BlockTags.COPPER_ORES)) d.xrayWindowOres++;
         if (!hasAdjacentAir) {
             d.xrayHidden++;
             d.xrayHiddenOreFamily = fam;
@@ -218,7 +221,7 @@ public final class XrayTracker {
         d.xrayHidden++;
         d.xrayHiddenOreFamily = fam;
         feed(player, d, KIND_HIDDEN, weightOf(fam),
-                " @" + pos.getX() + " " + pos.getY() + " " + pos.getZ() + " (сквозь блок)");
+                " @" + pos.getX() + " " + pos.getY() + " " + pos.getZ() + Lang.t(" (сквозь блок)"));
         return fam;
     }
 
@@ -270,12 +273,12 @@ public final class XrayTracker {
         tellStaff(player, d, kind, where);
         for (int i = 0; i < probes; i++) {
             AttackChainDetector.probe(new ChainPlayerAdapter(player), "xray",
-                    kind + where + " (руд " + d.xrayValuable + ", камень " + d.xrayStoneLike
-                            + ", скрытых " + d.xrayHidden + ")");
+                    kind + where + Lang.t(" (руд ") + d.xrayValuable + Lang.t(", камень ") + d.xrayStoneLike
+                            + Lang.t(", скрытых ") + d.xrayHidden + ")");
         }
         // A suspicious mining moment: the analyzer looks at the whole session.
         dev.bastionac.argus.Argus.signal(player, dev.bastionac.argus.Signal.Kind.XRAY_PROBE,
-                kind + where + " — руд " + d.xrayValuable + ", камня " + d.xrayStoneLike + ", скрытых " + d.xrayHidden);
+                kind + where + Lang.t(" — руд ") + d.xrayValuable + Lang.t(", камня ") + d.xrayStoneLike + Lang.t(", скрытых ") + d.xrayHidden);
     }
 
     /**
@@ -291,7 +294,7 @@ public final class XrayTracker {
         boolean verdict = !KIND_HIDDEN.equals(kind);
         int batched = verdict ? 1 : hiddenBatch(d, System.currentTimeMillis(), cfg.xrayHiddenAlertSeconds);
         if (batched == 0) return;
-        String stats = "руд " + d.xrayValuable + ", камня " + d.xrayStoneLike + ", скрытых " + d.xrayHidden;
+        String stats = Lang.t("руд ") + d.xrayValuable + Lang.t(", камня ") + d.xrayStoneLike + Lang.t(", скрытых ") + d.xrayHidden;
         Alerts.sendXray(player, labelOf(kind) + (batched > 1 ? " ×" + batched : ""), where.trim(), stats, verdict);
     }
 
@@ -312,10 +315,10 @@ public final class XrayTracker {
     /** Staff-facing name of a finding. */
     static String labelOf(String kind) {
         return switch (kind) {
-            case KIND_HIDDEN -> "скрытая руда";
-            case KIND_PURE -> "чистая руда без камня";
-            case KIND_RATIO -> "слишком много руды на камень";
-            case KIND_DROP -> "резкий скачок руды";
+            case KIND_HIDDEN -> Lang.t("скрытая руда");
+            case KIND_PURE -> Lang.t("чистая руда без камня");
+            case KIND_RATIO -> Lang.t("слишком много руды на камень");
+            case KIND_DROP -> Lang.t("резкий скачок руды");
             default -> kind;
         };
     }
@@ -385,9 +388,9 @@ public final class XrayTracker {
 
     /** Session summary for the player card UI. */
     public static String summary(PlayerData d) {
-        if (d == null) return "нет данных";
-        return "руд=" + d.xrayValuable + ", камня=" + d.xrayStoneLike
-                + ", скрытых=" + d.xrayHidden
+        if (d == null) return Lang.t("нет данных");
+        return Lang.t("руд=") + d.xrayValuable + Lang.t(", камня=") + d.xrayStoneLike
+                + Lang.t(", скрытых=") + d.xrayHidden
                 + (isHighRatio(d.xrayValuable, d.xrayStoneLike) ? " [ratio]" : "");
     }
 }

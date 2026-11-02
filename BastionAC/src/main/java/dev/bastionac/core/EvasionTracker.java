@@ -123,7 +123,7 @@ public final class EvasionTracker {
                 st.lastStaffToggleAt = now;
                 AttackChainDetector.evasion(adapter, "staff-toggle",
                         String.format(java.util.Locale.ROOT,
-                                "клик %.1f→%.1f/сек после появления персонала",
+                                Lang.t("клик %.1f→%.1f/сек после появления персонала"),
                                 st.cpsBeforeStaff, cps));
             }
         }
@@ -135,7 +135,7 @@ public final class EvasionTracker {
                 st.lastPanicAt = now;
                 AttackChainDetector.evasion(adapter, "panic-pause",
                         String.format(java.util.Locale.ROOT,
-                                "клик %.1f→%.1f/сек сразу после алерта",
+                                Lang.t("клик %.1f→%.1f/сек сразу после алерта"),
                                 st.cpsBeforeAlert, cps));
             }
         }

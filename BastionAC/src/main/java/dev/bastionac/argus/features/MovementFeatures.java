@@ -43,6 +43,7 @@ public final class MovementFeatures {
 
     static final double AIR_ACCEL = 0.026;     // 0.02, ×1.3 sprinting
     static final double SPRINT_JUMP = 0.2;
+    static final double ICE_SLIP = 0.989;       // blue ice, the slipperiest; ice and packed ice are 0.98
     static final double GRAVITY = 0.08;
     static final double TOL_GAIN = 0.0035;      // the 0.003 velocity zeroing plus float noise
     static final double TOL_TURN = 0.006;
@@ -130,6 +131,9 @@ public final class MovementFeatures {
                         || st.has(ST_GLIDING) || st.has(ST_SLEEPING)) {
                     skip[i] = true;
                 }
+                // Lying down moves the player onto the bed in one packet, between two 1 Hz states:
+                // the state after the move already says asleep (4,4 blocks in one move, 02.11).
+                if (si + 1 < s.states.size() && s.states.get(si + 1).has(ST_SLEEPING)) skip[i] = true;
             }
             int env = s.moveEnv.a[i];
             if ((env & (ENV_FLYING | ENV_VEHICLE)) != 0) skip[i] = true;
@@ -336,6 +340,12 @@ public final class MovementFeatures {
 
             // Friction that turned the move of tick b into the velocity tick c starts with.
             double slipA = ga ? slip(blocks, tk.groundBlock[a]) : 1.0;
+            // The recorded ground block is the one under the centre of the feet. On an edge or
+            // a step vanilla takes the friction from the block actually holding the player, and
+            // the recording reads air there (0.6): 02.11 a slide down an ice mountain with the
+            // keys released was read as 26 "разгонов без клавиш". The ICE bit says ice is under
+            // the footprint; with it, ice friction is allowed — the one that keeps more speed.
+            if (ga && (tk.env[a] & ENV_ICE) != 0) slipA = Math.max(slipA, ICE_SLIP);
             double f = slipA * 0.91;
             double vx = zero(d1x * f), vz = zero(d1z * f);
             double vh = Math.hypot(vx, vz);

@@ -193,7 +193,7 @@ reason)`, `isArrested(id)`.
 
 | Персонал — `/claims` (OP 3+) |
 |---|
-| `reload` · `bypass` · `list <ник>` · `delete <ник> <приват>` · `here` · `manage <ник> <приват>` · `flag <ник> <флаг> on\|off <приват>` · `/we …` |
+| `reload` · `lang [ru\|en]` · `bypass` · `list <ник>` · `delete <ник> <приват>` · `here` · `manage <ник> <приват>` · `flag <ник> <флаг> on\|off <приват>` · `/we …` |
 
 Для операторов `/claim bypass` работает так же, как `/claims bypass`.
 

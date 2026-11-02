@@ -3,6 +3,7 @@ package dev.bastionac.checks;
 import dev.bastionac.BastionAC;
 import dev.bastionac.core.Action;
 import dev.bastionac.core.CheckType;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.PlayerData;
 import net.minecraft.network.packet.c2s.play.ClickSlotC2SPacket;
 import net.minecraft.server.network.ServerPlayerEntity;
@@ -95,17 +96,17 @@ public final class ClientChecks {
         java.util.List<Finding> out = new java.util.ArrayList<>();
         java.util.LinkedHashSet<String> distinct = new java.util.LinkedHashSet<>(seen);
         if (distinct.size() >= 2) {
-            out.add(new Finding("бренд сменился за сессию: " + String.join(" → ", quoted(distinct)), 1.0));
+            out.add(new Finding(Lang.t("бренд сменился за сессию: ") + String.join(" → ", quoted(distinct)), 1.0));
         }
         if (brand == null) {
-            out.add(new Finding("клиент не прислал бренд (ванильный присылает всегда)", 0.5));
+            out.add(new Finding(Lang.t("клиент не прислал бренд (ванильный присылает всегда)"), 0.5));
             return out;
         }
         if (doctored(brand)) {
-            out.add(new Finding("подделанная строка бренда «" + printable(brand) + "»", 1.0));
+            out.add(new Finding(Lang.t("подделанная строка бренда «") + printable(brand) + "»", 1.0));
         }
         if (VANILLA_BRANDS.contains(brand) && !modChannels.isEmpty()) {
-            out.add(new Finding(String.format("бренд «%s» при %d модовых каналах (%s)",
+            out.add(new Finding(String.format(Lang.t("бренд «%s» при %d модовых каналах (%s)"),
                     brand, modChannels.size(), preview(modChannels)), 1.0));
         }
         return out;
@@ -191,7 +192,7 @@ public final class ClientChecks {
                     dev.bastionac.core.ClientVersion.protocolOf(player.getUuid()))) {
                 d.tickEndAbsenceFlagged = true;
                 BastionAC.flag(player, d, CheckType.BRANDSPOOF, d.movesWithoutTickEnd
-                        + " пакетов движения без единого ClientTickEnd — не ванильный клиент (бренд «"
+                        + Lang.t(" пакетов движения без единого ClientTickEnd — не ванильный клиент (бренд «")
                         + (d.brand == null ? "?" : printable(d.brand)) + "»)");
             }
             return;   // no tick ends seen: no per-tick invariant to test
@@ -265,7 +266,7 @@ public final class ClientChecks {
         double step = stepHeight(d.tickDys, dyCount);
         if (step > 0) {
             BastionAC.flag(player, d, CheckType.STEP, String.format(java.util.Locale.ROOT,
-                    "подъём на %.1f бл за тик через пакеты +%.3f/+%.3f (NCP-step)", step, d.tickDys[0], d.tickDys[1]));
+                    Lang.t("подъём на %.1f бл за тик через пакеты +%.3f/+%.3f (NCP-step)"), step, d.tickDys[0], d.tickDys[1]));
         }
 
         if (moves > 1) {
@@ -275,7 +276,7 @@ public final class ClientChecks {
             if (d.packetOrderBuffer >= 4) {
                 d.packetOrderBuffer = 1;
                 BastionAC.flag(player, d, CheckType.PACKETORDER,
-                        moves + " move-пакетов за один клиентский тик");
+                        moves + Lang.t(" move-пакетов за один клиентский тик"));
             }
         } else {
             d.packetOrderBuffer = Math.max(0, d.packetOrderBuffer - 0.25);
@@ -311,7 +312,7 @@ public final class ClientChecks {
         if (d.invMoveBuffer >= 6) {
             d.invMoveBuffer = 2;
             if (BastionAC.flag(player, d, CheckType.INVMOVE, String.format(
-                    "клик в инвентаре на ходу (%.2f бл/тик%s)", moved, sprinting ? ", спринт" : ""))) {
+                    Lang.t("клик в инвентаре на ходу (%.2f бл/тик%s)"), moved, sprinting ? Lang.t(", спринт") : ""))) {
                 return Action.CANCEL;
             }
         }
@@ -332,7 +333,7 @@ public final class ClientChecks {
         if (tick - d.lastBadRotationFlagTick < 20) return;
         d.lastBadRotationFlagTick = tick;
         BastionAC.flag(player, d, CheckType.BADROTATION,
-                String.format(java.util.Locale.ROOT, "наклон головы %.1f° (клиент не может больше 90°)", pitch));
+                String.format(java.util.Locale.ROOT, Lang.t("наклон головы %.1f° (клиент не может больше 90°)"), pitch));
     }
 
     // ------------------------------------------------------------------ auto totem
@@ -379,7 +380,7 @@ public final class ClientChecks {
         if (d.autoTotemBuffer >= 2) {
             d.autoTotemBuffer = 0.5;
             BastionAC.flag(player, d, CheckType.AUTOTOTEM, String.format(java.util.Locale.ROOT,
-                    "тотем в левой руке через %d мс после срабатывания (пинг %d мс)", gap, ping));
+                    Lang.t("тотем в левой руке через %d мс после срабатывания (пинг %d мс)"), gap, ping));
         }
     }
 

@@ -5,6 +5,7 @@ import com.mojang.brigadier.builder.LiteralArgumentBuilder;
 import com.mojang.brigadier.context.CommandContext;
 import dev.bastionauth.BastionAuth;
 import dev.bastionauth.core.AuthManager;
+import dev.bastionauth.core.Lang;
 import dev.bastionauth.core.LinkVerdict;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
@@ -63,18 +64,18 @@ public final class LinkCommands {
         // three of these are mine" — otherwise that is one command per pair,
         // and the count grows quadratically with the number of accounts.
         for (String word : new String[]{"доверять-все", "доверять-всё", "trust-all"}) {
-            root.then(literal(word).then(argument("ник", word())
+            root.then(literal(word).then(argument(Lang.arg("ник"), word())
                     .executes(ctx -> bulk(ctx, LinkVerdict.TRUSTED, ""))
-                    .then(argument("заметка", greedyString())
-                            .executes(ctx -> bulk(ctx, LinkVerdict.TRUSTED, getString(ctx, "заметка"))))));
+                    .then(argument(Lang.arg("заметка"), greedyString())
+                            .executes(ctx -> bulk(ctx, LinkVerdict.TRUSTED, getString(ctx, Lang.arg("заметка")))))));
         }
 
         // Bare name: that account's links. Registered last so the literals
         // above win the parse — "доверять" would otherwise read as a nick.
-        return root.then(argument("ник", word()).executes(ctx -> {
+        return root.then(argument(Lang.arg("ник"), word()).executes(ctx -> {
             AuthManager m = BastionAuth.manager();
             if (m == null) return 0;
-            m.adminLinks(ctx.getSource(), getString(ctx, "ник"));
+            m.adminLinks(ctx.getSource(), getString(ctx, Lang.arg("ник")));
             return 1;
         }));
     }
@@ -82,10 +83,10 @@ public final class LinkCommands {
     private static void verdict(LiteralArgumentBuilder<ServerCommandSource> root,
                                 LinkVerdict verdict, String... words) {
         for (String word : words) {
-            root.then(literal(word).then(argument("первый", word()).then(argument("второй", word())
+            root.then(literal(word).then(argument(Lang.arg("первый"), word()).then(argument(Lang.arg("второй"), word())
                     .executes(ctx -> pair(ctx, verdict, ""))
-                    .then(argument("заметка", greedyString())
-                            .executes(ctx -> pair(ctx, verdict, getString(ctx, "заметка")))))));
+                    .then(argument(Lang.arg("заметка"), greedyString())
+                            .executes(ctx -> pair(ctx, verdict, getString(ctx, Lang.arg("заметка"))))))));
         }
     }
 
@@ -99,14 +100,14 @@ public final class LinkCommands {
     private static int pair(CommandContext<ServerCommandSource> ctx, LinkVerdict verdict, String note) {
         AuthManager m = BastionAuth.manager();
         if (m == null) return 0;
-        m.adminSetLinkVerdict(ctx.getSource(), getString(ctx, "первый"), getString(ctx, "второй"), verdict, note);
+        m.adminSetLinkVerdict(ctx.getSource(), getString(ctx, Lang.arg("первый")), getString(ctx, Lang.arg("второй")), verdict, note);
         return 1;
     }
 
     private static int bulk(CommandContext<ServerCommandSource> ctx, LinkVerdict verdict, String note) {
         AuthManager m = BastionAuth.manager();
         if (m == null) return 0;
-        m.adminSetAllLinkVerdicts(ctx.getSource(), getString(ctx, "ник"), verdict, note);
+        m.adminSetAllLinkVerdicts(ctx.getSource(), getString(ctx, Lang.arg("ник")), verdict, note);
         return 1;
     }
 

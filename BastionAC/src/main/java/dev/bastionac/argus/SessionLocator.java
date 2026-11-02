@@ -1,5 +1,6 @@
 package dev.bastionac.argus;
 
+import dev.bastionac.core.Lang;
 import dev.bastionac.telemetry.TelemetryIO;
 
 import java.nio.file.Files;
@@ -69,7 +70,7 @@ public final class SessionLocator {
         long start = starts[idx];
         long end = Math.max(start, ends[idx]);
         if (start <= 0) return null;
-        String note = "сессия " + DAY.format(Instant.ofEpochMilli(start)) + "–" + TIME.format(Instant.ofEpochMilli(end));
+        String note = Lang.t("сессия ") + DAY.format(Instant.ofEpochMilli(start)) + "–" + TIME.format(Instant.ofEpochMilli(end));
         return new Window(start - MARGIN_MS, end + MARGIN_MS, note);
     }
 

@@ -4,6 +4,7 @@ import dev.bastionac.BastionAC;
 import dev.bastionac.config.ACConfig;
 import dev.bastionac.core.AcJournal;
 import dev.bastionac.core.BanManager;
+import dev.bastionac.core.Lang;
 import dev.bastionac.telemetry.Telemetry;
 import dev.bastionac.telemetry.TelemetryFormat;
 import dev.bastionac.telemetry.TelemetryIO;
@@ -177,7 +178,7 @@ public final class Argus {
                 case CLOSE -> {
                     c.status = CaseFile.Status.CLOSED;
                     c.closedAt = now;
-                    if (c.awaitsDecision()) c.closeNote = "мало данных при алертах — нужен взгляд персонала";
+                    if (c.awaitsDecision()) c.closeNote = Lang.t("мало данных при алертах — нужен взгляд персонала");
                     changed = true;
                 }
                 case NONE -> changed |= wasFinal != c.finalPass;
@@ -244,11 +245,11 @@ public final class Argus {
         }
         if (fresh) {
             AcJournal.write("argus-case", s.name(), s.uuid().toString(), s.kind().name().toLowerCase(Locale.ROOT), 0,
-                    "дело #" + c.id + ": " + s.kind().label + (s.detail() == null ? "" : " — " + s.detail())
-                            + (previous == null ? "" : " (прошлое дело #" + previous.id + ": "
-                            + previous.verdict.label + ", закрыто)"), null);
+                    Lang.t("дело #") + c.id + ": " + s.kind().label() + (s.detail() == null ? "" : " — " + s.detail())
+                            + (previous == null ? "" : Lang.t(" (прошлое дело #") + previous.id + ": "
+                            + previous.verdict.label() + Lang.t(", закрыто)")), null);
         }
-        Telemetry.acAction(s.uuid(), TelemetryFormat.ACT_SIGNAL, "Аргус #" + c.id + ": " + s.kind().label
+        Telemetry.acAction(s.uuid(), TelemetryFormat.ACT_SIGNAL, Lang.t("Аргус #") + c.id + ": " + s.kind().label()
                 + (s.detail() == null ? "" : " — " + s.detail()));
     }
 
@@ -283,7 +284,7 @@ public final class Argus {
         PROGRESS.put(id, progress);
         in.progress = progress;
         int priority = c.analyses == 0 ? ArgusWorker.PRIO_CASE : ArgusWorker.PRIO_RECHECK;
-        worker.submit(priority, "дело #" + id + " (" + c.name + ")", progress, () -> {
+        worker.submit(priority, Lang.t("дело #") + id + " (" + c.name + ")", progress, () -> {
             MinecraftServer s = BastionAC.server();
             if (s != null) s.execute(() -> {
                 CaseFile live = store.byId(id);
@@ -342,7 +343,7 @@ public final class Argus {
         c.lastError = out.error;
         c.sessionFiles = new ArrayList<>(out.files);
         c.categories.clear();
-        r.categories().forEach((k, v) -> c.categories.put(k.label, v));
+        r.categories().forEach((k, v) -> c.categories.put(k.label(), v));
         c.evidenceByKey = r.evidenceByKey();
         c.features.clear();
         for (Scorer.Row row : r.rows()) {
@@ -366,7 +367,7 @@ public final class Argus {
         c.verdict = verdictOf(r, cfg);
         writeReport(c, out, r);
         AcJournal.write("argus-verdict", c.name, c.uuid, "argus", 0, String.format(Locale.ROOT,
-                "дело #%s: %s, оценка %.3f — %s", c.id, c.verdict.label, c.score,
+                Lang.t("дело #%s: %s, оценка %.3f — %s"), c.id, c.verdict.label(), c.score,
                 c.findings.isEmpty() ? "" : c.findings.get(0)), null);
         tellWaitingStaff(c);
         if (outcome == CaseLifecycle.Outcome.RECORD_ONLY) {
@@ -399,8 +400,8 @@ public final class Argus {
         if (checks.isEmpty()) return;
         c.clearedNotified = true;
         String outcome = c.verdict == CaseFile.Verdict.CLEAN
-                ? "&aчисто &7— алерты (" + checks + ") телеметрией не подтвердились"
-                : "&7мало данных для вывода при алертах (" + checks + ") &e— посмотри сам";
+                ? Lang.t("&aчисто &7— алерты (") + checks + Lang.t(") телеметрией не подтвердились")
+                : Lang.t("&7мало данных для вывода при алертах (") + checks + Lang.t(") &e— посмотри сам");
         dev.bastionac.core.Alerts.sendArgusNote(c.name, c.id, outcome);
     }
 
@@ -422,8 +423,8 @@ public final class Argus {
         if (c.waitingStaff == null || c.waitingStaff.isEmpty()) return;
         MinecraftServer srv = BastionAC.server();
         if (srv != null) {
-            String line = String.format(Locale.ROOT, "&5[Аргус] &7Дело &f#%s &7(&f%s&7): %s%s &8(%.0f%%)%s",
-                    c.id, c.name, c.verdict.colour, c.verdict.label, c.score * 100,
+            String line = String.format(Locale.ROOT, Lang.t("&5[Аргус] &7Дело &f#%s &7(&f%s&7): %s%s &8(%.0f%%)%s"),
+                    c.id, c.name, c.verdict.colour, c.verdict.label(), c.score * 100,
                     c.findings.isEmpty() ? "" : " &7— " + c.findings.get(0));
             for (String who : c.waitingStaff) {
                 ServerPlayerEntity staff = srv.getPlayerManager().getPlayer(who);
@@ -448,13 +449,13 @@ public final class Argus {
         String m = mode();
         if ("AUTO".equals(m) && c.verdict == CaseFile.Verdict.GUILTY && c.action != CaseFile.Action.BANNED
                 && autoBanAllowed(c, r, cfg)) {
-            ban(c.id, "Аргус (авто)");
+            ban(c.id, Lang.t("Аргус (авто)"));
             return;
         }
         if (!"SHADOW".equals(m) && (worse || c.action == CaseFile.Action.NONE)) {
             c.action = CaseFile.Action.NOTIFIED;
             c.actionAt = System.currentTimeMillis();
-            dev.bastionac.core.Alerts.sendArgus(c.name, UUID.fromString(c.uuid), c.id, c.verdict.label,
+            dev.bastionac.core.Alerts.sendArgus(c.name, UUID.fromString(c.uuid), c.id, c.verdict.label(),
                     c.verdict == CaseFile.Verdict.GUILTY, c.score, c.findings);
         }
     }
@@ -495,15 +496,15 @@ public final class Argus {
         long now = System.currentTimeMillis();
         if (c.verdict == CaseFile.Verdict.GUILTY && c.action != CaseFile.Action.BANNED
                 && autoBanAllowed(c, r, cfg, p.banMinMinutes)) {
-            ban(c.id, "Аргус (проактивный)");
+            ban(c.id, Lang.t("Аргус (проактивный)"));
             return;
         }
         if (r.score() >= p.enforceScore && dev.bastionac.core.Proactive.enforce(uuid, p.enforceMinutes, now)) {
             AcJournal.write("argus-enforce", c.name, c.uuid, "argus", 0, String.format(Locale.ROOT,
-                    "дело #%s: оценка %.3f — откаты и отмены включены на %d мин", c.id, r.score(), p.enforceMinutes), null);
+                    Lang.t("дело #%s: оценка %.3f — откаты и отмены включены на %d мин"), c.id, r.score(), p.enforceMinutes), null);
             if (!"SHADOW".equals(mode())) {
                 dev.bastionac.core.Alerts.sendArgusNote(c.name, c.id, String.format(Locale.ROOT,
-                        "&cсанкции проверок включены &7на %d мин &8(оценка %.0f%%)", p.enforceMinutes, r.score() * 100));
+                        Lang.t("&cсанкции проверок включены &7на %d мин &8(оценка %.0f%%)"), p.enforceMinutes, r.score() * 100));
             }
         }
     }
@@ -537,7 +538,7 @@ public final class Argus {
     }
 
     private static void scan(String uuid, String name, Path file) {
-        worker.submit(ArgusWorker.PRIO_SCAN, "фоновый разбор " + name, () -> {
+        worker.submit(ArgusWorker.PRIO_SCAN, Lang.t("фоновый разбор ") + name, () -> {
             TelemetryIO.drain(10_000);
             Analysis.Input in = new Analysis.Input();
             in.uuid = uuid;
@@ -557,7 +558,7 @@ public final class Argus {
             } else if (r.score() >= cfg.suspectScore) {
                 String top = Report.findings(r, out).get(0);
                 signal(UUID.fromString(uuid), name, Signal.Kind.SESSION_SCAN,
-                        String.format(Locale.ROOT, "оценка %.2f: %s", r.score(), top));
+                        String.format(Locale.ROOT, Lang.t("оценка %.2f: %s"), r.score(), top));
             }
         });
     }
@@ -595,35 +596,35 @@ public final class Argus {
      * hour before now, so a player who had left had nothing to read.
      */
     public static Investigation investigate(UUID uuid, String name, String by, long atMs) {
-        if (!ready) return new Investigation(null, "Аргус не запущен", null);
+        if (!ready) return new Investigation(null, Lang.t("Аргус не запущен"), null);
         MinecraftServer srv = BastionAC.server();
         boolean online = srv != null && srv.getPlayerManager().getPlayer(uuid) != null;
         if (online && atMs <= 0) {
             String id = manual(uuid, name, by);
-            return new Investigation(id, id == null ? "Аргус выключен в конфиге" : null, "последний час, игрок в сети");
+            return new Investigation(id, id == null ? Lang.t("Аргус выключен в конфиге") : null, Lang.t("последний час, игрок в сети"));
         }
         Telemetry.flushNow(uuid);
         SessionLocator.Window w = SessionLocator.find(uuid.toString(), atMs);
         if (w == null) {
-            return new Investigation(null, "нет телеметрии " + (atMs > 0 ? "за это время" : "этого игрока")
-                    + " (хранится " + BastionAC.config().telemetry.retentionDays + " дн.)", null);
+            return new Investigation(null, Lang.t("нет телеметрии ") + (atMs > 0 ? Lang.t("за это время") : Lang.t("этого игрока"))
+                    + Lang.t(" (хранится ") + BastionAC.config().telemetry.retentionDays + Lang.t(" дн.)"), null);
         }
         if (online && w.to() >= System.currentTimeMillis() - SessionLocator.MARGIN_MS) {
             // The alert is from the session being played right now: the live case.
             String id = manual(uuid, name, by);
-            return new Investigation(id, id == null ? "Аргус выключен в конфиге" : null, "текущая сессия");
+            return new Investigation(id, id == null ? Lang.t("Аргус выключен в конфиге") : null, Lang.t("текущая сессия"));
         }
         PENDING_WINDOWS.put(uuid.toString(), w);
         try {
-            String id = manual(uuid, name, by, "запросил " + by + ": " + w.note());
-            return new Investigation(id, id == null ? "Аргус выключен в конфиге" : null, w.note());
+            String id = manual(uuid, name, by, Lang.t("запросил ") + by + ": " + w.note());
+            return new Investigation(id, id == null ? Lang.t("Аргус выключен в конфиге") : null, w.note());
         } finally {
             PENDING_WINDOWS.remove(uuid.toString());
         }
     }
 
     public static String manual(UUID uuid, String name, String by) {
-        return manual(uuid, name, by, "запросил " + by);
+        return manual(uuid, name, by, Lang.t("запросил ") + by);
     }
 
     private static String manual(UUID uuid, String name, String by, String detail) {
@@ -667,7 +668,7 @@ public final class Argus {
             MinecraftServer srv = BastionAC.server();
             if (c.analyses == 0 && !c.inFlight && srv != null) queue(srv, c, BastionAC.config().argus);
         }
-        AcJournal.write("argus-label", c.name, c.uuid, "argus", 0, "дело #" + c.id + ": " + label.label + " (" + by + ")", null);
+        AcJournal.write("argus-label", c.name, c.uuid, "argus", 0, Lang.t("дело #") + c.id + ": " + label.label() + " (" + by + ")", null);
         store.save();
         refit();
         return true;
@@ -683,7 +684,7 @@ public final class Argus {
             if (c.label == CaseFile.Label.CLEAN) samples.add(new Calibration.Sample(c.evidenceByKey, c.signalEvidence, false));
         }
         double suspect = BastionAC.config().argus.suspectScore;
-        worker.submit(ArgusWorker.PRIO_LABELS, "переобучение модели", () -> {
+        worker.submit(ArgusWorker.PRIO_LABELS, Lang.t("переобучение модели"), () -> {
             calibration.fit(samples, suspect);
             dirtyModel = true;
             MinecraftServer srv = BastionAC.server();
@@ -695,7 +696,7 @@ public final class Argus {
     public static boolean ban(String id, String by) {
         CaseFile c = store == null ? null : store.byId(id);
         if (c == null) return false;
-        String reason = c.findings.isEmpty() ? c.verdict.label : c.findings.get(0);
+        String reason = c.findings.isEmpty() ? c.verdict.label() : c.findings.get(0);
         BanManager.argusBan(UUID.fromString(c.uuid), c.name, c.id, reason, by);
         c.action = CaseFile.Action.BANNED;
         c.actionBy = by;
@@ -794,7 +795,7 @@ public final class Argus {
     public static List<String> status() {
         List<String> out = new ArrayList<>();
         if (!ready) {
-            out.add("&cАргус не запущен");
+            out.add(Lang.t("&cАргус не запущен"));
             return out;
         }
         int open = 0, suspect = 0;
@@ -802,24 +803,24 @@ public final class Argus {
             if (c.open()) open++;
             if (c.open() && (c.verdict == CaseFile.Verdict.SUSPECT || c.verdict == CaseFile.Verdict.GUILTY)) suspect++;
         }
-        out.add("&7Режим: &f" + modeLabel(mode()));
-        out.add("&7Открытых дел: &f" + open + " &8(подозрительных " + suspect + ")");
-        out.add("&7Нормы: &f" + baselines.sessions() + " &7сессий");
-        out.add("&7Модель: &f" + Calibration.Prior.get().version()
-                + " &7+ меток владельца: &f" + calibration.cheaters + " &7читеров, &f" + calibration.clean + " &7чистых");
-        out.add("&7Разборов: &f" + analysesDone + "&7, фоновых: &f" + scansDone
-                + (lastAnalysisMs > 0 ? " &8(последний " + lastDurationMs + " мс)" : ""));
+        out.add(Lang.t("&7Режим: &f") + modeLabel(mode()));
+        out.add(Lang.t("&7Открытых дел: &f") + open + Lang.t(" &8(подозрительных ") + suspect + ")");
+        out.add(Lang.t("&7Нормы: &f") + baselines.sessions() + Lang.t(" &7сессий"));
+        out.add(Lang.t("&7Модель: &f") + Calibration.Prior.get().version()
+                + Lang.t(" &7+ меток владельца: &f") + calibration.cheaters + Lang.t(" &7читеров, &f") + calibration.clean + Lang.t(" &7чистых"));
+        out.add(Lang.t("&7Разборов: &f") + analysesDone + Lang.t("&7, фоновых: &f") + scansDone
+                + (lastAnalysisMs > 0 ? Lang.t(" &8(последний ") + lastDurationMs + Lang.t(" мс)") : ""));
         String cur = worker == null ? null : worker.current();
-        out.add("&7Сейчас: &f" + (cur == null ? "ожидание" : cur) + " &8(в очереди " + (worker == null ? 0 : worker.pending()) + ")");
-        out.add("&7Телеметрия: &f" + (TelemetryIO.totalBytes() / (1024 * 1024)) + " МБ &7в " + TelemetryIO.fileCount() + " файлах");
+        out.add(Lang.t("&7Сейчас: &f") + (cur == null ? Lang.t("ожидание") : cur) + Lang.t(" &8(в очереди ") + (worker == null ? 0 : worker.pending()) + ")");
+        out.add(Lang.t("&7Телеметрия: &f") + (TelemetryIO.totalBytes() / (1024 * 1024)) + Lang.t(" МБ &7в ") + TelemetryIO.fileCount() + Lang.t(" файлах"));
         return out;
     }
 
     public static String modeLabel(String m) {
         return switch (m) {
-            case "SHADOW" -> "тень (только дела)";
-            case "AUTO" -> "авто (сам банит)";
-            default -> "помощник (сообщает персоналу)";
+            case "SHADOW" -> Lang.t("тень (только дела)");
+            case "AUTO" -> Lang.t("авто (сам банит)");
+            default -> Lang.t("помощник (сообщает персоналу)");
         };
     }
 

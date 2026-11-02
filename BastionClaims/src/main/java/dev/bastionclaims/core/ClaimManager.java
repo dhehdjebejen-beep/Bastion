@@ -5,6 +5,7 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.reflect.TypeToken;
 import dev.bastionclaims.BastionClaims;
 import dev.bastionclaims.model.Claim;
+import dev.bastionclaims.util.Lang;
 
 import java.io.IOException;
 import java.lang.reflect.Type;
@@ -330,13 +331,41 @@ public final class ClaimManager {
     /** The claim covering this block, or {@code null} if the block is unclaimed. */
     public static Claim claimAt(String dim, int x, int y, int z) {
         Map<Long, List<Claim>> world = INDEX.get(dim);
-        if (world == null) return null;
-        List<Claim> bucket = world.get(chunkKey(x >> 4, z >> 4));
-        if (bucket == null) return null;
-        for (Claim c : bucket) {
-            if (c.contains(x, y, z)) return c;
+        List<Claim> bucket = world == null ? null : world.get(chunkKey(x >> 4, z >> 4));
+        if (bucket != null) {
+            for (Claim c : bucket) {
+                if (c.contains(x, y, z)) return c;
+            }
         }
-        return null;
+        Claim spawn = spawnZone();
+        return spawn != null && spawn.contains(dim, x, y, z) ? spawn : null;
+    }
+
+    /** Id of the spawn protection; it is never saved and never in the index. */
+    public static final String SPAWN_ZONE_ID = "server:spawn";
+    private static volatile Object spawnBuiltFor;
+    private static volatile Claim spawnClaim;
+
+    /** True for the spawn protection, which no command may change. */
+    public static boolean isServerZone(Claim c) {
+        return c != null && SPAWN_ZONE_ID.equals(c.id);
+    }
+
+    /** The spawn protection as a claim, rebuilt whenever the config is reloaded. */
+    public static Claim spawnZone() {
+        dev.bastionclaims.config.ClaimConfig cfg = BastionClaims.config();
+        if (cfg == null || cfg.spawnZone == null || !cfg.spawnZone.enabled) return null;
+        dev.bastionclaims.config.ClaimConfig.SpawnZone z = cfg.spawnZone;
+        if (spawnBuiltFor != z) {
+            Claim c = Claim.of(SPAWN_ZONE_ID, Lang.t("Сервер"), z.name, z.dim,
+                    z.centerX - z.radius, -2048, z.centerZ - z.radius,
+                    z.centerX + z.radius, 4096, z.centerZ + z.radius);
+            c.fullHeight = true;
+            c.guestDoors = z.guestDoors;
+            spawnClaim = c;
+            spawnBuiltFor = z;
+        }
+        return spawnClaim;
     }
 
     /**
@@ -345,6 +374,8 @@ public final class ClaimManager {
      */
     public static Claim firstOverlap(String dim, int minX, int minY, int minZ,
                                      int maxX, int maxY, int maxZ, String ignoreId) {
+        Claim spawn = spawnZone();
+        if (spawn != null && spawn.sameDim(dim) && spawn.intersects(minX, minY, minZ, maxX, maxY, maxZ)) return spawn;
         Map<Long, List<Claim>> world = INDEX.get(dim);
         if (world == null) return null;
         for (int cx = minX >> 4; cx <= (maxX >> 4); cx++) {
@@ -539,7 +570,7 @@ public final class ClaimManager {
 
     /** {@code base}, or "base 2", "base 3"… — the first name free for that owner. */
     public static String uniqueNameFor(String owner, String base, int maxNameLen) {
-        String name = base == null || base.isBlank() ? "приват" : base.trim();
+        String name = base == null || base.isBlank() ? Lang.t("приват") : base.trim();
         if (!nameTaken(owner, name)) return name;
         for (int n = 2; n < 1000; n++) {
             String suffix = " " + n;
@@ -595,11 +626,103 @@ public final class ClaimManager {
     public static synchronized boolean removeMember(Claim c, String member, UUID memberUuid) {
         if (c == null) return false;
         boolean removedName = c.removeMember(member);
-        boolean removedUuid = c.removeMemberUuid(Claim.offlineUuid(member))
-                || (memberUuid != null && c.removeMemberUuid(memberUuid));
+        // Names are kept lower-case, but the UUID was made from the name as the
+        // player spells it: removing "steve" took away the offline UUID of
+        // "steve" and left the real one of "Steve" — the player vanished
+        // from the list, still counted as a member, and the menu would not offer
+        // to add them back (02.11). Every UUID the name can stand for goes.
+        java.util.Set<UUID> ids = uuidsOf(member);
+        if (memberUuid != null) ids.add(memberUuid);
+        boolean removedUuid = false;
+        for (UUID id : ids) removedUuid |= c.removeMemberUuid(id);
         boolean changed = removedName || removedUuid;
         if (changed) save();
         return changed;
+    }
+
+    // ------------------------------------------------------------------ names and UUIDs
+
+    private static volatile net.minecraft.server.MinecraftServer server;
+
+    public static void attach(net.minecraft.server.MinecraftServer s) {
+        server = s;
+    }
+
+    /**
+     * Every UUID a name may stand for on this offline-mode server: the online
+     * player of that name in any letter case, the server's name cache, and the
+     * offline formula of the name as given.
+     */
+    public static java.util.Set<UUID> uuidsOf(String name) {
+        java.util.Set<UUID> out = new java.util.LinkedHashSet<>();
+        if (name == null || name.isBlank()) return out;
+        var s = server;
+        if (s != null) {
+            for (var p : s.getPlayerManager().getPlayerList()) {
+                if (p.getGameProfile().name().equalsIgnoreCase(name)) out.add(p.getUuid());
+            }
+        }
+        for (Map.Entry<UUID, String> e : nameCache().entrySet()) {
+            if (e.getValue().equalsIgnoreCase(name)) out.add(e.getKey());
+        }
+        out.add(Claim.offlineUuid(name));
+        return out;
+    }
+
+    /** The UUID this claim actually trusts for a listed member name (for roles), or the offline one. */
+    public static UUID memberUuid(Claim c, String name) {
+        for (UUID id : uuidsOf(name)) if (c.isMember(id)) return id;
+        return Claim.offlineUuid(name);
+    }
+
+    /** usercache.json: UUID → name as the player spells it. Empty when unreadable. */
+    private static Map<UUID, String> nameCache() {
+        Map<UUID, String> out = new HashMap<>();
+        Path f = net.fabricmc.loader.api.FabricLoader.getInstance().getGameDir().resolve("usercache.json");
+        if (!Files.isRegularFile(f)) return out;
+        try {
+            var arr = com.google.gson.JsonParser.parseString(Files.readString(f, StandardCharsets.UTF_8)).getAsJsonArray();
+            for (var el : arr) {
+                var o = el.getAsJsonObject();
+                if (!o.has("name") || !o.has("uuid")) continue;
+                try {
+                    out.put(UUID.fromString(o.get("uuid").getAsString()), o.get("name").getAsString());
+                } catch (IllegalArgumentException ignored) {
+                }
+            }
+        } catch (Exception e) {
+            BastionClaims.LOGGER.warn("usercache.json not read: {}", e.toString());
+        }
+        return out;
+    }
+
+    /**
+     * Members left behind by the removal bug above: a trusted UUID whose player
+     * the name cache knows, but whose name is no longer on the claim's list.
+     * Removed once at start, with a log line each.
+     */
+    public static synchronized void repairOrphanMembers() {
+        Map<UUID, String> names = nameCache();
+        if (names.isEmpty()) return;
+        int fixed = 0;
+        for (Claim c : CLAIMS) {
+            if (c.memberUuids == null) continue;
+            for (String raw : new ArrayList<>(c.memberUuids)) {
+                UUID id;
+                try {
+                    id = UUID.fromString(raw);
+                } catch (IllegalArgumentException e) {
+                    continue;
+                }
+                String name = names.get(id);
+                if (name == null || c.isMember(name)) continue;
+                c.removeMemberUuid(id);
+                fixed++;
+                BastionClaims.LOGGER.info("Claim '{}': {} was removed by name but still trusted by UUID — trust removed",
+                        c.name, name);
+            }
+        }
+        if (fixed > 0) save();
     }
 
     // ------------------------------------------------------------------ roles

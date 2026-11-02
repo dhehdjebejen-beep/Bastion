@@ -1,6 +1,7 @@
 package dev.bastionac.argus;
 
 import dev.bastionac.BastionAC;
+import dev.bastionac.core.Lang;
 
 import java.util.concurrent.PriorityBlockingQueue;
 import java.util.concurrent.atomic.AtomicLong;
@@ -127,7 +128,7 @@ final class ArgusWorker {
             if (srv == null || srv.getAverageTickTime() <= limit) return;
             if (progress != null) {
                 progress.stage(ArgusProgress.Stage.WAITING_SERVER);
-                progress.detail(String.format(java.util.Locale.ROOT, "тик %.0f мс при пороге %.0f мс",
+                progress.detail(String.format(java.util.Locale.ROOT, Lang.t("тик %.0f мс при пороге %.0f мс"),
                         srv.getAverageTickTime(), limit));
             }
             try {

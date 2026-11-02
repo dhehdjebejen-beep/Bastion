@@ -4,6 +4,7 @@ import dev.bastionclaims.BastionClaims;
 import dev.bastionclaims.config.ClaimConfig;
 import dev.bastionclaims.model.Claim;
 import dev.bastionclaims.util.Fmt;
+import dev.bastionclaims.util.Lang;
 import dev.bastionclaims.wand.ClaimWand;
 import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.fabricmc.fabric.api.event.player.AttackBlockCallback;
@@ -120,7 +121,7 @@ public final class ClaimEvents {
         Claim interact = ProtectionService.blockingInteract(p, dim, pos.getX(), pos.getY(), pos.getZ(), cat);
         if (interact != null) {
             ProtectionService.notifyThrottled(p, Fmt.text(cfg().message("protect.deniedInteract", interact.owner)));
-            return traced(p, "взаимодействие запрещено приватом «" + interact.name + "»", ActionResult.FAIL);
+            return traced(p, Lang.t("взаимодействие запрещено приватом «") + interact.name + "»", ActionResult.FAIL);
         }
         // Deny placing a block into a claim from just outside its border.
         // Where the block actually lands depends on what was clicked: a
@@ -147,10 +148,10 @@ public final class ClaimEvents {
             Claim build = ProtectionService.blockingBuild(p, dim, place.getX(), place.getY(), place.getZ());
             if (build != null) {
                 ProtectionService.notifyThrottled(p, Fmt.text(cfg().message("protect.denied", build.owner)));
-                return traced(p, "установка запрещена приватом «" + build.name + "»", ActionResult.FAIL);
+                return traced(p, Lang.t("установка запрещена приватом «") + build.name + "»", ActionResult.FAIL);
             }
         }
-        return traced(p, "приваты пропускают клик по " + cat, ActionResult.PASS);
+        return traced(p, Lang.t("приваты пропускают клик по ") + cat, ActionResult.PASS);
     }
 
     // -------------------------------------------------------------- break protect
@@ -164,10 +165,10 @@ public final class ClaimEvents {
         Claim c = ProtectionService.blockingBuild(p, dim, pos.getX(), pos.getY(), pos.getZ());
         if (c != null) {
             ProtectionService.notifyThrottled(p, Fmt.text(cfg().message("protect.denied", c.owner)));
-            traced(p, "разрушение " + pos.toShortString() + " запрещено приватом «" + c.name + "»", ActionResult.FAIL);
+            traced(p, Lang.t("разрушение ") + pos.toShortString() + Lang.t(" запрещено приватом «") + c.name + "»", ActionResult.FAIL);
             return false; // cancel the break
         }
-        traced(p, "приваты пропускают разрушение " + pos.toShortString(), ActionResult.PASS);
+        traced(p, Lang.t("приваты пропускают разрушение ") + pos.toShortString(), ActionResult.PASS);
         return true;
     }
 
@@ -219,8 +220,8 @@ public final class ClaimEvents {
         if (TRACE.contains(p.getUuid())) {
             // ActionResult prints as an obfuscated record name on a server
             // ("class_9859[]"), which told the reader nothing.
-            String verdict = result == ActionResult.PASS ? "&aPASS &8(приват не вмешался — дальше решает ваниль)"
-                    : result == ActionResult.FAIL ? "&cFAIL &8(приват запретил)" : "&f" + result;
+            String verdict = result == ActionResult.PASS ? Lang.t("&aPASS &8(приват не вмешался — дальше решает ваниль)")
+                    : result == ActionResult.FAIL ? Lang.t("&cFAIL &8(приват запретил)") : "&f" + result;
             p.sendMessage(Fmt.text("&8[trace] &7" + what + " &8→ " + verdict), false);
         }
         return result;

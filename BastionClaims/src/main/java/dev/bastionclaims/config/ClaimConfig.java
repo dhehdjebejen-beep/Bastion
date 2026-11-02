@@ -2,6 +2,7 @@ package dev.bastionclaims.config;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
+import dev.bastionclaims.util.Lang;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -23,6 +24,27 @@ import java.util.function.Consumer;
  */
 public final class ClaimConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
+
+    /** A square around spawn, full height, protected as a claim of nobody's. */
+    public static final class SpawnZone {
+        public boolean enabled = true;
+        public String dim = "minecraft:overworld";
+        public int centerX = 0;
+        public int centerZ = 0;
+        /** Half the side of the square: blocks from the centre to the edge. */
+        public int radius = 115;
+        public String name = "Спавн";
+        /** Doors, buttons and levers at spawn work for everyone. */
+        public boolean guestDoors = true;
+    }
+
+    /**
+     * Language of every line the mod writes: "ru" (default) or "en", or any
+     * {@code <code>.json} placed in {@code config/bastionclaims/lang}. Switched
+     * live with {@code /claims lang <code>} or the language button an
+     * operator sees in {@code /claim}.
+     */
+    public String language = "ru";
 
     public Progression progression = new Progression();
 
@@ -48,8 +70,21 @@ public final class ClaimConfig {
 
     /** Reject claims whose shortest horizontal side is below this (anti-microclaim). */
     public int minSideLength = 5;
-    /** How many cuboids one claim may be built from (the first one included). */
+    /** How many cuboids one claim may be built from (the first one included). Operators are not limited. */
     public int maxZonesPerClaim = 8;
+    /**
+     * Flags an ordinary owner may switch, by their command name. The others
+     * stay as the server set them and only an operator changes them — the
+     * usual arrangement on public servers, where an owner opening explosions
+     * or hoppers onto neighbours is how griefing starts.
+     */
+    public List<String> playerFlags = new ArrayList<>(List.of("pvp", "mobdmg"));
+    /**
+     * The protected area around spawn, owned by nobody. It behaves like a
+     * claim with every flag closed, so spawn needs no claim of its own and
+     * nobody can claim inside it; a real claim placed there still wins.
+     */
+    public SpawnZone spawnZone = new SpawnZone();
     /** A new zone must be at most this far from a zone the claim already has. */
     public int zoneMaxDistance = 256;
     /** Item used as the selection wand. */
@@ -240,6 +275,31 @@ public final class ClaimConfig {
         return cfg;
     }
 
+    /** Writes the config back, e.g. after {@code /claims lang} changed the language. */
+    public void save(Path file) throws IOException {
+        Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
+        Files.writeString(tmp, GSON.toJson(this) + System.lineSeparator(), StandardCharsets.UTF_8);
+        Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+    }
+
+    /**
+     * Only the {@code language} of a config file, read before the commands are
+     * registered (their argument names are translated once). "ru" when the
+     * file is missing or unreadable.
+     */
+    public static String peekLanguage(Path file) {
+        try {
+            if (!Files.exists(file)) return "ru";
+            com.google.gson.JsonElement e = com.google.gson.JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+            if (e.isJsonObject() && e.getAsJsonObject().has("language")) {
+                return e.getAsJsonObject().get("language").getAsString();
+            }
+        } catch (Exception ignored) {
+            // loadOrCreate reports a broken file properly a moment later
+        }
+        return "ru";
+    }
+
     private static final String OLD_PROGRESS =
             "&7Наиграй больше часов, чтобы поднять лимит: &f10ч&7 → 3 привата, &f20ч&7 → 6.";
 
@@ -250,10 +310,10 @@ public final class ClaimConfig {
                 .sorted(java.util.Comparator.comparingInt(t -> t.minHours))
                 .forEach(t -> {
                     if (b.length() > 0) b.append("&7, ");
-                    b.append("&f").append(t.minHours).append("ч&7 → ").append(t.maxClaims)
-                            .append(" прив. по ").append(t.maxBlocksPerClaim).append(" бл.");
+                    b.append("&f").append(t.minHours).append(Lang.t("ч&7 → ")).append(t.maxClaims)
+                            .append(Lang.t(" прив. по ")).append(t.maxBlocksPerClaim).append(Lang.t(" бл."));
                 });
-        return b.length() == 0 ? "&7у вас уже наибольший уровень" : b.toString();
+        return b.length() == 0 ? Lang.t("&7у вас уже наибольший уровень") : b.toString();
     }
 
     /** Play-time tiers: a newcomer can claim a base and a farm on day one. */
@@ -279,6 +339,7 @@ public final class ClaimConfig {
         if (protection == null) protection = new Protection();
         if (worldEdit == null) worldEdit = new WorldEdit();
         if (wandItem == null || wandItem.isBlank()) wandItem = "minecraft:wooden_axe";
+        if (language == null || language.isBlank()) language = "ru";
         if (serviceEntityNames == null) serviceEntityNames = new ArrayList<>();
         if (serviceEntityTags == null) serviceEntityTags = new ArrayList<>();
         if (workstationBlocks == null) workstationBlocks = new ArrayList<>();
@@ -320,6 +381,11 @@ public final class ClaimConfig {
     }
 
     private void clamp() {
+        if (playerFlags == null) playerFlags = new ArrayList<>(List.of("pvp", "mobdmg"));
+        if (spawnZone == null) spawnZone = new SpawnZone();
+        spawnZone.radius = Math.max(8, Math.min(5_000, spawnZone.radius));
+        if (spawnZone.dim == null || spawnZone.dim.isBlank()) spawnZone.dim = "minecraft:overworld";
+        if (spawnZone.name == null || spawnZone.name.isBlank()) spawnZone.name = "Спавн";
         minSideLength = Math.max(1, Math.min(64, minSideLength));
         maxZonesPerClaim = Math.max(1, Math.min(64, maxZonesPerClaim));
         zoneMaxDistance = Math.max(0, Math.min(30_000, zoneMaxDistance));
@@ -345,7 +411,9 @@ public final class ClaimConfig {
 
     /** Message template for the key with {@code String.format} args applied. */
     public String message(String key, Object... args) {
-        String template = messages != null ? messages.getOrDefault(key, key) : key;
+        // Templates are stored in Russian; an untouched one is shown in the
+        // server language, one the admin rewrote is shown as written.
+        String template = Lang.t(messages != null ? messages.getOrDefault(key, key) : key);
         if (args == null || args.length == 0) return template;
         try {
             return String.format(template, args);
@@ -356,85 +424,85 @@ public final class ClaimConfig {
 
     private static Map<String, String> defaultMessages() {
         Map<String, String> m = new LinkedHashMap<>();
-        m.put("wand.given", "&aВыдан приват-топор 🪓 &7ЛКМ — точка 1, ПКМ — точка 2.");
-        m.put("wand.pos1", "&aТочка 1: &f%s %s %s &8(осталось выбрать точку 2 — ПКМ)");
-        m.put("wand.pos2", "&aТочка 2: &f%s %s %s &8(создать: &f/claim create <название>&8)");
-        m.put("wand.selInfo", "&7Выделение: &f%s×%s×%s &8= &f%s &7блоков");
-        m.put("sel.none", "&cСначала выдели область топором: &f/claim wand");
-        m.put("sel.diffWorld", "&cОбе точки должны быть в одном мире.");
-        m.put("create.success", "&aПриват &f%s&a создан! &7Объём: &f%s &7блоков.");
-        m.put("create.success3d", "&aПриват &f%s&a создан &8(3D)&a! &7Объём: &f%s &7блоков.");
-        m.put("create.success2d", "&aПриват &f%s&a создан &8(во всю высоту)&a! &7Площадь: &f%s &7блоков.");
-        m.put("create.noName", "&cУкажи название: &f/claim create <название>");
-        m.put("create.nameTaken", "&cУ тебя уже есть приват с таким названием.");
-        m.put("create.tooSmall", "&cСлишком маленькая область: минимум %s блоков по стороне.");
-        m.put("create.overlap", "&cОбласть пересекается с чужим приватом &f%s&c (владелец &f%s&c).");
-        m.put("create.limitClaims", "&cЛимит приватов для тебя: &f%s&c. Часов сыграно: &f%s&c.");
-        m.put("create.limitBlocks", "&cСлишком большой приват: &f%s&c > лимита &f%s&c блоков (твой тир).");
-        m.put("limit.progress", "&7Наиграй больше часов, чтобы поднять лимит: %s.");
-        m.put("delete.success", "&aПриват &f%s&a удалён 🗑");
-        m.put("delete.notFound", "&cПривата &f%s&c нет.");
-        m.put("delete.confirm", "&eУдалить приват &f%s&e? Подтверди: &f/claim delete confirm &8(60 секунд)");
-        m.put("codeword.required", "&cПередача и удаление привата защищены кодовым словом. &7Назовите его: &f/слово <слово>");
-        m.put("rename.success", "&aПриват переименован: &f%s &7→ &f%s");
-        m.put("zone.added", "&aЗона добавлена к привату &f%s&a! Теперь зон: &f%s&a, всего блоков: &f%s");
-        m.put("zone.removed", "&7Зона &f#%s&7 убрана из привата &f%s&7.");
-        m.put("zone.limit", "&cУ привата уже максимум зон: &f%s&c.");
-        m.put("zone.tooFar", "&cЗона слишком далеко от привата: &f%s&c блоков (максимум &f%s&c). "
-                + "&7Приват должен оставаться единым куском, а не разбросом по карте.");
-        m.put("zone.overlapSelf", "&cЭта зона налезает на уже существующую зону этого же привата.");
-        m.put("zone.notFound", "&cЗоны &f#%s&c нет. Список: &f/claim zones");
-        m.put("zone.primary", "&cЗону &f#1&c убрать нельзя — это основа привата. "
-                + "&7Удалить целиком: &f/claim delete");
-        m.put("presence.enterOwn", "&a🛡 Ваш приват &f%s");
-        m.put("presence.enterMember", "&a🛡 Приват &f%s&a — у вас есть доступ");
-        m.put("presence.enterOther", "&c🛡 Приват &f%s&c — владелец &f%s");
-        m.put("presence.leave", "&7Вы покинули приват &f%s");
-        m.put("presence.arrested", "&8[&4⛔ ФССП&8] &cПриват &f%s &cарестован: &7%s&c. Вход закрыт до снятия ареста.");
-        m.put("transfer.arrested", "&cАрестованный приват передать нельзя — сначала снимите арест (погасите долг).");
-        m.put("borders.on", "&aГраницы ваших приватов показаны. &8Выключить: &f/claim borders");
-        m.put("borders.off", "&7Границы скрыты.");
-        m.put("zone.header", "&6Зоны привата &f%s &8(&f%s&8):");
-        m.put("zone.entry", "&8• &f#%s &7— %sx%sx%s &8(%s %s %s) &7%s блоков");
-        m.put("transfer.confirm", "&eПередать приват &f%s&e игроку &f%s&e? "
-                + "&cТы полностью потеряешь к нему доступ.&e Подтверди: &f/claim transfer confirm &8(60 секунд)");
-        m.put("transfer.done", "&aПриват &f%s&a передан игроку &f%s&a. Доступа у тебя больше нет.");
-        m.put("transfer.received", "&a🛡 Тебе передали приват &f%s&a — от игрока &f%s&a. Он теперь твой.");
-        m.put("transfer.renamed", "&7У нового владельца было такое название, приват стал &f%s&7.");
-        m.put("transfer.self", "&cЭто и так твой приват.");
-        m.put("transfer.offline", "&cНовый владелец должен быть в сети — передавать приват вслепую нельзя.");
-        m.put("trust.added", "&aИгрок &f%s&a добавлен в приват &f%s&a.");
-        m.put("trust.removed", "&7Игрок &f%s&7 убран из привата &f%s&7.");
-        m.put("trust.notMember", "&cИгрок &f%s&c не является пользователем привата.");
-        m.put("trust.self", "&cТы и так владелец этого привата.");
-        m.put("flag.set", "&aФлаг &f%s&a привата &f%s&a: &f%s");
-        m.put("flag.unknown", "&cНеизвестный флаг. Доступно: &fpvp&7, &fmobs&7, &fmobdmg&7, "
-                + "&fexplosions&7, &ffluids&7, &fpistons&7, &fhoppers&7, &fcontainers&7, &fdoors&7, &ffire");
-        m.put("info.header", "&6▎ Приват &f%s &8(владелец &f%s&8)");
-        m.put("info.bounds", "&7Границы: &f%s %s %s &7→ &f%s %s %s &8(%s)");
-        m.put("info.volume", "&7Объём: &f%s &7блоков &8• размер &f%sx%sx%s");
-        m.put("info.members", "&7Пользователи: &f%s");
-        m.put("info.flags", "&7Флаги: PvP &f%s&7, мобгриф &f%s&7, урон-мобов &f%s&7, взрывы &f%s");
-        m.put("info.external", "&7Извне: жидкости &f%s&7, поршни &f%s&7, воронки &f%s");
-        m.put("info.guest", "&7Гостям: сундуки &f%s&7, двери &f%s&7, существа &f%s");
-        m.put("list.header", "&6Твои приваты &8(&f%s&8/&f%s&8):");
-        m.put("list.entry", "&8• &f%s &7— %s блоков &8(%s %s %s)");
-        m.put("list.empty", "&7У тебя нет приватов. Выдели топором и создай: &f/claim wand");
-        m.put("protect.denied", "&cЭто чужой приват (&f%s&c). Строить нельзя.");
-        m.put("protect.deniedInteract", "&cЭто чужой приват (&f%s&c). Взаимодействовать нельзя.");
-        m.put("protect.deniedEntity", "&cСущества в чужом привате (&f%s&c) трогать нельзя. "
-                + "&7Владелец может открыть доступ: &f/claim flag entities on");
-        m.put("protect.deniedFluid", "&cЭто чужой приват (&f%s&c). Разливать жидкости нельзя.");
-        m.put("protect.pvp", "&cВ этом привате PvP отключено.");
-        m.put("protect.portal", "&cПортал вышел бы в чужой приват — там он не строится. Поставь портал в другом месте.");
-        m.put("notPlayer", "&cКоманда только для игроков.");
-        m.put("noPermission", "&cНедостаточно прав.");
-        m.put("admin.reloaded", "&aКонфигурация BastionClaims перезагружена.");
-        m.put("admin.reloadFailed", "&cНе удалось перезагрузить конфиг: %s");
-        m.put("admin.deleted", "&aПриват &f%s&a игрока &f%s&a удалён.");
-        m.put("admin.listHeader", "&6Приваты игрока &f%s &8(&f%s&8):");
-        m.put("admin.bypassOn", "&eРежим обхода защиты &aВКЛ&e — ты игнорируешь чужие приваты до выхода с сервера.");
-        m.put("admin.bypassOff", "&aРежим обхода защиты &fВЫКЛ&a — чужие приваты действуют на тебя как на обычного игрока.");
+        m.put("wand.given", Lang.k("&aВыдан приват-топор 🪓 &7ЛКМ — точка 1, ПКМ — точка 2."));
+        m.put("wand.pos1", Lang.k("&aТочка 1: &f%s %s %s &8(осталось выбрать точку 2 — ПКМ)"));
+        m.put("wand.pos2", Lang.k("&aТочка 2: &f%s %s %s &8(создать: &f/claim create <название>&8)"));
+        m.put("wand.selInfo", Lang.k("&7Выделение: &f%s×%s×%s &8= &f%s &7блоков"));
+        m.put("sel.none", Lang.k("&cСначала выдели область топором: &f/claim wand"));
+        m.put("sel.diffWorld", Lang.k("&cОбе точки должны быть в одном мире."));
+        m.put("create.success", Lang.k("&aПриват &f%s&a создан! &7Объём: &f%s &7блоков."));
+        m.put("create.success3d", Lang.k("&aПриват &f%s&a создан &8(3D)&a! &7Объём: &f%s &7блоков."));
+        m.put("create.success2d", Lang.k("&aПриват &f%s&a создан &8(во всю высоту)&a! &7Площадь: &f%s &7блоков."));
+        m.put("create.noName", Lang.k("&cУкажи название: &f/claim create <название>"));
+        m.put("create.nameTaken", Lang.k("&cУ тебя уже есть приват с таким названием."));
+        m.put("create.tooSmall", Lang.k("&cСлишком маленькая область: минимум %s блоков по стороне."));
+        m.put("create.overlap", Lang.k("&cОбласть пересекается с чужим приватом &f%s&c (владелец &f%s&c)."));
+        m.put("create.limitClaims", Lang.k("&cЛимит приватов для тебя: &f%s&c. Часов сыграно: &f%s&c."));
+        m.put("create.limitBlocks", Lang.k("&cСлишком большой приват: &f%s&c > лимита &f%s&c блоков (твой тир)."));
+        m.put("limit.progress", Lang.k("&7Наиграй больше часов, чтобы поднять лимит: %s."));
+        m.put("delete.success", Lang.k("&aПриват &f%s&a удалён 🗑"));
+        m.put("delete.notFound", Lang.k("&cПривата &f%s&c нет."));
+        m.put("delete.confirm", Lang.k("&eУдалить приват &f%s&e? Подтверди: &f/claim delete confirm &8(60 секунд)"));
+        m.put("codeword.required", Lang.k("&cПередача и удаление привата защищены кодовым словом. &7Назовите его: &f/слово <слово>"));
+        m.put("rename.success", Lang.k("&aПриват переименован: &f%s &7→ &f%s"));
+        m.put("zone.added", Lang.k("&aЗона добавлена к привату &f%s&a! Теперь зон: &f%s&a, всего блоков: &f%s"));
+        m.put("zone.removed", Lang.k("&7Зона &f#%s&7 убрана из привата &f%s&7."));
+        m.put("zone.limit", Lang.k("&cУ привата уже максимум зон: &f%s&c."));
+        m.put("zone.tooFar", Lang.k("&cЗона слишком далеко от привата: &f%s&c блоков (максимум &f%s&c). "
+                + "&7Приват должен оставаться единым куском, а не разбросом по карте."));
+        m.put("zone.overlapSelf", Lang.k("&cЭта зона налезает на уже существующую зону этого же привата."));
+        m.put("zone.notFound", Lang.k("&cЗоны &f#%s&c нет. Список: &f/claim zones"));
+        m.put("zone.primary", Lang.k("&cЗону &f#1&c убрать нельзя — это основа привата. "
+                + "&7Удалить целиком: &f/claim delete"));
+        m.put("presence.enterOwn", Lang.k("&a🛡 Ваш приват &f%s"));
+        m.put("presence.enterMember", Lang.k("&a🛡 Приват &f%s&a — у вас есть доступ"));
+        m.put("presence.enterOther", Lang.k("&c🛡 Приват &f%s&c — владелец &f%s"));
+        m.put("presence.leave", Lang.k("&7Вы покинули приват &f%s"));
+        m.put("presence.arrested", Lang.k("&8[&4⛔ ФССП&8] &cПриват &f%s &cарестован: &7%s&c. Вход закрыт до снятия ареста."));
+        m.put("transfer.arrested", Lang.k("&cАрестованный приват передать нельзя — сначала снимите арест (погасите долг)."));
+        m.put("borders.on", Lang.k("&aГраницы ваших приватов показаны. &8Выключить: &f/claim borders"));
+        m.put("borders.off", Lang.k("&7Границы скрыты."));
+        m.put("zone.header", Lang.k("&6Зоны привата &f%s &8(&f%s&8):"));
+        m.put("zone.entry", Lang.k("&8• &f#%s &7— %sx%sx%s &8(%s %s %s) &7%s блоков"));
+        m.put("transfer.confirm", Lang.k("&eПередать приват &f%s&e игроку &f%s&e? "
+                + "&cТы полностью потеряешь к нему доступ.&e Подтверди: &f/claim transfer confirm &8(60 секунд)"));
+        m.put("transfer.done", Lang.k("&aПриват &f%s&a передан игроку &f%s&a. Доступа у тебя больше нет."));
+        m.put("transfer.received", Lang.k("&a🛡 Тебе передали приват &f%s&a — от игрока &f%s&a. Он теперь твой."));
+        m.put("transfer.renamed", Lang.k("&7У нового владельца было такое название, приват стал &f%s&7."));
+        m.put("transfer.self", Lang.k("&cЭто и так твой приват."));
+        m.put("transfer.offline", Lang.k("&cНовый владелец должен быть в сети — передавать приват вслепую нельзя."));
+        m.put("trust.added", Lang.k("&aИгрок &f%s&a добавлен в приват &f%s&a."));
+        m.put("trust.removed", Lang.k("&7Игрок &f%s&7 убран из привата &f%s&7."));
+        m.put("trust.notMember", Lang.k("&cИгрок &f%s&c не является пользователем привата."));
+        m.put("trust.self", Lang.k("&cТы и так владелец этого привата."));
+        m.put("flag.set", Lang.k("&aФлаг &f%s&a привата &f%s&a: &f%s"));
+        m.put("flag.unknown", Lang.k("&cНеизвестный флаг. Доступно: &fpvp&7, &fmobs&7, &fmobdmg&7, "
+                + "&fexplosions&7, &ffluids&7, &fpistons&7, &fhoppers&7, &fcontainers&7, &fdoors&7, &ffire"));
+        m.put("info.header", Lang.k("&6▎ Приват &f%s &8(владелец &f%s&8)"));
+        m.put("info.bounds", Lang.k("&7Границы: &f%s %s %s &7→ &f%s %s %s &8(%s)"));
+        m.put("info.volume", Lang.k("&7Объём: &f%s &7блоков &8• размер &f%sx%sx%s"));
+        m.put("info.members", Lang.k("&7Пользователи: &f%s"));
+        m.put("info.flags", Lang.k("&7Флаги: PvP &f%s&7, мобгриф &f%s&7, урон-мобов &f%s&7, взрывы &f%s"));
+        m.put("info.external", Lang.k("&7Извне: жидкости &f%s&7, поршни &f%s&7, воронки &f%s"));
+        m.put("info.guest", Lang.k("&7Гостям: сундуки &f%s&7, двери &f%s&7, существа &f%s"));
+        m.put("list.header", Lang.k("&6Твои приваты &8(&f%s&8/&f%s&8):"));
+        m.put("list.entry", Lang.k("&8• &f%s &7— %s блоков &8(%s %s %s)"));
+        m.put("list.empty", Lang.k("&7У тебя нет приватов. Выдели топором и создай: &f/claim wand"));
+        m.put("protect.denied", Lang.k("&cЭто чужой приват (&f%s&c). Строить нельзя."));
+        m.put("protect.deniedInteract", Lang.k("&cЭто чужой приват (&f%s&c). Взаимодействовать нельзя."));
+        m.put("protect.deniedEntity", Lang.k("&cСущества в чужом привате (&f%s&c) трогать нельзя. "
+                + "&7Владелец может открыть доступ: &f/claim flag entities on"));
+        m.put("protect.deniedFluid", Lang.k("&cЭто чужой приват (&f%s&c). Разливать жидкости нельзя."));
+        m.put("protect.pvp", Lang.k("&cВ этом привате PvP отключено."));
+        m.put("protect.portal", Lang.k("&cПортал вышел бы в чужой приват — там он не строится. Поставь портал в другом месте."));
+        m.put("notPlayer", Lang.k("&cКоманда только для игроков."));
+        m.put("noPermission", Lang.k("&cНедостаточно прав."));
+        m.put("admin.reloaded", Lang.k("&aКонфигурация BastionClaims перезагружена."));
+        m.put("admin.reloadFailed", Lang.k("&cНе удалось перезагрузить конфиг: %s"));
+        m.put("admin.deleted", Lang.k("&aПриват &f%s&a игрока &f%s&a удалён."));
+        m.put("admin.listHeader", Lang.k("&6Приваты игрока &f%s &8(&f%s&8):"));
+        m.put("admin.bypassOn", Lang.k("&eРежим обхода защиты &aВКЛ&e — ты игнорируешь чужие приваты до выхода с сервера."));
+        m.put("admin.bypassOff", Lang.k("&aРежим обхода защиты &fВЫКЛ&a — чужие приваты действуют на тебя как на обычного игрока."));
         return m;
     }
 }

@@ -91,7 +91,7 @@ public final class HistoryManager {
         add(PUNISH, e, MAX_PUNISH);
         save(); // punishments are rare and important — persist immediately
         AcJournal.write(kind.name().toLowerCase(java.util.Locale.ROOT), name, e.uuid, check, 0,
-                (hours > 0 ? hours + " ч; " : "") + (details == null ? "" : details), null);
+                (hours > 0 ? hours + Lang.t(" ч; ") : "") + (details == null ? "" : details), null);
     }
 
     private static Event base(Kind kind, UUID uuid, String name) {

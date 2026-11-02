@@ -4,6 +4,7 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import dev.bastionac.argus.features.Features;
 import dev.bastionac.argus.features.Stats;
+import dev.bastionac.core.Lang;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -101,7 +102,7 @@ public final class Baselines {
     public synchronized Ref population(Features.Spec spec) {
         Deque<Entry> d = pop.get(spec.key());
         if (d == null || d.size() < MIN_POOL || distinctPlayers(d) < MIN_PLAYERS) {
-            return new Ref(spec.priorRef(), spec.priorScale(), 0, "норма по умолчанию");
+            return new Ref(spec.priorRef(), spec.priorScale(), 0, Lang.t("норма по умолчанию"));
         }
         // One player, one vote: every value is weighted 1/(that player's
         // values), so a regular with thirty sessions weighs as much as a
@@ -121,7 +122,7 @@ public final class Baselines {
         double[] dev = new double[v.length];
         for (int k = 0; k < v.length; k++) dev[k] = Math.abs(v[k] - med);
         double scale = Math.max(1.4826 * weightedMedian(dev, w), spec.minScale());
-        return new Ref(med, scale, v.length, "норма сервера (" + v.length + " сессий, " + per.size() + " игроков)");
+        return new Ref(med, scale, v.length, Lang.t("норма сервера (") + v.length + Lang.t(" сессий, ") + per.size() + Lang.t(" игроков)"));
     }
 
     /** The value at half the total weight. */
@@ -151,7 +152,7 @@ public final class Baselines {
         Deque<Double> d = m == null ? null : m.get(spec.key());
         if (d == null || d.size() < MIN_SELF) return null;
         double[] v = d.stream().mapToDouble(Double::doubleValue).toArray();
-        return new Ref(Stats.median(v), Math.max(1.4826 * Stats.mad(v), spec.minScale()), v.length, "своя норма");
+        return new Ref(Stats.median(v), Math.max(1.4826 * Stats.mad(v), spec.minScale()), v.length, Lang.t("своя норма"));
     }
 
     private static int distinctPlayers(Deque<Entry> d) {

@@ -1,5 +1,6 @@
 package dev.bastionclaims.core;
 
+import dev.bastionclaims.util.Lang;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.util.math.Direction;
 
@@ -39,17 +40,17 @@ public final class Directions {
     /** Russian name for messages. */
     public static String ru(Direction d) {
         return switch (d) {
-            case UP -> "вверх";
-            case DOWN -> "вниз";
-            case NORTH -> "на север";
-            case SOUTH -> "на юг";
-            case WEST -> "на запад";
-            case EAST -> "на восток";
+            case UP -> Lang.t("вверх");
+            case DOWN -> Lang.t("вниз");
+            case NORTH -> Lang.t("на север");
+            case SOUTH -> Lang.t("на юг");
+            case WEST -> Lang.t("на запад");
+            case EAST -> Lang.t("на восток");
         };
     }
 
     public static String help() {
-        return "вверх, вниз, север, юг, запад, восток, вперёд, назад";
+        return Lang.t("вверх, вниз, север, юг, запад, восток, вперёд, назад");
     }
 
     private Directions() {}

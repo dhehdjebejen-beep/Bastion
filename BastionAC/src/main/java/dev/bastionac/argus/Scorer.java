@@ -3,6 +3,7 @@ package dev.bastionac.argus;
 import dev.bastionac.argus.features.FeatureSet;
 import dev.bastionac.argus.features.Features;
 import dev.bastionac.argus.features.Stats;
+import dev.bastionac.core.Lang;
 
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -62,15 +63,15 @@ public final class Scorer {
                 ref = 0;
                 scale = 1;
                 z = v.value() > 0 ? 9 : 0;
-                source = "факт";
+                source = Lang.t("факт");
             } else if (spec.agg() == Features.Agg.Z) {
                 ref = 0;
                 scale = 1;
                 z = v.value();
-                source = "против случайного копания";
+                source = Lang.t("против случайного копания");
             } else {
                 Baselines.Ref r = base == null
-                        ? new Baselines.Ref(spec.priorRef(), spec.priorScale(), 0, "норма по умолчанию")
+                        ? new Baselines.Ref(spec.priorRef(), spec.priorScale(), 0, Lang.t("норма по умолчанию"))
                         : base.population(spec);
                 ref = r.ref();
                 scale = r.scale();
@@ -95,7 +96,7 @@ public final class Scorer {
                     double bonus = 0.5 * spec.weight() * conf * clamp((zs - 4) / 2, 0, 2);
                     if (bonus > 0) {
                         e += bonus;
-                        source += " + резко не как обычно у игрока";
+                        source += Lang.t(" + резко не как обычно у игрока");
                     }
                 }
             }

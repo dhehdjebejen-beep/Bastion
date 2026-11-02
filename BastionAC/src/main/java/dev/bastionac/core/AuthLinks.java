@@ -180,10 +180,10 @@ public final class AuthLinks {
     /** Russian label for a verdict id. Kept here so the panel never imports BastionAuth. */
     public static String verdictLabel(String verdict) {
         return switch (verdict == null ? "NEW" : verdict) {
-            case "TRUSTED" -> "Доверенная";
-            case "WATCH" -> "Под наблюдением";
-            case "ALT" -> "Мультиаккаунт";
-            default -> "Не проверена";
+            case "TRUSTED" -> Lang.t("Доверенная");
+            case "WATCH" -> Lang.t("Под наблюдением");
+            case "ALT" -> Lang.t("Мультиаккаунт");
+            default -> Lang.t("Не проверена");
         };
     }
 
@@ -200,26 +200,26 @@ public final class AuthLinks {
     /** What the verdict does to the gates, in one line. */
     public static String verdictEffect(String verdict) {
         return switch (verdict == null ? "NEW" : verdict) {
-            case "TRUSTED" -> "Без ограничений между ними; реферальный бонус — одно лицо";
-            case "WATCH" -> "Ограничения действуют, связь просмотрена";
-            case "ALT" -> "Ограничения действуют всегда, без оглядки на оценку";
-            default -> "Решает оценка связи";
+            case "TRUSTED" -> Lang.t("Без ограничений между ними; реферальный бонус — одно лицо");
+            case "WATCH" -> Lang.t("Ограничения действуют, связь просмотрена");
+            case "ALT" -> Lang.t("Ограничения действуют всегда, без оглядки на оценку");
+            default -> Lang.t("Решает оценка связи");
         };
     }
 
     /** Russian label for one analysis signal token. */
     public static String signalName(String token) {
         return switch (token) {
-            case "device" -> "устройство";
-            case "profile" -> "отпечаток клиента";
-            case "launcher-uuid" -> "UUID лаунчера";
-            case "mods" -> "набор модов";
-            case "ip" -> "IP-адрес";
-            case "host" -> "адрес входа";
-            case "name" -> "похожий ник";
-            case "timing" -> "время регистрации";
-            case "password" -> "тот же пароль";
-            case "manual" -> "заведена вручную";
+            case "device" -> Lang.t("устройство");
+            case "profile" -> Lang.t("отпечаток клиента");
+            case "launcher-uuid" -> Lang.t("UUID лаунчера");
+            case "mods" -> Lang.t("набор модов");
+            case "ip" -> Lang.t("IP-адрес");
+            case "host" -> Lang.t("адрес входа");
+            case "name" -> Lang.t("похожий ник");
+            case "timing" -> Lang.t("время регистрации");
+            case "password" -> Lang.t("тот же пароль");
+            case "manual" -> Lang.t("заведена вручную");
             default -> token;
         };
     }

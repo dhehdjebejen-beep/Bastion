@@ -3,6 +3,7 @@ package dev.bastionac.checks;
 import dev.bastionac.BastionAC;
 import dev.bastionac.core.Action;
 import dev.bastionac.core.CheckType;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.MathUtil;
 import dev.bastionac.core.PlayerData;
 import dev.bastionac.core.ShadowTelemetry;
@@ -100,6 +101,9 @@ public final class MovementChecks {
         return 60;
     }
 
+    /** Blocks taken off the measured descent before the NoFall outcome check bills it. */
+    static final double NOFALL_DESCENT_SLACK = 1.0;
+
     /** Vanilla's fall damage for a drop, before armour (LivingEntity.computeFallDamage). */
     static int vanillaFallDamage(double fallDistance, double safeFallDistance, double multiplier) {
         return MathHelper.floor((fallDistance + 1.0e-6 - safeFallDistance) * multiplier);
@@ -123,21 +127,49 @@ public final class MovementChecks {
                 || player.isInvulnerable() || !player.isAlive()) {
             return;
         }
+        // Still falling four ticks after the "landing": it was a shaft wall the
+        // wide support box brushed on the way down, not a floor. Vanilla rightly
+        // charged nothing, and this used to bill the player for it in mid-air
+        // (26.10: 3 HP on a drop that ended in water further down).
+        if (d.airTicks >= 2 && d.lastDy < -0.3) {
+            return;
+        }
         double safe = player.getAttributeValue(EntityAttributes.SAFE_FALL_DISTANCE);
         double mult = player.getAttributeValue(EntityAttributes.FALL_DAMAGE_MULTIPLIER);
-        int expected = vanillaFallDamage(descent, safe, mult);
+        // Our descent and vanilla's fall distance start from different points
+        // when the fall begins at a water surface or a block edge; 26.10 one
+        // landing measured 7.5 here against vanilla's 6.7 and was billed a
+        // fourth heart. Judge the drop one block short of what we measured: a
+        // NoFall still saves whole hearts on any fall worth cheating on.
+        int expected = vanillaFallDamage(descent - NOFALL_DESCENT_SLACK, safe, mult);
         double missing = expected - applied;
         if (expected < 1 || missing < 1.0) {
             d.noFallBuffer = Math.max(0, d.noFallBuffer - 0.5);
             return;
         }
         BastionAC.flag(player, d, CheckType.NOFALL, String.format(
-                "падение %.1f бл: урон %.0f из положенных %d", descent, applied, expected));
+                Lang.t("падение %.1f бл: урон %.0f из положенных %d"), descent, applied, expected));
         // The landing's own damage put the player into hurt cooldown, which
         // would silently swallow this charge (vanilla only applies damage above
         // the last hit while it lasts). The bill is not a new hit; clear it.
         player.timeUntilRegen = 0;
         player.serverDamage(player.getDamageSources().fall(), (float) Math.min(missing, 1000.0));
+    }
+
+    /** Any collision within {@code depth} blocks under the feet, in a footprint a little wider than the hitbox. */
+    private static boolean floorWithin(ServerPlayerEntity player, World world, double x, double y, double z, double depth) {
+        Box probe = new Box(x - 0.4, y - depth, z - 0.4, x + 0.4, y + 0.05, z + 0.4);
+        net.minecraft.block.ShapeContext ctx = net.minecraft.block.ShapeContext.of(player);
+        for (BlockPos pos : BlockPos.iterate(MathHelper.floor(probe.minX), MathHelper.floor(probe.minY) - 1,
+                MathHelper.floor(probe.minZ), MathHelper.floor(probe.maxX), MathHelper.floor(probe.maxY),
+                MathHelper.floor(probe.maxZ))) {
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir()) continue;
+            for (Box b : state.getCollisionShape(world, pos, ctx).getBoundingBoxes()) {
+                if (b.offset(pos.getX(), pos.getY(), pos.getZ()).intersects(probe)) return true;
+            }
+        }
+        return false;
     }
 
     private static boolean honeyBeside(World world, double x, double y, double z) {
@@ -337,7 +369,7 @@ public final class MovementChecks {
                     if (d.blinkStreak >= 2) {
                         d.blinkStreak = 0;
                         if (BastionAC.flag(player, d, CheckType.BLINK, String.format(
-                                "всплеск пакетов с σ(IAT)=%.2f мс", iatStd))) {
+                                Lang.t("всплеск пакетов с σ(IAT)=%.2f мс"), iatStd))) {
                             action = Action.max(action, Action.SETBACK);
                         }
                     }
@@ -362,7 +394,7 @@ public final class MovementChecks {
             if (packet.isOnGround() && !movementExempt && !d.lastSupport && !d.lastEnvSupport
                     && d.airTicks > 2 && d.lastDy < -0.1) {
                 BastionAC.flag(player, d, CheckType.NOFALL,
-                        String.format("onGround=true без координат в падении (%.1f бл от верха)", d.fallPeakY - d.lastY));
+                        String.format(Lang.t("onGround=true без координат в падении (%.1f бл от верха)"), d.fallPeakY - d.lastY));
             }
             // Keep-alive move packets: a player hovering mid-air keeps sending
             // them without position changes — that still accumulates hover.
@@ -497,11 +529,11 @@ public final class MovementChecks {
             boolean padded = d.zeroMovesThisClientTick >= 3;
             boolean onlyFoot = footTeleport && !(hDist > bigMoveLimit || dy > bigMoveLimit || -dy > descentAllow);
             BastionAC.flag(player, d, CheckType.BIGMOVE, onlyFoot
-                    ? String.format("телепорт пешком: %.1f бл по горизонтали за тик (предел %.1f, верт. %.1f)",
+                    ? String.format(Lang.t("телепорт пешком: %.1f бл по горизонтали за тик (предел %.1f, верт. %.1f)"),
                             hDist, footLimit, dy)
-                    : String.format("%.1f бл за пакет (гор. %.1f/%.1f, верт. %.1f, пауза %d т)%s",
+                    : String.format(Lang.t("%.1f бл за пакет (гор. %.1f/%.1f, верт. %.1f, пауза %d т)%s"),
                             Math.sqrt(distSq), hDist, bigMoveLimit, dy, moveGap,
-                            padded ? " после " + d.zeroMovesThisClientTick + " пустых пакетов — MaceDMG/ArrowDMG" : ""),
+                            padded ? Lang.t(" после ") + d.zeroMovesThisClientTick + Lang.t(" пустых пакетов — MaceDMG/ArrowDMG") : ""),
                     padded ? 2.0 : 1.0);
             // Never accept the jump as the new position.
             return finish(player, d, Action.SETBACK, tick);
@@ -521,6 +553,38 @@ public final class MovementChecks {
         }
         long scanStartNanos = general.shadowTelemetryEnabled ? System.nanoTime() : 0L;
         Env env = scanEnv(player, world, newX, newY, newZ);
+        // The landing below was first limited to "no support at all", but the
+        // support box reaches half a block down: landing on a wall's 1.5-high
+        // arm or a snow layer from the corner of the start box left support
+        // set by the floor underneath and the landing unrecognised (HighJump
+        // 1,75 at a desert village wall and on a snowy slope, 02.11 12:13/12:41).
+        if ((!env.support || !env.groundBelow) && packet.isOnGround() && newY <= d.lastY) {
+            // Vanilla resolves the vertical collision with the box where the tick
+            // started, then slides sideways: a landing on a block's corner can end
+            // the tick a few centimetres past the edge, on the ground. 02.11 a sprint
+            // jump up a slope landed on a cobblestone corner and drifted 6 cm off it;
+            // the end position alone had no floor, so the landing did not count and
+            // the next jump was measured from the step before (HighJump 1,88, setback).
+            Env start = scanEnv(player, world, d.lastX, newY, d.lastZ);
+            if (start.support && !start.entitySupport) {
+                env.support = true;
+                env.groundBelow |= start.groundBelow;
+                env.floorFace |= start.floorFace;
+                env.slimeBelow |= start.slimeBelow;
+                env.bedBelow |= start.bedBelow;
+                env.iceBelow |= start.iceBelow;
+                env.cushionBelow |= start.cushionBelow;
+            }
+        }
+        if (!env.groundBelow && packet.isOnGround() && d.lastGroundedOnFace
+                && newY > d.lastY && newY - d.lastY <= 0.6 && floorFaceNear(player, world, newX, newY, newZ)) {
+            // A step-up onto a slab or a block edge ends with the hitbox over the
+            // step by however far the tick carried it, sometimes by less than the
+            // foot probe's hair (HighJump 1,75 after a step from 138,5 to 139,0).
+            env.support = true;
+            env.groundBelow = true;
+            env.floorFace = true;
+        }
         if (general.shadowTelemetryEnabled) {
             ShadowTelemetry.recordEnvironmentScanNanos(System.nanoTime() - scanStartNanos);
         }
@@ -552,6 +616,19 @@ public final class MovementChecks {
             // floor (HighJump 4,75 / 5,17 in the prod log).
             d.climbBaseY = newY;
             d.highJumpBase = Double.NaN;
+            // The fall origin has to follow the player through the exempt stretch
+            // too. A server lag spike exempts everyone for a few seconds; the origin
+            // used to stay where the spike began, and the first landing after it was
+            // measured from there: 02.11, sprint-hopping down a snowy slope right
+            // after an /rtp lag spike was billed as a 9,6- and a 7,2-block fall
+            // (NoFall, and 5 HP charged) for hops of two blocks each.
+            if (env.support || env.liquid || env.climbable || env.web || env.powder || env.bubble
+                    || (packet.isOnGround() && floorWithin(player, world, newX, newY, newZ, 1.0))) {
+                d.fallPeakY = newY;
+            } else if (newY > d.fallPeakY) {
+                d.fallPeakY = newY;
+            }
+            d.lastEnvSupport = env.support;
             update(d, newX, newY, newZ, dy, env);
             return finish(player, d, action, tick);
         }
@@ -593,7 +670,7 @@ public final class MovementChecks {
             if (d.speedBuffer > 4) {
                 d.speedBuffer = 2;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.SPEED,
-                        String.format("средняя %.2f бл/тик, лимит %.2f", avgSpeed, avgLimit));
+                        String.format(Lang.t("средняя %.2f бл/тик, лимит %.2f"), avgSpeed, avgLimit));
                 if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
@@ -607,7 +684,13 @@ public final class MovementChecks {
         // ground speed-hacks (e.g. Meteor "Only On Ground") that the loose average
         // misses, and is immune to bunny-hopping (airborne). Ice/knockback/bounce
         // are exempted so legit momentum never flags.
-        boolean groundStable = env.support && d.lastSupport && !env.liquid && !env.entitySupport;
+        // The support box reaches half a block down, so it also holds a player hopping 0,2 blocks
+        // under a 2-high ceiling — sprint-jumping in a tunnel, where vanilla carries jump momentum
+        // to ~0,40 bl/tick (Speed 0,40 > 0,39, 02.11). The client must also say it stood on the
+        // ground for both moves; a hack that lies "on ground" is still measured here.
+        boolean groundStable = env.support && d.lastSupport && packet.isOnGround() && d.lastPacketGround
+                && !env.liquid && !env.entitySupport;
+        d.lastPacketGround = packet.isOnGround();
         if (groundStable && tick >= d.bounceGraceUntil) {
             double groundLimit = (groundMax * 1.3 + 0.03) * tol;
             if (d.iceMemoryTicks > 0) groundLimit *= 1.9;
@@ -621,7 +704,7 @@ public final class MovementChecks {
                 if (d.groundSpeedBuffer > 3) {
                     d.groundSpeedBuffer = 1;
                     boolean mitigate = BastionAC.flag(player, d, CheckType.SPEED,
-                            String.format("на земле %.2f бл/тик, лимит %.2f", hDist, groundLimit));
+                            String.format(Lang.t("на земле %.2f бл/тик, лимит %.2f"), hDist, groundLimit));
                     if (mitigate || BastionAC.instantSetback(d)) {
                         action = Action.max(action, Action.SETBACK);
                     }
@@ -634,67 +717,75 @@ public final class MovementChecks {
         }
 
         // ---------------- NOSLOW ----------------
-        // Vanilla applies a hard 0.2x multiplier to movement input while an item
-        // is in use (eating, bow draw, shield block). After the first few ticks
-        // of inertia bleed off, a using-item player cannot sustain anywhere near
-        // sprint speed. A NoSlow module skips the multiplier, so the player keeps
-        // full speed — detectable as a sustained scalar excess with no raycast.
+        // While an item is in use vanilla scales the movement INPUT (by the
+        // item's use speed, 0.2 for food, bows and shields) — and nothing
+        // else. Momentum keeps its friction, and a sprint already running is
+        // not stopped by eating: the client only refuses to START a sprint
+        // with an item up (ClientPlayerEntity.canStartSprinting), so every
+        // jump of a player who sprints and eats still gets the full 0.2
+        // sprint-jump boost. A fixed speed cap read those jumps as NoSlow —
+        // "0,32 бл/тик с предметом (лимит 0,10)" on stairs with an apple,
+        // the false positive that survived three fixes.
+        //
+        // So the judge is the vanilla step itself: this tick's horizontal
+        // distance from the last one, its friction, the slowed acceleration
+        // and the jump boost when the client took off sprinting. A NoSlow
+        // skips the 0.2 and holds walking or sprinting speed, which is far
+        // above that step after a tick or two of friction.
         if (player.isUsingItem()) {
             if (d.usingItemSinceTick < 0) d.usingItemSinceTick = tick;
             long usingFor = tick - d.usingItemSinceTick;
-            // Only judge a player standing on solid ground and not sliding. Ice
-            // carries momentum far above the use-penalty for many ticks (blue ice
-            // reaches 0.5+ per tick), and airborne momentum from a jump taken
-            // before the item went up bleeds off slowly — both used to be read as
-            // NoSlow and set the player back mid-meal.
-            boolean judgeable = env.support && d.lastSupport && !env.liquid
-                    && !env.entitySupport && d.iceMemoryTicks == 0
-                    && tick >= d.bounceGraceUntil;
+            boolean groundNow = packet.isOnGround() && env.groundBelow;
+            // Ice and blue ice carry momentum the friction model below does
+            // not cover past a few ticks of memory; liquids, ladders, webs and
+            // mounts have their own rules; a bounce and an entity floor push.
+            boolean judgeable = moveGap == 1 && !env.liquid && !env.climbable && !env.web
+                    && !env.entitySupport && d.iceMemoryTicks == 0 && tick >= d.bounceGraceUntil
+                    && d.noSlowLastHDist >= 0;
             if (usingFor > general.noSlowGraceTicks && judgeable) {
-                double useLimit = groundMax * general.noSlowMaxFactor;
-                // Sneaking is a movement multiplier, not an attribute, so the
-                // MOVEMENT_SPEED-derived ceiling does not shrink with it — which
-                // handed NoSlow a free pass: crouch-walking while using an item
-                // stayed far under a limit built for standing.
-                if (player.isSneaking()) useLimit *= 0.5;
-                if (velocityActive) useLimit += Math.max(0, d.velocityBudget);
+                float useMul = player.getActiveItem().getOrDefault(
+                        net.minecraft.component.DataComponentTypes.USE_EFFECTS,
+                        net.minecraft.component.type.UseEffectsComponent.DEFAULT).speedMultiplier();
+                float slip = world.getBlockState(BlockPos.ofFloored(newX, newY - 0.5000001, newZ))
+                        .getBlock().getSlipperiness();
+                // The step starts from vanilla's own prediction of the last
+                // tick when there is one, not from what the client claimed: a
+                // NoSlow is only ~0.02 a tick over vanilla in the air, inside
+                // any per-tick slack, but the excess adds up tick after tick.
+                double base = d.noSlowShadow >= 0 ? d.noSlowShadow : d.noSlowLastHDist;
+                double step = noSlowStep(base, d.noSlowGroundBefore, d.noSlowLastGround, dy,
+                        // The jump boost follows the client's sprint; the
+                        // server's flag can lag behind it (19.10: a sprint-hop
+                        // with an item, the key held, the flag off).
+                        player.isSprinting() || player.getPlayerInput().sprint(),
+                        player.getAttributeValue(EntityAttributes.MOVEMENT_SPEED),
+                        useMul, slip, player.isSneaking());
+                double bound = noSlowSlack(step, d.noSlowLastGround);
+                if (velocityActive) bound += Math.max(0, d.velocityBudget);
                 if (general.debugChecks) {
-                    BastionAC.LOGGER.info("[DEBUG noslow] {} h={} limit={} usingFor={} sneak={} buffer={}",
-                            d.name, String.format("%.3f", hDist), String.format("%.3f", useLimit),
-                            usingFor, player.isSneaking(), String.format("%.1f", d.noSlowBuffer));
+                    BastionAC.LOGGER.info("[DEBUG noslow] {} h={} bound={} usingFor={} ground={}/{} buffer={}",
+                            d.name, String.format("%.3f", hDist), String.format("%.3f", bound),
+                            usingFor, d.noSlowLastGround, groundNow, String.format("%.1f", d.noSlowBuffer));
                 }
-                // Honest sprint-eat vs real NoSlow. A player who sprints and
-                // then raises food keeps the sprint momentum for a few ticks,
-                // but that momentum DECAYS every tick as friction bleeds it
-                // toward the use-penalty cap. A NoSlow module skips the penalty
-                // and HOLDS full speed flat. So only a non-decaying excess
-                // counts: a tick slower than the last judged one is momentum
-                // leaking off, not a cheat, and must not fill the buffer. This
-                // is what kills the sprint+apple false NoSlow from the live test
-                // (0,29-0,33 бл/тик while the apple animation finished).
-                //
-                // 3.5 beta (audit): "slower than the tick before" let a sawtooth
-                // through — 0.26, 0.25, 0.26, 0.25 read as decaying every other
-                // tick, and the decaying tick also drained the buffer, so it
-                // never filled. Momentum only goes down, and only for the first
-                // few ticks: a tick counts as decay when it is below the slowest
-                // tick of this use so far, early in the use, and decay merely
-                // holds the buffer.
-                boolean decaying = noSlowDecaying(d.noSlowMinHDist, hDist, usingFor, general.noSlowGraceTicks);
-                d.noSlowMinHDist = d.noSlowMinHDist < 0 ? hDist : Math.min(d.noSlowMinHDist, hDist);
-                if (decaying) {
-                    // Momentum leaking off: neither evidence nor an excuse.
-                } else if (hDist > useLimit) {
+                // Shoved by a mob, a boat or another player: vanilla adds
+                // that push to the step. Asked only when the step was exceeded.
+                boolean shoved = hDist > bound && !world.getOtherEntities(player,
+                        player.getBoundingBox().expand(0.6, 0.3, 0.6),
+                        e -> e.isPushable() && e != player.getVehicle()).isEmpty();
+                // Vanilla's prediction carries on; a slower client (a wall, a
+                // corner) pulls it down, a faster one never pushes it up.
+                d.noSlowShadow = shoved || velocityActive ? -1 : Math.min(step, hDist);
+                if (shoved) {
+                    // Neither evidence nor an excuse.
+                } else if (hDist > bound) {
                     d.noSlowBuffer += 1;
-                    // Six consecutive ticks, not four. The server keeps
-                    // isUsingItem() true until the client's release packet lands,
-                    // so a player who taps a food item and sprints on is "using" it at
-                    // full speed for a ping's worth of ticks through no fault of
-                    // their own. A real NoSlow holds the excess for seconds.
+                    // Six ticks over the vanilla step: the server keeps
+                    // isUsingItem() until the client's release lands, so a
+                    // ping's worth of full-speed ticks after letting go is honest.
                     if (d.noSlowBuffer > 5) {
                         d.noSlowBuffer = 1;
                         boolean mitigate = BastionAC.flag(player, d, CheckType.NOSLOW,
-                                String.format("%.2f бл/тик с предметом (лимит %.2f)", hDist, useLimit));
+                                String.format(Lang.t("%.2f бл/тик с предметом (ванильный предел %.2f)"), hDist, bound));
                         if (mitigate || BastionAC.instantSetback(d)) {
                             action = Action.max(action, Action.SETBACK);
                         }
@@ -702,19 +793,19 @@ public final class MovementChecks {
                 } else {
                     d.noSlowBuffer = Math.max(0, d.noSlowBuffer - 1);
                 }
-                d.noSlowLastHDist = hDist;
             } else {
-                // Using an item but this tick is not judgeable (airborne, on
-                // ice, mid-bounce). Break the decay series so the next judgeable
-                // tick starts a fresh comparison rather than reading across a gap.
-                d.noSlowLastHDist = -1;
-                d.noSlowMinHDist = -1;
+                d.noSlowShadow = -1;
             }
+            d.noSlowLastHDist = moveGap == 1 ? hDist : -1;
+            d.noSlowGroundBefore = d.noSlowLastGround;
+            d.noSlowLastGround = groundNow;
         } else {
             d.usingItemSinceTick = -1;
+            d.noSlowShadow = -1;
             d.noSlowBuffer = Math.max(0, d.noSlowBuffer - 0.5);
-            d.noSlowLastHDist = -1;
-            d.noSlowMinHDist = -1;
+            d.noSlowLastHDist = moveGap == 1 ? hDist : -1;
+            d.noSlowGroundBefore = d.noSlowLastGround;
+            d.noSlowLastGround = packet.isOnGround() && env.groundBelow;
         }
 
         // ---------------- NOWEB ----------------
@@ -727,7 +818,7 @@ public final class MovementChecks {
             if (d.webFastStreak >= 6) {
                 d.webFastStreak = 2;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.NOSLOW,
-                        String.format("в паутине %.2f бл/тик (без мода не больше 0.08)", hDist));
+                        String.format(Lang.t("в паутине %.2f бл/тик (без мода не больше 0.08)"), hDist));
                 if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
@@ -752,7 +843,7 @@ public final class MovementChecks {
                 if (d.berryFastStreak >= 6) {
                     d.berryFastStreak = 2;
                     boolean mitigate = BastionAC.flag(player, d, CheckType.NOSLOW, String.format(
-                            "в кусте ягод %.2f бл/тик (без мода не больше %.2f)", hDist, bushLimit));
+                            Lang.t("в кусте ягод %.2f бл/тик (без мода не больше %.2f)"), hDist, bushLimit));
                     if (mitigate || BastionAC.instantSetback(d)) {
                         action = Action.max(action, Action.SETBACK);
                     }
@@ -779,6 +870,16 @@ public final class MovementChecks {
             d.glideStreak = 0;
             d.flyBuffer = Math.max(0, d.flyBuffer - 1);
             d.fallPeakY = newY; // reset fall origin
+        } else if (packet.isOnGround() && floorWithin(player, world, newX, newY, newZ, 1.0)) {
+            // A sprint-hop down a slope lands for a single tick on a block edge the
+            // support box misses, and the fall origin used to ride over every hop:
+            // 02.11 a run of one-block hops was billed as a 5,2-block fall (and
+            // charged as damage). A claimed landing with a floor within a block
+            // under the feet ends the fall, as it does for vanilla. A NoFall that
+            // claims the ground high in the air has no floor there and is still
+            // caught by both detectors below.
+            d.airTicks++;
+            d.fallPeakY = newY;
         } else {
             d.airTicks++;
             if (d.airTicks == 1 && d.pendingFallTick < 0) d.fallDamageRaw = 0;
@@ -833,7 +934,7 @@ public final class MovementChecks {
                     if (d.fastFallBuffer > 5) {
                         d.fastFallBuffer = 1;
                         boolean mitigate = BastionAC.flag(player, d, CheckType.FASTFALL, String.format(
-                                "падение %.2f бл/тик (ванильный предел %.2f на %d-м тике)", -dy, cap, d.fallTicks));
+                                Lang.t("падение %.2f бл/тик (ванильный предел %.2f на %d-м тике)"), -dy, cap, d.fallTicks));
                         if (mitigate || BastionAC.instantSetback(d)) {
                             action = Action.max(action, Action.SETBACK);
                         }
@@ -842,6 +943,15 @@ public final class MovementChecks {
                     d.fastFallBuffer = Math.max(0, d.fastFallBuffer - 1);
                 }
             }
+        } else if (dy < 0 && !env.groundBelow && !env.entitySupport) {
+            // "Resting" with nothing under the feet: the support box brushing a
+            // shaft wall, or the body scan still finding the water the player is
+            // dropping out of. The fall is real and keeps its speed; restarting
+            // the curve at zero held two players falling down a water-topped
+            // shaft to the eighth tick's 0.77 while vanilla had them at the
+            // twelfth (0.84, to the hundredth) — FastFall 26.10, and a setback.
+            d.fallTicks = ticksForFallSpeed(-dy);
+            d.fastFallBuffer = Math.max(0, d.fastFallBuffer - 0.5);
         } else {
             d.fallTicks = 0;
             d.fastFallBuffer = Math.max(0, d.fastFallBuffer - 0.5);
@@ -909,7 +1019,7 @@ public final class MovementChecks {
                 if (d.spiderBuffer > 2) {
                     d.spiderBuffer = 1;
                     if (BastionAC.flag(player, d, CheckType.SPIDER,
-                            String.format("подъём %.2f у стены, dy=%.2f, воздух %d т", climbGain, dy, d.airTicks))) {
+                            String.format(Lang.t("подъём %.2f у стены, dy=%.2f, воздух %d т"), climbGain, dy, d.airTicks))) {
                         action = Action.max(action, Action.SETBACK);
                     }
                 }
@@ -921,7 +1031,10 @@ public final class MovementChecks {
         // one, a jump still tops out at ~1.25 blocks (plus Jump Boost), and
         // Wurst's HighJump (height 6 by default) clears six. Once per jump:
         // the take-off height is latched after the first report.
-        if (!footing && dy > 0.0 && !player.isGliding() && !player.isUsingRiptide()) {
+        // Not in Прятки worlds: props are blocks sent to the clients only, so a
+        // player who hops onto a disguised hider stands on air for the server.
+        boolean propWorld = player.getEntityWorld().getRegistryKey().getValue().getNamespace().equals("hideseek");
+        if (!footing && dy > 0.0 && !player.isGliding() && !player.isUsingRiptide() && !propWorld) {
             double maxGain = 1.35;
             StatusEffectInstance jb = player.getStatusEffect(StatusEffects.JUMP_BOOST);
             if (jb != null) maxGain += (jb.getAmplifier() + 1) * 2.0;
@@ -941,7 +1054,7 @@ public final class MovementChecks {
             if (gain > maxGain + 0.35 && !exempt && d.highJumpBase != d.climbBaseY) {
                 d.highJumpBase = d.climbBaseY;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.FLY, String.format(
-                        "прыжок на %.2f бл без опоры (предел %.2f) — HighJump", gain, maxGain));
+                        Lang.t("прыжок на %.2f бл без опоры (предел %.2f) — HighJump"), gain, maxGain));
                 if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
@@ -962,7 +1075,7 @@ public final class MovementChecks {
                 // every few ticks, and Spider's kick threshold was set for a
                 // check that fires once per wall.
                 boolean mitigate = BastionAC.flag(player, d, CheckType.SPIDER,
-                        String.format("по лестнице %.3f бл/тик (без мода 0.118) — FastLadder", dy), 0.5);
+                        String.format(Lang.t("по лестнице %.3f бл/тик (без мода 0.118) — FastLadder"), dy), 0.5);
                 if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
@@ -996,6 +1109,8 @@ public final class MovementChecks {
                     || player.hasStatusEffect(StatusEffects.LEVITATION)
                     || player.isGliding() || player.isUsingRiptide() || player.hasVehicle()
                     || player.isInvulnerable()
+                    // Прятки switch all damage off in their arena, so no fall is ever billed there.
+                    || player.getEntityWorld().getRegistryKey().getValue().getNamespace().equals("hideseek")
                     || tick < d.bounceGraceUntil
                     // A wind charge / explosion changes how vanilla bills the fall.
                     || tick - d.lastExplosionTick < 200;
@@ -1033,7 +1148,7 @@ public final class MovementChecks {
             if (d.groundBuffer > 3) {
                 d.groundBuffer = 1;
                 CheckType type = dy < -0.5 ? CheckType.NOFALL : CheckType.GROUNDSPOOF;
-                BastionAC.flag(player, d, type, String.format("onGround=true в воздухе, dy=%.2f", dy));
+                BastionAC.flag(player, d, type, String.format(Lang.t("onGround=true в воздухе, dy=%.2f"), dy));
                 // The damage is not dealt here any more. Charging "fall so far"
                 // each time the buffer overflowed billed a 20-block drop as
                 // 2 + 1 + 1 and reset the fall origin each time; the landing
@@ -1055,7 +1170,7 @@ public final class MovementChecks {
             if (d.jesusBuffer > 5) {
                 d.jesusBuffer = 2;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.JESUS,
-                        String.format("стоит на воде (onGround над жидкостью, dy=%.2f)", dy));
+                        String.format(Lang.t("стоит на воде (onGround над жидкостью, dy=%.2f)"), dy));
                 if (mitigate || BastionAC.instantSetback(d)) {
                     action = Action.max(action, Action.SETBACK);
                 }
@@ -1077,7 +1192,7 @@ public final class MovementChecks {
             if (d.falseAirStreak >= 30) {
                 d.falseAirStreak = 10;
                 BastionAC.flag(player, d, CheckType.GROUNDSPOOF,
-                        "onGround=false на твёрдой земле 30 пакетов подряд — AntiHunger");
+                        Lang.t("onGround=false на твёрдой земле 30 пакетов подряд — AntiHunger"));
             }
         } else {
             d.falseAirStreak = 0;
@@ -1158,16 +1273,44 @@ public final class MovementChecks {
      * client is judged by — ClientTickEnd for 1.21.2+, move packets for older
      * clients whose tick ends Via makes up. See {@link dev.bastionac.core.TimerBalance}.
      */
-    /** Ticks after the grace in which honest sprint momentum can still be bleeding off. */
-    static final int NOSLOW_DECAY_TICKS = 8;
+    /**
+     * The farthest a vanilla client can move horizontally this tick while
+     * using an item, from the last tick's distance (3.6). Vanilla's
+     * {@code travel} takes the friction from where the player was at the start
+     * of a tick and keeps it for the next one; the acceleration comes from
+     * where they are at the start of this one:
+     * <ul>
+     *   <li>last tick's distance × friction: the block's slipperiness × 0.91
+     *       if the LAST tick began on the ground, air drag 0.91 if not;</li>
+     *   <li>plus the acceleration of this tick, scaled by the item: on the
+     *       ground speed × 0.216 / slip³, in the air 0.02 (0.026 sprinting);</li>
+     *   <li>plus, on the tick the player jumps while sprinting, the 0.2
+     *       sprint-jump boost, which item use does not take away.</li>
+     * </ul>
+     * Checked against a real stair climb with an apple: 0.2297 × 0.91 +
+     * 0.0255 + 0.2 = 0.4345, recorded 0.435.
+     * Sneaking scales the input by 0.3. No slack here: see {@link #noSlowSlack}.
+     */
+    static double noSlowStep(double lastH, boolean groundBefore, boolean lastGround, double dy, boolean sprinting,
+                             double speedAttr, float useMul, float slip, boolean sneaking) {
+        double input = 0.98 * useMul * (sneaking ? 0.3 : 1.0);
+        double step = lastH * (groundBefore ? slip * 0.91 : 0.91);
+        if (lastGround) {
+            step += speedAttr * (0.21600002 / (slip * slip * slip)) * input;
+            if (dy > 0.2 && sprinting) step += 0.2;
+        } else {
+            step += (sprinting ? 0.025999999 : 0.02) * input;
+        }
+        return step;
+    }
 
     /**
-     * Whether this judged tick is momentum decaying rather than NoSlow: below
-     * the slowest tick of the use so far (by more than noise), and early in the
-     * use. Pure, unit-tested.
+     * The vanilla step with its slack. In the air nothing but drag and the
+     * input acts, and the recorded honest climb matches to a thousandth: 2 %
+     * and 0.012. On the ground the friction is read from one block: 5 % and 0.03.
      */
-    static boolean noSlowDecaying(double minSoFar, double hDist, long usingFor, int graceTicks) {
-        return minSoFar >= 0 && hDist < minSoFar - 0.004 && usingFor <= graceTicks + NOSLOW_DECAY_TICKS;
+    static double noSlowSlack(double step, boolean startedOnGround) {
+        return startedOnGround ? step * 1.05 + 0.03 : step * 1.02 + 0.012;
     }
 
     /**
@@ -1198,7 +1341,7 @@ public final class MovementChecks {
         // Flag only: the packets already played out, and the anchor is the
         // latest accepted one — there is no earlier spot to put it back to.
         BastionAC.flag(player, d, CheckType.TIMER, String.format(java.util.Locale.ROOT,
-                "транспорт обогнал реальное время на %.0f мс (по пакетам транспорта)", aheadMs));
+                Lang.t("транспорт обогнал реальное время на %.0f мс (по пакетам транспорта)"), aheadMs));
     }
 
     public static void timerArrival(ServerPlayerEntity player, PlayerData d, long nowMs, boolean tickEnd) {
@@ -1220,8 +1363,8 @@ public final class MovementChecks {
         if (player.isCreative() || player.isSpectator() || BastionAC.isAuthFrozen(player)) return;
         if (d.isFullyExempt(tick)) return;
         if (BastionAC.flag(player, d, CheckType.TIMER, String.format(java.util.Locale.ROOT,
-                "клиент обогнал реальное время на %.0f мс (%s)", aheadMs,
-                tickClock ? "по концам тиков" : "по пакетам движения"))) {
+                Lang.t("клиент обогнал реальное время на %.0f мс (%s)"), aheadMs,
+                tickClock ? Lang.t("по концам тиков") : Lang.t("по пакетам движения")))) {
             setbackNow(player, d);
         }
     }
@@ -1235,7 +1378,7 @@ public final class MovementChecks {
         if (d.flyBuffer <= 3) return false;
         d.flyBuffer = 1.5;
         boolean mitigate = BastionAC.flag(player, d, CheckType.FLY,
-                String.format("dy=%.3f, в воздухе %d тиков", dy, d.airTicks));
+                String.format(Lang.t("dy=%.3f, в воздухе %d тиков"), dy, d.airTicks));
         return mitigate || BastionAC.instantSetback(d);
     }
 
@@ -1279,7 +1422,7 @@ public final class MovementChecks {
 
         d.lastSetbackTick = tick;
         dev.bastionac.telemetry.Telemetry.acAction(player.getUuid(), dev.bastionac.telemetry.TelemetryFormat.ACT_SETBACK,
-                String.format(java.util.Locale.ROOT, "к %.2f %.2f %.2f", d.anchorX, d.anchorY, d.anchorZ));
+                String.format(java.util.Locale.ROOT, Lang.t("к %.2f %.2f %.2f"), d.anchorX, d.anchorY, d.anchorZ));
         player.networkHandler.requestTeleport(d.anchorX, d.anchorY, d.anchorZ, d.anchorYaw, d.anchorPitch);
         dev.bastionac.core.FreezeManager.afterSetback(player, d, tick, general.setbackFreezeTicks);
         return Action.SETBACK;
@@ -1476,6 +1619,24 @@ public final class MovementChecks {
             }
         }
         return env;
+    }
+
+    /** A top face at the feet anywhere under the hitbox widened by 2 cm. */
+    private static boolean floorFaceNear(ServerPlayerEntity player, World world, double x, double y, double z) {
+        double h = 0.32;
+        Box probe = new Box(x - h, y - 0.0625, z - h, x + h, y + 0.03125, z + h);
+        net.minecraft.block.ShapeContext ctx = net.minecraft.block.ShapeContext.of(player);
+        for (BlockPos pos : BlockPos.iterate(MathHelper.floor(probe.minX), MathHelper.floor(y) - 2,
+                MathHelper.floor(probe.minZ), MathHelper.floor(probe.maxX), MathHelper.floor(probe.maxY),
+                MathHelper.floor(probe.maxZ))) {
+            BlockState state = world.getBlockState(pos);
+            if (state.isAir()) continue;
+            for (Box b : state.getCollisionShape(world, pos, ctx).getBoundingBoxes()) {
+                Box wb = b.offset(pos.getX(), pos.getY(), pos.getZ());
+                if (wb.intersects(probe) && supportsFeetFromTop(wb, y)) return true;
+            }
+        }
+        return false;
     }
 
     /** Half-width of the foot probe: the player's hitbox (0.3) less a hair. */

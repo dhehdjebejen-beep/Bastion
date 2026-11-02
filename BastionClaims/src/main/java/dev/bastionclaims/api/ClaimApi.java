@@ -3,6 +3,7 @@ package dev.bastionclaims.api;
 import dev.bastionclaims.core.ClaimManager;
 import dev.bastionclaims.core.ProtectionService;
 import dev.bastionclaims.model.Claim;
+import dev.bastionclaims.util.Lang;
 import net.minecraft.server.network.ServerPlayerEntity;
 
 /**
@@ -31,7 +32,7 @@ public final class ClaimApi {
      */
     public static String statusLine(ServerPlayerEntity player) {
         Claim c = claimAt(player);
-        if (c == null) return "&7нет";
+        if (c == null) return Lang.t("&7нет");
         if (c.arrested) return "&4⛔ " + c.name;
         if (c.isOwner(player.getUuid()) || c.isMember(player.getUuid())) return "&a" + c.name;
         return "&c" + c.name;

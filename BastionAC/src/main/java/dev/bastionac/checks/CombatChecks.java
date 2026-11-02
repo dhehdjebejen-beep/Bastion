@@ -5,6 +5,7 @@ import dev.bastionac.core.Action;
 import dev.bastionac.core.AimTracker;
 import dev.bastionac.core.CheckType;
 import dev.bastionac.core.HitboxHistory;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.MathUtil;
 import dev.bastionac.core.PlayerData;
 import dev.bastionac.core.RhythmTracker;
@@ -83,7 +84,7 @@ public final class CombatChecks {
                         d.gcdBuffer = 0;
                         BastionAC.flag(player, d, CheckType.GCD, String.format(
                                 java.util.Locale.ROOT,
-                                "%.0f%% ротаций мимо сетки чувствительности (шаг %.4f°)",
+                                Lang.t("%.0f%% ротаций мимо сетки чувствительности (шаг %.4f°)"),
                                 (1 - onGrid) * 100, step));
                     }
                 } else {
@@ -117,7 +118,7 @@ public final class CombatChecks {
             if (now - d.lastCpsFlagMs >= CPS_FLAG_INTERVAL_MS) {
                 d.lastCpsFlagMs = now;
                 BastionAC.flag(player, d, CheckType.CPS,
-                        cps + " ударов/сек (лимит " + maxCps + ")",
+                        cps + Lang.t(" ударов/сек (лимит ") + maxCps + ")",
                         MathUtil.cpsSeverity(cps, maxCps));
             }
         }
@@ -184,14 +185,14 @@ public final class CombatChecks {
             // No verdict either way: keep the buffer as it is.
         } else if (best > base + 1.2 + drift) {
             BastionAC.flag(player, d, CheckType.REACH,
-                    String.format("%.2f бл (лимит %.2f, пинг %d)", best, base + 1.2 + drift, ping));
+                    String.format(Lang.t("%.2f бл (лимит %.2f, пинг %d)"), best, base + 1.2 + drift, ping));
             action = Action.max(action, Action.CANCEL); // blatant — always cancel the hit
         } else if (best > base + margin + drift) {
             d.reachBuffer += 1;
             if (d.reachBuffer >= 2) {
                 d.reachBuffer = 0;
                 if (BastionAC.flag(player, d, CheckType.REACH,
-                        String.format("%.2f бл (лимит %.2f, пинг %d)", best, base + margin + drift, ping))) {
+                        String.format(Lang.t("%.2f бл (лимит %.2f, пинг %d)"), best, base + margin + drift, ping))) {
                     action = Action.max(action, Action.CANCEL);
                 }
             }
@@ -213,7 +214,7 @@ public final class CombatChecks {
                 if (d.angleBuffer >= 3) {
                     d.angleBuffer = 1;
                     if (BastionAC.flag(player, d, CheckType.ANGLE,
-                            String.format("удар с отворотом %.0f°", Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, dot))))))) {
+                            String.format(Lang.t("удар с отворотом %.0f°"), Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, dot))))))) {
                         action = Action.max(action, Action.CANCEL);
                     }
                 }
@@ -276,7 +277,7 @@ public final class CombatChecks {
                 if (d.wallsBuffer >= 2) {
                     d.wallsBuffer = 0;
                     if (BastionAC.flag(player, d, CheckType.WALLS,
-                            String.format("удар сквозь стену с %.1f бл", best))) {
+                            String.format(Lang.t("удар сквозь стену с %.1f бл"), best))) {
                         action = Action.max(action, Action.CANCEL);
                     }
                 }
@@ -300,7 +301,7 @@ public final class CombatChecks {
         if (offLook >= 2 && d.recentTargetSpread(tick, 6) >= MULTITARGET_MIN_SPREAD_DEG
                 && d.distinctRecentTargets(tick, 6) >= 3) {
             BastionAC.flag(player, d, CheckType.MULTITARGET, String.format(java.util.Locale.ROOT,
-                    "%d разных целей за 6 тиков, %d мимо прицела, разброс %.0f°",
+                    Lang.t("%d разных целей за 6 тиков, %d мимо прицела, разброс %.0f°"),
                     d.distinctRecentTargets(tick, 6), offLook, d.recentTargetSpread(tick, 6)));
         }
 
@@ -311,7 +312,7 @@ public final class CombatChecks {
         if (player.isUsingItem()) {
             d.useAttackStreak++;
             if (d.useAttackStreak >= 4) {
-                if (BastionAC.flag(player, d, CheckType.USEATTACK, "атака во время использования предмета")) {
+                if (BastionAC.flag(player, d, CheckType.USEATTACK, Lang.t("атака во время использования предмета"))) {
                     action = Action.max(action, Action.CANCEL);
                 }
             }
@@ -336,7 +337,7 @@ public final class CombatChecks {
             if (d.noSwingBuffer >= 6) {
                 d.noSwingBuffer = 0;
                 BastionAC.flag(player, d, CheckType.NOSWING,
-                        cps + " ударов/сек при " + swings + " замахах/сек");
+                        cps + Lang.t(" ударов/сек при ") + swings + Lang.t(" замахах/сек"));
             }
         } else {
             d.noSwingBuffer = Math.max(0, d.noSwingBuffer - 1);
@@ -418,7 +419,7 @@ public final class CombatChecks {
                     if (d.snapBuffer >= 2) {
                         d.snapBuffer = 0.5;
                         BastionAC.flag(player, d, CheckType.AIM, String.format(java.util.Locale.ROOT,
-                                "рывок взгляда на %.0f° точно в центр цели (%.2f°) и сразу обратно",
+                                Lang.t("рывок взгляда на %.0f° точно в центр цели (%.2f°) и сразу обратно"),
                                 d.snapAngle, d.snapErr), 1.5);
                     }
                 } else {
@@ -481,7 +482,7 @@ public final class CombatChecks {
             WorldChecks.interactWallsClean(d);
             return false;
         }
-        WorldChecks.interactWallsViolation(player, d, String.format("взаимодействие сквозь блок с %s",
+        WorldChecks.interactWallsViolation(player, d, String.format(Lang.t("взаимодействие сквозь блок с %s"),
                 net.minecraft.registry.Registries.ENTITY_TYPE.getId(target.getType()).getPath()));
         return true;
     }
@@ -644,7 +645,7 @@ public final class CombatChecks {
             if (d.critBuffer >= 2) {
                 d.critBuffer = 0;
                 if (BastionAC.flag(player, d, CheckType.CRITICALS,
-                        String.format("крит без падения (падение %.3f, ноги на блоке, тик начат на земле)",
+                        String.format(Lang.t("крит без падения (падение %.3f, ноги на блоке, тик начат на земле)"),
                                 player.fallDistance))) {
                     return Action.CANCEL;
                 }

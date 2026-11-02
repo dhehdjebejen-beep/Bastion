@@ -3,6 +3,7 @@ package dev.bastionac.checks;
 import dev.bastionac.BastionAC;
 import dev.bastionac.core.Action;
 import dev.bastionac.core.CheckType;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.PlayerData;
 import dev.bastionac.core.ShadowTelemetry;
 import dev.bastionac.core.RhythmTracker;
@@ -63,7 +64,7 @@ public final class WorldChecks {
                     if (d.packetMineBuffer >= 2) {
                         d.packetMineBuffer = 0;
                         if (BastionAC.flag(player, d, CheckType.PACKETMINE,
-                                String.format("начало добычи с %.1f бл", reach))) {
+                                String.format(Lang.t("начало добычи с %.1f бл"), reach))) {
                             return Action.CANCEL;
                         }
                     }
@@ -88,9 +89,8 @@ public final class WorldChecks {
             // Nuker runs BEFORE the insta-mine exit: grass, torches and crops are
             // insta-mined, carry no timing signal, and are exactly what a nuker
             // sweeps. Rate and aim are the only things left to measure on them.
-            if (nuker(player, d, pos)) return Action.CANCEL;
-
             double delta = breakingDelta(player, world, pos);
+            if (nuker(player, d, pos, delta >= 1.0)) return Action.CANCEL;
             // Insta-mine: vanilla destroys the block inside this very packet
             // (ServerPlayerInteractionManager -> finishMining "insta mine") and the
             // client, having broken it locally, sends neither STOP nor ABORT. Arming
@@ -140,7 +140,7 @@ public final class WorldChecks {
                     if (d.packetMineBuffer >= 2) {
                         d.packetMineBuffer = 0;
                         if (BastionAC.flag(player, d, CheckType.PACKETMINE,
-                                String.format("завершение добычи с %.1f бл", reach))) {
+                                String.format(Lang.t("завершение добычи с %.1f бл"), reach))) {
                             return Action.CANCEL;
                         }
                     }
@@ -179,7 +179,7 @@ public final class WorldChecks {
                     if (d.fastBreakBuffer >= 2) {
                         d.fastBreakBuffer = 0;
                         if (BastionAC.flag(player, d, CheckType.FASTBREAK,
-                                String.format("%d тиков вместо ~%.0f", elapsed, requiredTicks))) {
+                                String.format(Lang.t("%d тиков вместо ~%.0f"), elapsed, requiredTicks))) {
                             return Action.CANCEL;
                         }
                     }
@@ -194,10 +194,12 @@ public final class WorldChecks {
     /**
      * Nuker: the two things that stay measurable when the block breaks instantly.
      *
-     * <p><b>Rate.</b> A vanilla client breaks one block at a time and arms a
-     * 5-tick cooldown after each, so holding the button through a field of grass
-     * yields about four blocks a second; by hand it is capped by the click rate.
-     * A nuker clears everything inside its radius and runs far past both.
+     * <p><b>Rate.</b> Only insta-broken blocks count: a vanilla survival client
+     * arms no cooldown after one, so a sweep through grass breaks up to one block
+     * a tick, 20 a second. Starts on harder blocks are aborted attacks, timed by
+     * FastBreak: counting them flagged a player who ran across a meadow swiping
+     * flowers off the grass ("16 блоков/сек", 02.11). A nuker breaks several
+     * blocks inside one tick and runs far past 20.
      *
      * <p><b>Aim.</b> The client picks its target by raycasting from the crosshair,
      * so the block must be in front of the camera. A nuker breaks whatever is in
@@ -206,13 +208,13 @@ public final class WorldChecks {
      * carries no hit position), so the threshold sits well past 90 degrees —
      * at point-blank the centre alone can be tens of degrees off the crosshair.
      */
-    private static boolean nuker(ServerPlayerEntity player, PlayerData d, BlockPos pos) {
-        int distinct = d.recordBreakAndCountDistinct(pos.asLong(), System.currentTimeMillis());
-        if (distinct > 14) {
+    private static boolean nuker(ServerPlayerEntity player, PlayerData d, BlockPos pos, boolean instant) {
+        int distinct = instant ? d.recordBreakAndCountDistinct(pos.asLong(), System.currentTimeMillis()) : 0;
+        if (distinct > 22) {
             d.nukerBuffer += 1;
             if (d.nukerBuffer >= 2) {
                 d.nukerBuffer = 0;
-                if (BastionAC.flag(player, d, CheckType.NUKER, distinct + " блоков/сек")) return true;
+                if (BastionAC.flag(player, d, CheckType.NUKER, distinct + Lang.t(" блоков/сек"))) return true;
             }
         } else {
             d.nukerBuffer = Math.max(0, d.nukerBuffer - 0.5);
@@ -227,7 +229,7 @@ public final class WorldChecks {
                 if (d.nukerAimBuffer >= 3) {
                     d.nukerAimBuffer = 1;
                     if (BastionAC.flag(player, d, CheckType.NUKER,
-                            String.format("добыча блока за спиной (cos=%.2f)", cos))) {
+                            String.format(Lang.t("добыча блока за спиной (cos=%.2f)"), cos))) {
                         return true;
                     }
                 }
@@ -327,7 +329,7 @@ public final class WorldChecks {
         if (perSecond > 11) {
             if (now - d.lastFastPlaceFlagMs >= 250) {
                 d.lastFastPlaceFlagMs = now;
-                if (BastionAC.flag(player, d, CheckType.FASTPLACE, perSecond + " блоков/сек")) {
+                if (BastionAC.flag(player, d, CheckType.FASTPLACE, perSecond + Lang.t(" блоков/сек"))) {
                     action = Action.max(action, Action.CANCEL);
                 }
             }
@@ -371,7 +373,7 @@ public final class WorldChecks {
             return false;
         }
         resync(player, packet);
-        interactWallsViolation(player, d, String.format("клик сквозь блок по %s на %d %d %d",
+        interactWallsViolation(player, d, String.format(Lang.t("клик сквозь блок по %s на %d %d %d"),
                 world.getBlockState(target).getBlock().getName().getString(),
                 target.getX(), target.getY(), target.getZ()));
         return true;
@@ -400,7 +402,7 @@ public final class WorldChecks {
         }
         player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket(pos, world.getBlockState(pos)));
         player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket(packet.getSequence()));
-        interactWallsViolation(player, d, String.format("ломание сквозь блок: %s на %d %d %d",
+        interactWallsViolation(player, d, String.format(Lang.t("ломание сквозь блок: %s на %d %d %d"),
                 world.getBlockState(pos).getBlock().getName().getString(), pos.getX(), pos.getY(), pos.getZ()));
         return true;
     }
@@ -542,7 +544,7 @@ public final class WorldChecks {
         int streak = d.placeCenterStreak;
         d.placeCenterStreak = 2;
         return BastionAC.flag(player, d, CheckType.AUTOPLACE,
-                streak + " кликов подряд точно в центр грани блока (координаты вычислены, а не наведены)");
+                streak + Lang.t(" кликов подряд точно в центр грани блока (координаты вычислены, а не наведены)"));
     }
 
     private static boolean airPlace(ServerPlayerEntity player, PlayerData d, PlayerInteractBlockC2SPacket packet) {
@@ -572,9 +574,9 @@ public final class WorldChecks {
         if (d.airPlaceBuffer >= 3) {
             d.airPlaceBuffer = 1;
             return BastionAC.flag(player, d, CheckType.AIRPLACE, String.format(
-                    "клик по пустоте на %d %d %d (%s)",
+                    Lang.t("клик по пустоте на %d %d %d (%s)"),
                     pos.getX(), pos.getY(), pos.getZ(),
-                    state.isAir() ? "воздух" : "жидкость без формы"));
+                    state.isAir() ? Lang.t("воздух") : Lang.t("жидкость без формы")));
         }
         return false;
     }
@@ -627,7 +629,7 @@ public final class WorldChecks {
         // (a jump start is 0.42 blocks) before calling the geometry impossible.
         if (outside < -0.5) {
             if (BastionAC.flag(player, d, CheckType.SCAFFOLD,
-                    String.format("клик по грани %s изнутри (%.2f бл)", side.name(), outside))) {
+                    String.format(Lang.t("клик по грани %s изнутри (%.2f бл)"), side.name(), outside))) {
                 return true;
             }
             return false;
@@ -650,7 +652,7 @@ public final class WorldChecks {
             if (d.scaffoldAimBuffer >= 3) {
                 d.scaffoldAimBuffer = 1;
                 if (BastionAC.flag(player, d, CheckType.SCAFFOLD, String.format(
-                        "постановка мимо взгляда (%.0f° от прицела, %.1f бл)",
+                        Lang.t("постановка мимо взгляда (%.0f° от прицела, %.1f бл)"),
                         Math.toDegrees(Math.acos(Math.max(-1, Math.min(1, aim)))), dist))) {
                     return true;
                 }
@@ -664,7 +666,7 @@ public final class WorldChecks {
             if (d.scaffoldBuffer >= 4) {
                 d.scaffoldBuffer = 2;
                 return BastionAC.flag(player, d, CheckType.SCAFFOLD,
-                        String.format("взгляд изнутри грани %s (dot=%.2f) x4", side.name(), dot));
+                        String.format(Lang.t("взгляд изнутри грани %s (dot=%.2f) x4"), side.name(), dot));
             }
         } else {
             d.scaffoldBuffer = Math.max(0, d.scaffoldBuffer - 1);

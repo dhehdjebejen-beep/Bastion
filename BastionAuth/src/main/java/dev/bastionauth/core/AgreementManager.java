@@ -25,7 +25,7 @@ import java.util.Optional;
  * registration, which is why this lives in the authentication mod rather than
  * in MaxCore: it has to be able to stand in front of {@code /register}.
  *
- * <p>The text ships in the jar as {@code bastionauth/agreement-1.3.txt},
+ * <p>The text ships in the jar as {@code bastionauth/agreement-1.4.txt},
  * already split into volumes and pages. Pagination is done ahead of time
  * against real glyph widths because a written-book page silently clips
  * anything past 14 lines or 114 pixels — laying it out at runtime is how you
@@ -37,13 +37,15 @@ import java.util.Optional;
 public final class AgreementManager {
 
     /** Stored with every acceptance. Bumping it invalidates every previous accept. */
-    public static final String VERSION = "maxcora-eula-1.3";
+    public static final String VERSION = "maxcora-eula-1.4";
     /** Shown to players. */
-    public static final String REVISION = "1.3";
-    public static final String REVISION_DATE = "16 сентября 2026";
+    public static final String REVISION = "1.4";
+    // The book title and author are how isAgreementBook recognises our books
+    // in an inventory, so they stay Russian whatever the server language.
+    public static final String REVISION_DATE = Lang.k("1 ноября 2026");
     public static final String AUTHOR = "Администрация MaxCora";
 
-    private static final String RESOURCE = "/bastionauth/agreement-1.3.txt";
+    private static final String RESOURCE = "/bastionauth/agreement-1.4.txt";
 
     /** One bound volume. */
     public record Volume(String title, List<String> pages) {}
@@ -119,9 +121,9 @@ public final class AgreementManager {
         stack.set(DataComponentTypes.CUSTOM_NAME,
                 Text.literal("§6" + volume.title()).styled(s -> s.withItalic(false)));
         stack.set(DataComponentTypes.LORE, new net.minecraft.component.type.LoreComponent(List.of(
-                Text.literal("§7Пользовательское соглашение MaxCora").styled(s -> s.withItalic(false)),
-                Text.literal("§8Редакция " + REVISION + " от " + REVISION_DATE).styled(s -> s.withItalic(false)),
-                Text.literal("§8Страниц: " + volume.pages().size()).styled(s -> s.withItalic(false)))));
+                Text.literal(Lang.t("§7Пользовательское соглашение MaxCora")).styled(s -> s.withItalic(false)),
+                Text.literal(Lang.t("§8Редакция ") + REVISION + Lang.t(" от ") + Lang.t(REVISION_DATE)).styled(s -> s.withItalic(false)),
+                Text.literal(Lang.t("§8Страниц: ") + volume.pages().size()).styled(s -> s.withItalic(false)))));
         return stack;
     }
 

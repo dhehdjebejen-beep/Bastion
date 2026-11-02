@@ -103,7 +103,7 @@ public final class KnockbackVerifier {
         if (d.kbUnanswered >= 5) {
             d.kbUnanswered = 0;
             BastionAC.flag(player, d, CheckType.VELOCITY,
-                    "клиент не отвечает на ping после отброса (5 раз подряд)");
+                    Lang.t("клиент не отвечает на ping после отброса (5 раз подряд)"));
         }
     }
 
@@ -201,7 +201,7 @@ public final class KnockbackVerifier {
             if (d.kbFailStreak >= streak) {
                 d.kbFailStreak = 0;
                 BastionAC.flag(player, d, CheckType.VELOCITY, String.format(
-                        "отброс %.2f бл вместо мин. %.2f (%d подряд)", moved, need, streak));
+                        Lang.t("отброс %.2f бл вместо мин. %.2f (%d подряд)"), moved, need, streak));
             }
         } else {
             d.kbFailStreak = Math.max(0, d.kbFailStreak - 1);

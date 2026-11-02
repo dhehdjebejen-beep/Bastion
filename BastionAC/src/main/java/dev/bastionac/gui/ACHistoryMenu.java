@@ -3,6 +3,7 @@ package dev.bastionac.gui;
 import dev.bastionac.core.BanManager;
 import dev.bastionac.core.HistoryManager;
 import dev.bastionac.core.HistoryManager.Event;
+import dev.bastionac.core.Lang;
 import dev.bastionac.core.TextFmt;
 import dev.bastionac.util.ChestGui;
 import net.minecraft.item.Items;
@@ -21,24 +22,24 @@ final class ACHistoryMenu {
     // ------------------------------------------------------------------ global
 
     static void openAlerts(ServerPlayerEntity admin, int page) {
-        feed(admin, "&8[&cBAC&8] &7История алертов", HistoryManager.recentAlerts(2000), page, true,
+        feed(admin, Lang.t("&8[&cBAC&8] &7История алертов"), HistoryManager.recentAlerts(2000), page, true,
                 () -> ACPanel.open(admin), pg -> openAlerts(admin, pg));
     }
 
     static void openPunishments(ServerPlayerEntity admin, int page) {
-        feed(admin, "&8[&cBAC&8] &7История наказаний", HistoryManager.recentPunishments(1000), page, true,
+        feed(admin, Lang.t("&8[&cBAC&8] &7История наказаний"), HistoryManager.recentPunishments(1000), page, true,
                 () -> ACPanel.open(admin), pg -> openPunishments(admin, pg));
     }
 
     // ------------------------------------------------------------------ per-player
 
     static void openPlayerAlerts(ServerPlayerEntity admin, UUID uuid, String name, int page) {
-        feed(admin, "&8[&cBAC&8] &7Алерты &f" + name, HistoryManager.alertsFor(uuid, 500), page, false,
+        feed(admin, Lang.t("&8[&cBAC&8] &7Алерты &f") + name, HistoryManager.alertsFor(uuid, 500), page, false,
                 () -> ACPlayerMenu.openCard(admin, uuid), pg -> openPlayerAlerts(admin, uuid, name, pg));
     }
 
     static void openPlayerPunishments(ServerPlayerEntity admin, UUID uuid, String name, int page) {
-        feed(admin, "&8[&cBAC&8] &7Наказания &f" + name, HistoryManager.punishmentsFor(uuid, 500), page, false,
+        feed(admin, Lang.t("&8[&cBAC&8] &7Наказания &f") + name, HistoryManager.punishmentsFor(uuid, 500), page, false,
                 () -> ACPlayerMenu.openCard(admin, uuid), pg -> openPlayerPunishments(admin, uuid, name, pg));
     }
 
@@ -59,12 +60,12 @@ final class ACHistoryMenu {
                 gui.button(i, icon(e, showName), () -> onClick(admin, e));
             }
         }
-        if (all.isEmpty()) gui.button(22, GuiItems.item(Items.BOOK, "&7Пока пусто"), () -> {});
+        if (all.isEmpty()) gui.button(22, GuiItems.item(Items.BOOK, Lang.t("&7Пока пусто")), () -> {});
 
         int prev = page - 1, next = page + 1;
-        if (page > 0) gui.button(45, GuiItems.item(Items.ARROW, "&7← Назад (стр.)"), () -> reopen.accept(prev));
-        gui.button(49, GuiItems.back("в панель"), back);
-        if (next < pages) gui.button(53, GuiItems.item(Items.ARROW, "&7Вперёд (стр.) →"), () -> reopen.accept(next));
+        if (page > 0) gui.button(45, GuiItems.item(Items.ARROW, Lang.t("&7← Назад (стр.)")), () -> reopen.accept(prev));
+        gui.button(49, GuiItems.back(Lang.t("в панель")), back);
+        if (next < pages) gui.button(53, GuiItems.item(Items.ARROW, Lang.t("&7Вперёд (стр.) →")), () -> reopen.accept(next));
 
         gui.fill(GuiItems.filler());
         gui.open(admin);
@@ -78,10 +79,10 @@ final class ACHistoryMenu {
             try {
                 UUID uuid = UUID.fromString(e.uuid);
                 if (BanManager.isBanned(uuid, e.name)) {
-                    Confirm.open(admin, "&aРазбанить " + e.name + "?", "Снять бан с " + e.name + "?", "Разбанить",
+                    Confirm.open(admin, Lang.t("&aРазбанить ") + e.name + "?", Lang.t("Снять бан с ") + e.name + "?", Lang.t("Разбанить"),
                             () -> {
                                 BanManager.unban(uuid, e.name, admin.getGameProfile().name());
-                                admin.sendMessage(TextFmt.literal("&a[BAC] " + e.name + " разбанен"), false);
+                                admin.sendMessage(TextFmt.literal("&a[BAC] " + e.name + Lang.t(" разбанен")), false);
                                 openPunishments(admin, 0);
                             },
                             () -> openPunishments(admin, 0));
@@ -121,7 +122,7 @@ final class ACHistoryMenu {
                 if (admin.getEntityWorld().getServer().getPlayerManager().getPlayer(uuid) != null) {
                     ACPlayerMenu.openCard(admin, uuid);
                 } else {
-                    admin.sendMessage(TextFmt.literal("&7[BAC] " + e.name + " не в сети — ЛКМ: расследование Аргуса"), false);
+                    admin.sendMessage(TextFmt.literal("&7[BAC] " + e.name + Lang.t(" не в сети — ЛКМ: расследование Аргуса")), false);
                 }
             }
         }
@@ -147,13 +148,13 @@ final class ACHistoryMenu {
             }
         }
         if (p == null || world == null) {
-            admin.sendMessage(TextFmt.literal("&c[BAC] У этого алерта нет сохранённой позиции"), false);
+            admin.sendMessage(TextFmt.literal(Lang.t("&c[BAC] У этого алерта нет сохранённой позиции")), false);
             return;
         }
         admin.teleport(world, p[0], p[1], p[2], java.util.Set.of(), admin.getYaw(), admin.getPitch(), false);
         admin.closeHandledScreen();
         admin.sendMessage(TextFmt.literal(String.format(java.util.Locale.ROOT,
-                "&7[BAC] Место алерта %s (%s): &f%.1f %.1f %.1f", e.check, e.name, p[0], p[1], p[2])), false);
+                Lang.t("&7[BAC] Место алерта %s (%s): &f%.1f %.1f %.1f"), e.check, e.name, p[0], p[1], p[2])), false);
     }
 
     /** The server's position of the player at the alert, from its evidence ("x,y,z"); null if none. */
@@ -178,8 +179,8 @@ final class ACHistoryMenu {
         String world = e.evidence.getOrDefault("world", "?");
         double[] p = alertPos(e);
         // Where it happened, readable at a glance (it used to be the last grey line).
-        lore.add(p == null ? "&7Где: &8позиция неизвестна" : String.format(java.util.Locale.ROOT,
-                "&7Где: &f%.1f %.1f %.1f &8(%s)", p[0], p[1], p[2], world.replace("minecraft:", "")));
+        lore.add(p == null ? Lang.t("&7Где: &8позиция неизвестна") : String.format(java.util.Locale.ROOT,
+                Lang.t("&7Где: &f%.1f %.1f %.1f &8(%s)"), p[0], p[1], p[2], world.replace("minecraft:", "")));
         lore.add("&8tick " + tick + " · " + tickMs + " ms · ping " + ping + " ms");
         String shadow = e.evidence.get("shadow");
         if (shadow != null && !shadow.isBlank()) lore.add("&8" + shadow);
@@ -187,12 +188,12 @@ final class ACHistoryMenu {
 
     private static net.minecraft.item.ItemStack icon(Event e, boolean showName) {
         HistoryManager.Kind kind = parseKind(e.kind);
-        String when = GuiItems.ago(System.currentTimeMillis() - e.time) + " назад &8(" + GuiItems.stamp(e.time) + ")";
+        String when = GuiItems.ago(System.currentTimeMillis() - e.time) + Lang.t(" назад &8(") + GuiItems.stamp(e.time) + ")";
         List<String> lore = new ArrayList<>();
-        if (showName) lore.add("&7Игрок: &f" + e.name);
+        if (showName) lore.add(Lang.t("&7Игрок: &f") + e.name);
         switch (kind) {
             case ALERT -> {
-                lore.add("&7Проверка: &f" + e.check + " &8· &7VL &f" + String.format(java.util.Locale.ROOT, "%.1f", e.vl));
+                lore.add(Lang.t("&7Проверка: &f") + e.check + " &8· &7VL &f" + String.format(java.util.Locale.ROOT, "%.1f", e.vl));
                 if (e.details != null && !e.details.isEmpty()) lore.add("&8" + e.details);
                 appendEvidence(lore, e);
                 lore.add("&8" + when);
@@ -200,36 +201,36 @@ final class ACHistoryMenu {
                     lore.add(ArgusMenu.caseLineFor(UUID.fromString(e.uuid), e.time));
                 } catch (IllegalArgumentException ignored) {
                 }
-                lore.add("&8ЛКМ — Аргус: разобрать эту сессию");
-                lore.add("&8ПКМ — телепорт к месту алерта");
-                lore.add("&8Shift+ЛКМ — дела игрока · Shift+ПКМ — карточка");
+                lore.add(Lang.t("&8ЛКМ — Аргус: разобрать эту сессию"));
+                lore.add(Lang.t("&8ПКМ — телепорт к месту алерта"));
+                lore.add(Lang.t("&8Shift+ЛКМ — дела игрока · Shift+ПКМ — карточка"));
                 return GuiItems.head(e.name, "&e⚠ " + e.check, lore);
             }
             case TEMPBAN, MANUAL_BAN, ARGUS_BAN -> {
-                lore.add("&7Срок: &f" + BanManager.formatDuration(Math.max(1, e.durationHours)));
+                lore.add(Lang.t("&7Срок: &f") + BanManager.formatDuration(Math.max(1, e.durationHours)));
                 if (e.details != null) lore.add("&8" + e.details);
                 lore.add("&8" + when);
                 boolean active = isActiveBan(e);
-                lore.add(active ? "&cАктивен &8· клик — разбанить" : "&8истёк/снят");
-                String title = kind == HistoryManager.Kind.MANUAL_BAN ? "&4Ручной бан "
-                        : kind == HistoryManager.Kind.ARGUS_BAN ? "&5Бан Аргуса " : "&cАвто-бан ";
+                lore.add(active ? Lang.t("&cАктивен &8· клик — разбанить") : Lang.t("&8истёк/снят"));
+                String title = kind == HistoryManager.Kind.MANUAL_BAN ? Lang.t("&4Ручной бан ")
+                        : kind == HistoryManager.Kind.ARGUS_BAN ? Lang.t("&5Бан Аргуса ") : Lang.t("&cАвто-бан ");
                 return GuiItems.item(kind == HistoryManager.Kind.ARGUS_BAN ? Items.ENDER_EYE : Items.BARRIER,
                         title + e.name, lore);
             }
             case KICK -> {
                 if (e.details != null) lore.add("&8" + e.details);
                 lore.add("&8" + when);
-                return GuiItems.item(Items.IRON_DOOR, "&6Кик " + e.name, lore);
+                return GuiItems.item(Items.IRON_DOOR, Lang.t("&6Кик ") + e.name, lore);
             }
             case UNBAN -> {
                 if (e.details != null) lore.add("&8" + e.details);
                 lore.add("&8" + when);
-                return GuiItems.item(Items.LIME_WOOL, "&aРазбан " + e.name, lore);
+                return GuiItems.item(Items.LIME_WOOL, Lang.t("&aРазбан ") + e.name, lore);
             }
             default -> {
                 if (e.details != null) lore.add("&8" + e.details);
                 lore.add("&8" + when);
-                return GuiItems.item(Items.SPONGE, "&bСброс VL " + e.name, lore);
+                return GuiItems.item(Items.SPONGE, Lang.t("&bСброс VL ") + e.name, lore);
             }
         }
     }

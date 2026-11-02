@@ -1,6 +1,7 @@
 package dev.bastionac.argus;
 
 import dev.bastionac.config.ACConfig;
+import dev.bastionac.core.Lang;
 
 import java.util.List;
 
@@ -201,7 +202,7 @@ final class CaseLifecycle {
         }
         old.finalPass = true;
         old.rerunRequested = false;
-        old.closeNote = "новый эпизод — дело #" + nextId;
+        old.closeNote = Lang.t("новый эпизод — дело #") + nextId;
     }
 
     /**

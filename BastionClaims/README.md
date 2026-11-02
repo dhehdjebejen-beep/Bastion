@@ -18,6 +18,11 @@ packets past the usual path still hits it.
 - **Limits grow with play time**, read from the vanilla `play_time` statistic.
   Tiers are configurable.
 - Transfer to another player with confirmation. A chest GUI for everything.
+- **Spawn zone.** A square around spawn is protected like a claim of nobody's,
+  every flag closed (`spawnZone`); doors and buttons there work for everyone.
+- **Owners switch only safe flags** (`playerFlags`, PvP and mob damage by
+  default); explosions, fluids, pistons, hoppers and the rest stay with staff.
+- **Russian or English** for everything the mod says (`/claims lang ru|en`).
 
 ## Members and roles
 
@@ -189,7 +194,7 @@ build mode lets builders use WorldEdit under its creative block rules.
 
 | Staff — `/claims` (op 3+) |
 |---|
-| `reload` · `bypass` · `list <name>` · `delete <name> <claim>` · `here` · `manage <name> <claim>` · `flag <name> <flag> on\|off <claim>` · `/we …` |
+| `reload` · `lang [ru\|en]` · `bypass` · `list <name>` · `delete <name> <claim>` · `here` · `manage <name> <claim>` · `flag <name> <flag> on\|off <claim>` · `/we …` |
 
 For operators, `/claim bypass` works the same as `/claims bypass`.
 

@@ -3,6 +3,7 @@ package dev.bastionclaims.core;
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
 import dev.bastionclaims.BastionClaims;
+import dev.bastionclaims.util.Lang;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.registry.Registries;
@@ -20,14 +21,17 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Resolves blocks by their in-game Russian name (e.g. «камень», «воздух»,
- * «динамит») for the {@code /we} commands. Names come from the official 1.21.11
- * translations bundled at {@code /bastionclaims/blocks_ru.json}; matched to live
- * blocks by translation key at first use. English ids still work as a fallback.
+ * «динамит») or by id for the {@code /we} commands. Names come from the official
+ * 1.21.11 translations bundled at {@code /bastionclaims/blocks_ru.json}; matched to
+ * live blocks by translation key at first use. Both forms are always accepted;
+ * the server language only decides which one is suggested and shown.
  */
 public final class BlockNames {
 
     private static final Map<String, Block> BY_RU = new ConcurrentHashMap<>();
     private static final List<String> DISPLAY = new ArrayList<>();
+    private static final List<String> IDS = new ArrayList<>();
+    private static final Map<Block, String> RU_NAME = new ConcurrentHashMap<>();
     private static volatile boolean loaded;
 
     /** Convenience shorthands resolved before the normal lookup (e.g. "0" == air). */
@@ -37,6 +41,11 @@ public final class BlockNames {
     private static synchronized void ensureLoaded() {
         if (loaded) return;
         loaded = true;
+        for (Block b : Registries.BLOCK) {
+            Identifier id = Registries.BLOCK.getId(b);
+            IDS.add("minecraft".equals(id.getNamespace()) ? id.getPath() : id.toString());
+        }
+        IDS.sort(null);
         Map<String, String> lang;
         try (InputStream in = BlockNames.class.getResourceAsStream("/bastionclaims/blocks_ru.json")) {
             if (in == null) {
@@ -53,6 +62,7 @@ public final class BlockNames {
         for (Block b : Registries.BLOCK) {
             String ru = lang.get(b.getTranslationKey());   // "block.minecraft.stone" -> "Камень"
             if (ru == null || ru.isBlank()) continue;
+            RU_NAME.put(b, ru);
             if (BY_RU.putIfAbsent(ru.toLowerCase(Locale.ROOT), b) == null) {
                 DISPLAY.add(ru);
             }
@@ -84,10 +94,20 @@ public final class BlockNames {
         }
     }
 
-    /** Russian display names, for command tab-completion. */
+    /** Tab-completion: Russian names on a Russian server, ids otherwise. */
     public static List<String> suggestions() {
         ensureLoaded();
-        return DISPLAY;
+        return Lang.isRussian() && !DISPLAY.isEmpty() ? DISPLAY : IDS;
+    }
+
+    /** A block's name for messages, in the server language. */
+    public static String name(Block b) {
+        ensureLoaded();
+        if (Lang.isRussian()) {
+            String ru = RU_NAME.get(b);
+            if (ru != null) return ru;
+        }
+        return b.getName().getString();
     }
 
     private BlockNames() {}
