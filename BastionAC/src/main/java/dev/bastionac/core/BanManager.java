@@ -117,8 +117,8 @@ public final class BanManager {
         }
         save();
 
-        int hours = banHours(priorBans, cfg.banStepsHours);
-        long until = now + hours * 3_600_000L;
+        int minutes = banMinutes(priorBans, cfg.banStepsMinutes);
+        long until = now + minutes * 60_000L;
         String reason = TextFmt.strip(Lang.t(cfg.banReason));
         noteBanNetwork(uuid, name, player);
 
@@ -131,16 +131,16 @@ public final class BanManager {
                 ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
                 if (online != null && online.networkHandler != null) {
                     online.networkHandler.disconnect(TextFmt.literal(Lang.t(cfg.banReason)
-                            + Lang.t("\n&7Срок: &f") + formatDuration(hours)));
+                            + Lang.t("\n&7Срок: &f") + formatMinutes(minutes)));
                 }
                 if (cfg.broadcastBan) {
                     srv.getPlayerManager().broadcast(TextFmt.literal(
-                            "&8[&cBAC&8] &e" + name + Lang.t(" &7заблокирован автоматически на &f") + formatDuration(hours)), false);
+                            "&8[&cBAC&8] &e" + name + Lang.t(" &7заблокирован автоматически на &f") + formatMinutes(minutes)), false);
                 }
             });
         }
-        HistoryManager.recordPunishment(HistoryManager.Kind.TEMPBAN, uuid, name, null, hours, Lang.t("авто-бан по алертам"));
-        BastionAC.LOGGER.warn("[TEMPBAN] {} banned for {}h (prior bans in window: {})", name, hours, priorBans);
+        HistoryManager.recordBan(HistoryManager.Kind.TEMPBAN, uuid, name, null, minutes, Lang.t("авто-бан по алертам"));
+        BastionAC.LOGGER.warn("[TEMPBAN] {} banned for {} min (prior bans in window: {})", name, minutes, priorBans);
     }
 
     /**
@@ -172,9 +172,8 @@ public final class BanManager {
             return;
         }
         long now = System.currentTimeMillis();
-        // The normal ladder: prior bans in the history window decide the
-        // length, exactly like an alert-ladder ban. A burned chain is strong
-        // evidence, not a reason to skip to the top step.
+        // Prior bans in the history window decide the length. A burned chain is
+        // strong evidence: the longer ladder, still no skipping to its top.
         long historyMs = cfg.banHistoryHours * 3_600_000L;
         Deque<Long> history = BAN_HISTORY.computeIfAbsent(uuid, u -> new ArrayDeque<>());
         int priorBans;
@@ -184,9 +183,8 @@ public final class BanManager {
             history.addLast(now);
         }
         save();
-        int hours = banHours(priorBans, cfg.banStepsHours);
-        final int fHours = hours;
-        long until = now + hours * 3_600_000L;
+        int minutes = banMinutes(priorBans, cfg.heavyBanStepsMinutes);
+        long until = now + minutes * 60_000L;
         String reason = Lang.t("BastionAC: цепочка нарушений (") + (kinds == null || kinds.isEmpty() ? Lang.t("несколько проверок") : kinds) + ")";
 
         // Network context FIRST: the registry entry is what the log line and
@@ -206,13 +204,13 @@ public final class BanManager {
             if (cfg.broadcastBan) {
                 srv.getPlayerManager().broadcast(TextFmt.literal(
                         "&8[&cBAC&8] &e" + name + Lang.t(" &7заблокирован по цепочке атак на &f")
-                                + formatDuration(fHours)), false);
+                                + formatMinutes(minutes)), false);
             }
         });
-        HistoryManager.recordPunishment(HistoryManager.Kind.EDR_CHAIN_BAN, uuid, name, kinds, hours,
+        HistoryManager.recordBan(HistoryManager.Kind.EDR_CHAIN_BAN, uuid, name, kinds, minutes,
                 "burned chain #" + burnedCount + " [" + kinds + "]" + (maskedIp == null ? "" : " ip=" + maskedIp));
         BastionAC.LOGGER.warn("[CHAINBAN] {} banned {}h for a burned attack chain (#{}, checks={}, prior bans={}, ip={})",
-                name, hours, burnedCount, kinds, priorBans, maskedIp == null ? "?" : maskedIp);
+                name, minutes, burnedCount, kinds, priorBans, maskedIp == null ? "?" : maskedIp);
     }
 
     /**
@@ -220,7 +218,7 @@ public final class BanManager {
      * staff from the case. Same escalation ladder as every other ban; its own
      * kind in the history, its own words on the screen.
      */
-    public static void argusBan(UUID uuid, String name, String caseId, String reason, String by) {
+    public static void argusBan(UUID uuid, String name, String caseId, String reason, String by, boolean heavy) {
         MinecraftServer srv = server;
         if (srv == null) return;
         ACConfig.Punishment cfg = BastionAC.config().punishment;
@@ -239,8 +237,8 @@ public final class BanManager {
             history.addLast(now);
         }
         save();
-        int hours = banHours(priorBans, cfg.banStepsHours);
-        long until = now + hours * 3_600_000L;
+        int minutes = banMinutes(priorBans, heavy ? cfg.heavyBanStepsMinutes : cfg.banStepsMinutes);
+        long until = now + minutes * 60_000L;
         noteBanNetwork(uuid, name, onlineNow, "argus");
         srv.execute(() -> {
             PlayerConfigEntry entry = new PlayerConfigEntry(uuid, name);
@@ -250,16 +248,16 @@ public final class BanManager {
             if (online != null && online.networkHandler != null) {
                 online.networkHandler.disconnect(TextFmt.literal(
                         Lang.t("&c&lВы заблокированы.\n&7Причина: решение аналитической системы защиты (дело #") + caseId + Lang.t(").\n"
-                                + "&7Срок: &f") + formatDuration(hours) + Lang.t("\n&7Обжалование: официальный канал MaxCore.")));
+                                + "&7Срок: &f") + formatMinutes(minutes) + Lang.t("\n&7Обжалование: официальный канал MaxCore.")));
             }
             if (cfg.broadcastBan) {
                 srv.getPlayerManager().broadcast(TextFmt.literal(
-                        Lang.t("&8[&5Аргус&8] &e") + name + Lang.t(" &7заблокирован по итогам расследования на &f") + formatDuration(hours)), false);
+                        Lang.t("&8[&5Аргус&8] &e") + name + Lang.t(" &7заблокирован по итогам расследования на &f") + formatMinutes(minutes)), false);
             }
         });
-        HistoryManager.recordPunishment(HistoryManager.Kind.ARGUS_BAN, uuid, name, "argus", hours,
+        HistoryManager.recordBan(HistoryManager.Kind.ARGUS_BAN, uuid, name, "argus", minutes,
                 Lang.t("дело #") + caseId + " (" + by + "): " + reason);
-        BastionAC.LOGGER.warn("[ARGUSBAN] {} banned {}h on case #{} by {} ({})", name, hours, caseId, by, reason);
+        BastionAC.LOGGER.warn("[ARGUSBAN] {} banned {} min on case #{} by {} ({})", name, minutes, caseId, by, reason);
     }
 
     /**
@@ -367,7 +365,7 @@ public final class BanManager {
         noteBanNetwork(player.getUuid(), player.getGameProfile().name(), player);
         if (!cfg.catastrophicPermabanEnabled) {
             // Disabled by config: degrade to the harshest temp-ban step.
-            manualBan(player, cfg.banStepsHours.isEmpty() ? 720 : cfg.banStepsHours.get(cfg.banStepsHours.size() - 1),
+            manualBan(player, Math.max(1, cfg.heavyBanStepsMinutes.get(cfg.heavyBanStepsMinutes.size() - 1) / 60),
                     "BastionAC catastrophic trigger (permaban disabled): " + trigger);
             return;
         }
@@ -458,12 +456,17 @@ public final class BanManager {
         return srv.getPlayerManager().getUserBanList().get(new PlayerConfigEntry(uuid, name)) != null;
     }
 
-    /** Escalation ladder: prior bans in window → hours. Pure, unit-tested. */
-    public static int banHours(int priorBansInWindow, List<Integer> steps) {
-        if (steps == null || steps.isEmpty()) return 1;
+    /** Escalation ladder: prior bans in window → minutes. Pure, unit-tested. */
+    public static int banMinutes(int priorBansInWindow, List<Integer> steps) {
+        if (steps == null || steps.isEmpty()) return 15;
         int idx = Math.min(Math.max(0, priorBansInWindow), steps.size() - 1);
-        Integer h = steps.get(idx);
-        return h == null || h < 1 ? 1 : h;
+        Integer m = steps.get(idx);
+        return m == null || m < 1 ? 15 : m;
+    }
+
+    public static String formatMinutes(int minutes) {
+        if (minutes % 60 == 0) return formatDuration(minutes / 60);
+        return minutes + Lang.t(" мин.");
     }
 
     public static String formatDuration(int hours) {
@@ -493,6 +496,58 @@ public final class BanManager {
         } catch (Exception e) {
             BastionAC.LOGGER.error("Failed to read bans.json", e);
         }
+    }
+
+    /**
+     * The owner confirmed it (08.11: "подтверждённые читы — бан на 3 недели"): a fixed term, offline
+     * or online, on top of whatever the ladder gave. It also counts as a prior ban.
+     */
+    public static void confirmedCheatBan(UUID uuid, String name, String why) {
+        MinecraftServer srv = server;
+        if (srv == null) return;
+        ACConfig.Punishment cfg = BastionAC.config().punishment;
+        if (isExemptOperator(srv, uuid, name)) {
+            BastionAC.LOGGER.warn("[CHEATBAN] {} is staff — not banned ({})", name, why);
+            return;
+        }
+        int days = Math.max(1, cfg.confirmedCheatBanDays);
+        long now = System.currentTimeMillis();
+        long until = now + days * 86_400_000L;
+        Deque<Long> history = BAN_HISTORY.computeIfAbsent(uuid, u -> new ArrayDeque<>());
+        synchronized (history) {
+            history.addLast(now);
+        }
+        save();
+        srv.execute(() -> {
+            PlayerConfigEntry entry = new PlayerConfigEntry(uuid, name);
+            srv.getPlayerManager().getUserBanList().add(new BannedPlayerEntry(
+                    entry, new Date(now), Lang.t("Владелец"), new Date(until), Lang.t("Читы: ") + why));
+            ServerPlayerEntity online = srv.getPlayerManager().getPlayer(uuid);
+            if (online != null && online.networkHandler != null) {
+                online.networkHandler.disconnect(TextFmt.literal(Lang.t("&c&lВы заблокированы.\n&7Причина: читы (подтверждено администрацией)\n&7Срок: &f")
+                        + formatDuration(days * 24) + Lang.t("\n&7Обжалование: официальный канал MaxCore.")));
+            }
+        });
+        HistoryManager.recordBan(HistoryManager.Kind.MANUAL_BAN, uuid, name, "cheat", days * 1440, Lang.t("читы подтверждены: ") + why);
+        BastionAC.LOGGER.warn("[CHEATBAN] {} banned {} d ({})", name, days, why);
+    }
+
+    /** A ban that turned out false, around {@code atMs}: no prior ban, and lifted if it still runs. */
+    public static void forgiveFalseBan(UUID uuid, String name, long atMs) {
+        Deque<Long> history = BAN_HISTORY.get(uuid);
+        if (history != null) {
+            synchronized (history) {
+                history.removeIf(t -> Math.abs(t - atMs) <= 120_000);
+            }
+            if (history.isEmpty()) BAN_HISTORY.remove(uuid);
+            save();
+        }
+        MinecraftServer srv = server;
+        if (srv != null) srv.execute(() -> {
+            PlayerConfigEntry entry = new PlayerConfigEntry(uuid, name);
+            if (srv.getPlayerManager().getUserBanList().contains(entry)) srv.getPlayerManager().getUserBanList().remove(entry);
+        });
+        BastionAC.LOGGER.warn("[FORGIVEN] {}: the ban of {} was false", name, new Date(atMs));
     }
 
     /**

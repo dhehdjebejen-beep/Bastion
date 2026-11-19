@@ -43,6 +43,7 @@ public final class MiningFeatures {
 
     public static void analyze(SessionData s, FeatureSet out, Classifier cls, WorldSample sample) {
         wallBreaks(s, out);
+        hiddenProbes(s, out);
         if (cls == null) return;
         Map<Long, Long> dugAt = new HashMap<>();
         Map<Long, Integer> dugCat = new HashMap<>();
@@ -87,6 +88,49 @@ public final class MiningFeatures {
             if (dx + dy + dz <= 2 && p != pos) return true;
         }
         return false;
+    }
+
+    /** Closed, distant blocks repeatedly STARTed and ABORTed while standing still.
+     * Individual cancellations and neighbour desync do not establish a scan.
+     */
+    static void hiddenProbes(SessionData s, FeatureSet out) {
+        long starts=0,hits=0;
+        int mi=0,si=0;
+        java.util.List<Integer> probes=new java.util.ArrayList<>();
+        for(int i=0;i<s.actionT.n;i++) {
+            if(s.actionKind.a[i]!=0||creativeAt(s,s.actionT.a[i]))continue;
+            starts++;
+            while(mi+1<s.moveT.n&&s.moveT.a[mi+1]<=s.actionT.a[i])mi++;
+            while(si+1<s.states.size()&&s.states.get(si+1).t<=s.actionT.a[i])si++;
+            if(s.moveT.n==0||s.moveT.a[mi]>s.actionT.a[i]||s.actionExposed.a[i]!=0)continue;
+            if(!s.states.isEmpty()&&(s.states.get(si).ping>150||s.states.get(si).world==3))continue;
+            long pos=s.actionPos.a[i];
+            double dx=unpackX(pos)+.5-s.moveX.a[mi],dy=unpackY(pos)+.5-(s.moveY.a[mi]+1.62),dz=unpackZ(pos)+.5-s.moveZ.a[mi];
+            // 4.5 reach plus a whole block's corner and rounding tolerance.
+            if(Math.sqrt(dx*dx+dy*dy+dz*dz)<=5.5)continue;
+            boolean aborted=false;
+            for(int j=i+1;j<s.actionT.n&&s.actionT.a[j]-s.actionT.a[i]<=100;j++) {
+                if(s.actionPos.a[j]==pos&&s.actionKind.a[j]==1) {aborted=true;break;}
+            }
+            if(aborted)probes.add(i);
+        }
+        java.util.Set<Integer> confirmed=new java.util.HashSet<>();
+        for(int q=0;q<probes.size();q++) {
+            int first=probes.get(q),end=q;
+            java.util.Set<Long> distinct=new java.util.HashSet<>();
+            while(end<probes.size()&&s.actionT.a[probes.get(end)]-s.actionT.a[first]<=1000)
+                distinct.add(s.actionPos.a[probes.get(end++)]);
+            if(distinct.size()<8)continue;
+            long from=s.actionT.a[first],to=s.actionT.a[probes.get(end-1)];
+            int a=MovementFeatures.lowerBound(s.moveT.a,s.moveT.n,from);
+            int b=MovementFeatures.lowerBound(s.moveT.a,s.moveT.n,to);
+            if(a>=s.moveT.n||b>=s.moveT.n)continue;
+            boolean stationary=true;
+            for(int k=a;k<=b;k++) if(Math.hypot(s.moveX.a[k]-s.moveX.a[a],s.moveZ.a[k]-s.moveZ.a[a])>.1)stationary=false;
+            if(stationary)confirmed.addAll(probes.subList(q,end));
+        }
+        for(int i:confirmed) {hits++;out.moment("mine.hidden_probe",s.actionT.a[i]);}
+        out.rate("mine.hidden_probe",hits,starts);
     }
 
     private static boolean creativeAt(SessionData s, long t) {

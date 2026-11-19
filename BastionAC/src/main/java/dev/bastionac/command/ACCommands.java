@@ -33,6 +33,14 @@ public final class ACCommands {
                     ACPanel.open(ctx.getSource().getPlayerOrThrow());
                     return 1;
                 }))
+                .then(literal("dossier").then(argument(Lang.arg("ник"), word()).executes(ctx -> {
+                    dev.bastionac.gui.ACDossierMenu.openByName(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("ник")));
+                    return 1;
+                })))
+                .then(literal("досье").then(argument(Lang.arg("ник"), word()).executes(ctx -> {
+                    dev.bastionac.gui.ACDossierMenu.openByName(ctx.getSource().getPlayerOrThrow(), getString(ctx, Lang.arg("ник")));
+                    return 1;
+                })))
                 .then(literal("shield").executes(ctx -> {
                     ACPanel.openShield(ctx.getSource().getPlayerOrThrow());
                     return 1;
@@ -52,13 +60,18 @@ public final class ACCommands {
                         return 0;
                     }
                     PlayerData d = BastionAC.data(target);
+                    String ver = d != null && d.clientVersionLabel != null && !d.clientVersionLabel.isEmpty()
+                            ? d.clientVersionLabel : dev.bastionac.core.ClientVersion.versionLabel(target.getUuid());
+                    String brand = d != null && d.brand != null ? d.brand : "?";
+                    String clientMeta = Lang.t(" §8[§7клиент: §f") + ver + Lang.t("§7, бренд: §f") + brand
+                            + Lang.t("§7, пинг: §f") + target.networkHandler.getLatency() + Lang.t(" мс§8]");
                     Map<CheckType, Double> snapshot = d != null ? d.vl.snapshot() : Map.of();
                     if (snapshot.isEmpty()) {
                         ctx.getSource().sendFeedback(() -> Text.literal(
-                                "§a[BAC] " + target.getGameProfile().name() + Lang.t(": активных нарушений нет")), false);
+                                "§a[BAC] " + target.getGameProfile().name() + clientMeta + Lang.t(": активных нарушений нет")), false);
                         return 1;
                     }
-                    StringBuilder sb = new StringBuilder("§e[BAC] ").append(target.getGameProfile().name()).append(":");
+                    StringBuilder sb = new StringBuilder("§e[BAC] ").append(target.getGameProfile().name()).append(clientMeta).append(":");
                     snapshot.forEach((type, vl) -> sb.append(" §f").append(type.key).append("§7=").append(String.format("%.1f", vl)));
                     ctx.getSource().sendFeedback(() -> Text.literal(sb.toString()), false);
                     return 1;

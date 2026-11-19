@@ -207,7 +207,7 @@ final class ACHistoryMenu {
                 return GuiItems.head(e.name, "&e⚠ " + e.check, lore);
             }
             case TEMPBAN, MANUAL_BAN, ARGUS_BAN -> {
-                lore.add(Lang.t("&7Срок: &f") + BanManager.formatDuration(Math.max(1, e.durationHours)));
+                lore.add(Lang.t("&7Срок: &f") + (e.durationMinutes > 0 ? BanManager.formatMinutes(e.durationMinutes) : BanManager.formatDuration(Math.max(1, e.durationHours))));
                 if (e.details != null) lore.add("&8" + e.details);
                 lore.add("&8" + when);
                 boolean active = isActiveBan(e);

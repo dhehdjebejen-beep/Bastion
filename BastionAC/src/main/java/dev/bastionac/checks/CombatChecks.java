@@ -39,6 +39,7 @@ public final class CombatChecks {
     public static Action onAttack(ServerPlayerEntity player, PlayerData d, Entity target) {
         long tick = BastionAC.serverTick();
         long now = System.currentTimeMillis();
+        d.lastAttackTick = tick;
 
         // A mace smash resets the attacker's fall (vanilla bills nothing for it):
         // the NoFall accounting must start the fall over from here too.
@@ -142,6 +143,10 @@ public final class CombatChecks {
         if (boxes.isEmpty()) boxes = List.of(target.getBoundingBox());
 
         double base = player.getAttributeValue(EntityAttributes.ENTITY_INTERACTION_RANGE);
+        var attackRange = player.getAttackRange();
+        if (attackRange != null) {
+            base = Math.max(base, attackRange.getEffectiveMaxRange(player) + attackRange.hitboxMargin());
+        }
         double margin = playerTarget ? 0.25 : 0.9; // mobs move without history — be lenient
         // Above 200 ms the backtrack itself gets coarse (one tick of victim
         // movement is a quarter block); widen the soft margin so the buffered
@@ -181,18 +186,31 @@ public final class CombatChecks {
                 bestBox = b;
             }
         }
+        // Hits that arrive in the burst after a stalled connection were aimed at where the target was
+        // seconds ago (08.11: 7.6 blocks and 90 degrees at a ping of 572, all inside one burst).
+        boolean burst = d.netStalledNear(d.currentArrivalMs > 0 ? d.currentArrivalMs : System.currentTimeMillis());
+        if (burst) judgeable = false;
+        // An enderman or a shulker that teleported in the same moment was hit where the client still
+        // saw it, up to forty blocks from where the server has it now (3.7.0 b21: nine "reach
+        // 19-39 blocks" and an "angle 174°", every one on an enderman).
+        boolean teleported = !playerTarget
+                && dev.bastionac.core.MobTeleports.recent(target.getId(), tick, Math.max(20, ping / 50 + 10));
+        if (teleported) judgeable = false;
+        String targetName = target.getType().getName().getString();
         if (!judgeable) {
             // No verdict either way: keep the buffer as it is.
         } else if (best > base + 1.2 + drift) {
             BastionAC.flag(player, d, CheckType.REACH,
-                    String.format(Lang.t("%.2f бл (лимит %.2f, пинг %d)"), best, base + 1.2 + drift, ping));
+                    String.format(Lang.t("%.2f бл (лимит %.2f, пинг %d)"), best, base + 1.2 + drift, ping)
+                            + " — " + targetName);
             action = Action.max(action, Action.CANCEL); // blatant — always cancel the hit
         } else if (best > base + margin + drift) {
             d.reachBuffer += 1;
             if (d.reachBuffer >= 2) {
                 d.reachBuffer = 0;
                 if (BastionAC.flag(player, d, CheckType.REACH,
-                        String.format(Lang.t("%.2f бл (лимит %.2f, пинг %d)"), best, base + margin + drift, ping))) {
+                        String.format(Lang.t("%.2f бл (лимит %.2f, пинг %d)"), best, base + margin + drift, ping)
+                                + " — " + targetName)) {
                     action = Action.max(action, Action.CANCEL);
                 }
             }
@@ -204,7 +222,7 @@ public final class CombatChecks {
         // Point-blank is still skipped (a big hitbox subtends a wide, noisy angle
         // there), but the dead zone is tightened 1.2 -> 1.0 so a close-range 360
         // aura has less room. The dot threshold + buffer below keep FPs out.
-        if (best > 1.0) {
+        if (best > 1.0 && !burst && !teleported) {
             Vec3d look = player.getRotationVec(1.0F);
             Box eb = bestBox.expand(0.1);
             double dot = MathUtil.lookDotToBox(eye.x, eye.y, eye.z, look.x, look.y, look.z,
@@ -269,10 +287,10 @@ public final class CombatChecks {
         // the eye->hitbox ray legitimately clips a corner when fighting around
         // thin cover; requiring BOTH the closest point and the centre to be
         // blocked (below) already suppresses those.
-        if (best > 1.75) {
+        if (best > 1.75 && !burst && !teleported) {
             Vec3d closest = closestPoint(eye, bestBox.expand(0.05));
             Vec3d center = bestBox.getCenter();
-            if (rayBlocked(player, eye, closest) && rayBlocked(player, eye, center)) {
+            if (rayBlocked(player, eye, closest) && rayBlocked(player, eye, center) && cornersBlocked(player, eye, bestBox)) {
                 d.wallsBuffer += 1;
                 if (d.wallsBuffer >= 2) {
                     d.wallsBuffer = 0;
@@ -297,7 +315,10 @@ public final class CombatChecks {
         // span a real angle (3.5 build 2).
         boolean lookHits = lookRayHits(player, eye, target, playerTarget ? 0.15 : 0.6 + drift);
         double dirYaw = Math.toDegrees(Math.atan2(-(target.getX() - eye.x), target.getZ() - eye.z));
-        int offLook = d.recordTargetAndCountOffLook(target.getId(), tick, 6, lookHits, (float) dirYaw);
+        // Six ticks of the client's own clock: hits that arrive in one burst were dealt over
+        // seconds (3.7.0 b21, 09.11: "4 targets in 6 ticks" at a burst of 59 client ticks).
+        long targetClock = d.sendsTickEnd && d.currentArrivalTicks >= 0 ? d.currentArrivalTicks + 1 : tick;
+        int offLook = d.recordTargetAndCountOffLook(target.getId(), targetClock, 6, lookHits, (float) dirYaw);
         if (offLook >= 2 && d.recentTargetSpread(tick, 6) >= MULTITARGET_MIN_SPREAD_DEG
                 && d.distinctRecentTargets(tick, 6) >= 3) {
             BastionAC.flag(player, d, CheckType.MULTITARGET, String.format(java.util.Locale.ROOT,
@@ -309,7 +330,15 @@ public final class CombatChecks {
         // Switching from right-click (eat/shield/bow) to a left-click attack
         // fires this transiently for legit players, so require a sustained
         // streak before acting.
-        if (player.isUsingItem()) {
+        MovementChecks.clearStaleEmptyUse(player, d);
+        if (player.isUsingItem() && MovementChecks.isDesyncProneUseItem(player.getActiveItem())) {
+            // The vanilla client cannot swing with a shield or kinetic spear charge up, so the
+            // server's idea of it is stale: the client's use ended or never started on its side
+            // (a shield broken mid-block, just off its axe cooldown, or a Spear on ViaBackwards)
+            // and no release will ever come. Put it down on either client without flagging.
+            player.clearActiveItem();
+            d.useAttackStreak = 0;
+        } else if (player.isUsingItem()) {
             d.useAttackStreak++;
             if (d.useAttackStreak >= 4) {
                 if (BastionAC.flag(player, d, CheckType.USEATTACK, Lang.t("атака во время использования предмета"))) {
@@ -499,6 +528,21 @@ public final class CombatChecks {
                 Math.max(box.minX, Math.min(from.x, box.maxX)),
                 Math.max(box.minY, Math.min(from.y, box.maxY)),
                 Math.max(box.minZ, Math.min(from.z, box.maxZ)));
+    }
+
+    /**
+     * Whether the top and the eight corners of the box are all behind blocks too. The centre and the
+     * nearest point alone left out a mob seen over a ledge from above: 06.11-07.11 two players hitting
+     * zombies and piglins two blocks below them, in plain view of part of the box.
+     */
+    private static boolean cornersBlocked(ServerPlayerEntity player, Vec3d eye, Box b) {
+        Box in = b.contract(0.05);
+        if (!rayBlocked(player, eye, new Vec3d(in.getCenter().x, in.maxY, in.getCenter().z))) return false;
+        for (int i = 0; i < 8; i++) {
+            Vec3d p = new Vec3d((i & 1) == 0 ? in.minX : in.maxX, (i & 2) == 0 ? in.minY : in.maxY, (i & 4) == 0 ? in.minZ : in.maxZ);
+            if (!rayBlocked(player, eye, p)) return false;
+        }
+        return true;
     }
 
     private static boolean rayBlocked(ServerPlayerEntity player, Vec3d from, Vec3d to) {

@@ -33,6 +33,21 @@ public abstract class LightningMixin {
         }
     }
 
+    /**
+     * Natural lightning used to leave fire on spawn and in claims. It burnt
+     * nothing (the claim stops fire from ticking) but the flames stayed and
+     * crept. Each fire block the bolt would set — under it and the few around
+     * it — is skipped where fire is not allowed.
+     */
+    @Redirect(method = "spawnFire", at = @At(value = "INVOKE",
+            target = "Lnet/minecraft/server/world/ServerWorld;setBlockState(Lnet/minecraft/util/math/BlockPos;Lnet/minecraft/block/BlockState;)Z"))
+    private boolean bastionclaims$noFireInClaims(ServerWorld world, net.minecraft.util.math.BlockPos pos,
+                                                 net.minecraft.block.BlockState state) {
+        String dim = world.getRegistryKey().getValue().toString();
+        if (ProtectionService.fireSpreadBlocked(dim, pos.getX(), pos.getY(), pos.getZ())) return false;
+        return world.setBlockState(pos, state);
+    }
+
     @Redirect(method = "tick", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/entity/Entity;onStruckByLightning(Lnet/minecraft/server/world/ServerWorld;Lnet/minecraft/entity/LightningEntity;)V"))
     private void bastionclaims$guardStrike(Entity victim, ServerWorld world, LightningEntity lightning) {

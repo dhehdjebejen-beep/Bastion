@@ -34,7 +34,8 @@ import java.util.Map;
  *       mod channels: 20 points. Same mod set, likely same install.</li>
  *   <li><b>Same IP (HMAC)</b> — 25 points. A CGNAT tower shares an IP across
  *       hundreds of households, so an IP alone must never convict.</li>
- *   <li><b>Same typed address</b> — 5 points. A bookmark habit.</li>
+ *   <li><b>Same typed address</b> — no points (08.11): 126 of 130 sightings typed the
+ *       same address, so it was five points for nearly every pair.</li>
  *   <li><b>Name similarity</b> — Levenshtein ≤ 2 on a 3+ char stem (the
  *       "builder / builderr" pattern): 15 points.</li>
  *   <li><b>Registration timing</b> — a new account registered within the
@@ -43,6 +44,13 @@ import java.util.Map;
  *       across accounts (compared only on a successful login, when the
  *       joiner's fingerprint exists): +40.</li>
  * </ul>
+ *
+ * <p>08.11, after the review of the ledger: a profile that three or more accounts share is
+ * nobody's in particular and counts for nothing; "registered right after" counts only next to a
+ * device or a launcher; an address surfaces candidates on its own, and the same address with a
+ * near-identical name, or with a registration right after the other account's last visit from it,
+ * is "likely"; a password only these two accounts use is "possible". The whole ledger is
+ * re-checked once a day, not only at a join.
  *
  * <p>Grades: 0–49 <b>none</b>, 50–79 <b>possible</b>, 80–99 <b>likely</b>,
  * 100+ <b>confirmed</b>. Reports to staff; the punishment decision stays
@@ -60,7 +68,7 @@ public final class AccountLinker {
         }
 
         public static Weights defaults() {
-            return new Weights(60, 25, 15, 20, 40, 35, 70, 20, 5);
+            return new Weights(60, 25, 15, 20, 40, 35, 70, 20, 0);
         }
     }
 
@@ -79,6 +87,12 @@ public final class AccountLinker {
         public boolean sameClientUuid;
         public boolean sameChannels;
         public boolean sameHost;
+        /** The same address with a near-identical name. */
+        public boolean ipName;
+        /** The same address, registered right after the other account was last there. */
+        public boolean ipTiming;
+        /** A password no other account uses. */
+        public boolean rarePassword;
         int score;
 
         Candidate(String uuid, String username, boolean device, boolean ip, boolean name,
@@ -113,6 +127,34 @@ public final class AccountLinker {
 
     private final Weights weights;
     private final long timingWindowMs;
+    /** A registration within this long of the other account's last visit from the same address. */
+    static final long IP_TIMING_MS = 24L * 3_600_000L;
+    /** A launcher id this many other accounts also send belongs to a launcher build, not to a person. */
+    static final int MASS_CLIENT_UUID = 6;
+
+    /**
+     * A launcher id that is no id at all (1.15, 12.11). Pirate launchers send the nil UUID
+     * {@code 00000000-0000-0000-0000-000000000000} for everybody: worth 70 points, it linked three
+     * strangers as "likely" alts of one another.
+     */
+    static boolean placeholderClientUuid(String clientUuid) {
+        String hex = clientUuid.replace("-", "").toLowerCase(java.util.Locale.ROOT);
+        if (hex.isEmpty()) return true;
+        char first = hex.charAt(0);
+        for (int i = 1; i < hex.length(); i++) {
+            if (hex.charAt(i) != first) return false;
+        }
+        return true;
+    }
+
+    /** A profile this many other accounts also have is everybody's. */
+    static final int COMMON_PROFILE_SHARERS = 2;
+    /** An address this many accounts registered from (a mobile tower, a school) proves nothing with timing. */
+    static final int CROWDED_ADDRESS = 4;
+    /** The floor for the address-based links: "likely". */
+    static final int ADDRESS_FLOOR = 80;
+    /** The floor for a password only these two accounts use: "possible". */
+    static final int RARE_PASSWORD_FLOOR = 50;
 
     public AccountLinker() {
         this(Weights.defaults(), 72L * 3_600_000L);
@@ -196,6 +238,10 @@ public final class AccountLinker {
         }
     }
 
+    public Weights weights() {
+        return weights;
+    }
+
     public Grade grade(int score) {
         if (score >= 100) return Grade.CONFIRMED;
         if (score >= 80) return Grade.LIKELY;
@@ -266,25 +312,38 @@ public final class AccountLinker {
      * auth worker; must not touch game state.
      */
     public List<Candidate> analyse(String uuid, String name, Material m, long now, Database db, long myCreatedAt) {
+        return analyse(uuid, name, m, now, db, myCreatedAt, 50);
+    }
+
+    /** As above, keeping every candidate scored at least {@code minScore} (the daily re-check wants them all). */
+    public List<Candidate> analyse(String uuid, String name, Material m, long now, Database db, long myCreatedAt,
+                                   int minScore) {
         List<Candidate> out = new ArrayList<>();
-        if (db == null || m == null || m.deviceHash() == null) return out;
+        if (db == null || m == null || (m.deviceHash() == null && m.ipHmac() == null && m.pwFp() == null)) return out;
         try {
             // --- surface candidates -------------------------------------------------
             Map<String, Database.DeviceRow> deviceSeen = new HashMap<>();
-            for (Database.DeviceRow row : db.sightingsOfDevice(m.deviceHash(), uuid)) {
-                deviceSeen.put(row.uuid(), row);
+            if (m.deviceHash() != null) {
+                for (Database.DeviceRow row : db.sightingsOfDevice(m.deviceHash(), uuid)) {
+                    deviceSeen.put(row.uuid(), row);
+                }
             }
             Map<String, Database.SightingRow> profileSeen = new HashMap<>();
             if (m.profileHash() != null) {
                 for (Database.SightingRow row : db.sightingsOfProfile(m.profileHash(), uuid)) {
                     profileSeen.put(row.uuid(), row);
                 }
+                // "ru_ru, 12, right hand" on two other accounts already is everybody's settings:
+                // eight accounts shared one profile and unrelated accounts were linked by it.
+                if (profileSeen.size() >= COMMON_PROFILE_SHARERS) profileSeen.clear();
             }
             Map<String, Database.SightingRow> clientUuidSeen = new HashMap<>();
-            if (m.clientUuid() != null) {
+            if (m.clientUuid() != null && !placeholderClientUuid(m.clientUuid())) {
                 for (Database.SightingRow row : db.sightingsOfClientUuid(m.clientUuid(), uuid)) {
                     clientUuidSeen.put(row.uuid(), row);
                 }
+                // One launcher id on many accounts is the launcher's, not the person's.
+                if (clientUuidSeen.size() >= MASS_CLIENT_UUID) clientUuidSeen.clear();
             }
             Map<String, Database.SightingRow> channelsSeen = new HashMap<>();
             if (m.channelsHash() != null && !m.channelsBaseline()) {
@@ -304,11 +363,23 @@ public final class AccountLinker {
             for (Database.LinkRow row : db.linkRowsForUuids(new ArrayList<>(candidateUuids))) {
                 users.put(row.uuid(), row);
             }
+            int passwordSharers = 0;
             if (m.pwFp() != null) {
                 for (Database.LinkRow row : db.rowsWithPwFp(m.pwFp(), uuid)) {
                     users.putIfAbsent(row.uuid(), row);
+                    passwordSharers++;
                 }
             }
+            // The address surfaces candidates too: a second account from one home with no device in
+            // common was never even looked at (e.g. a fresh alt from the same network without a shared device hash).
+            java.util.Set<String> sameAddress = new java.util.HashSet<>();
+            if (m.ipHmac() != null) {
+                for (Database.LinkRow row : db.rowsWithIpHmac(m.ipHmac(), uuid)) {
+                    users.putIfAbsent(row.uuid(), row);
+                    sameAddress.add(row.uuid());
+                }
+            }
+            boolean crowded = sameAddress.size() + 1 >= CROWDED_ADDRESS;
 
             // --- score --------------------------------------------------------------
             for (Map.Entry<String, Database.LinkRow> e : users.entrySet()) {
@@ -336,6 +407,8 @@ public final class AccountLinker {
                     lastSeenOnDevice = profileSeen.get(cand).lastSeen();
                 }
                 long timingAnchor = lastSeenOnDevice > 0 ? lastSeenOnDevice : row.createdAt();
+                // "Registered right after" only means something next to a machine in common: next to a
+                // shared everyday profile it was true of nearly any two players (08.11).
 
                 String candidateName = row.username() == null
                         ? "?" + row.uuid().substring(0, 8) : row.username();
@@ -343,17 +416,31 @@ public final class AccountLinker {
                 boolean sameIp = m.ipHmac() != null
                         && (m.ipHmac().equals(row.regIpHmac()) || m.ipHmac().equals(row.lastIpHmac()));
                 boolean samePw = m.pwFp() != null && m.pwFp().equals(row.pwFp());
-                boolean timing = isTimingSignal(myCreatedAt, now, timingAnchor);
+                boolean timing = (sameDevice || sameClientUuid) && isTimingSignal(myCreatedAt, now, timingAnchor);
 
                 int sc = score(sameDevice, sameIp, similar, timing, samePw,
                         sameProfile, sameClientUuid, sameChannels, sameHost, m.commonProfile());
-                if (sc >= 50) {
+                boolean ipName = sameIp && similar;
+                boolean ipTiming = false;
+                if (sameIp && !crowded) {
+                    long created = myCreatedAt > 0 ? myCreatedAt : now;
+                    long theirLast = db.lastActivityBefore(row.uuid(), created);
+                    ipTiming = theirLast > 0 && created - theirLast <= IP_TIMING_MS
+                            && row.createdAt() < created;
+                }
+                boolean rarePassword = samePw && passwordSharers == 1;
+                if (ipName || ipTiming) sc = Math.max(sc, ADDRESS_FLOOR);
+                if (rarePassword) sc = Math.max(sc, RARE_PASSWORD_FLOOR);
+                if (sc >= minScore && (sc > 0 || minScore <= 0)) {
                     Candidate c = new Candidate(row.uuid(), candidateName, sameDevice, sameIp,
                             similar, timing, samePw);
                     c.sameProfile = sameProfile;
                     c.sameClientUuid = sameClientUuid;
                     c.sameChannels = sameChannels;
                     c.sameHost = sameHost;
+                    c.ipName = ipName;
+                    c.ipTiming = ipTiming;
+                    c.rarePassword = rarePassword;
                     c.score = sc;
                     out.add(c);
                 }
@@ -398,10 +485,10 @@ public final class AccountLinker {
         if (c.sameClientUuid) signals.add("launcher-uuid");
         if (c.sameChannels) signals.add("mods");
         if (c.sameIpHmac) signals.add("ip");
-        if (c.sameHost) signals.add("host");
         if (c.similarName) signals.add("name");
         if (c.registeredSoonAfterBan) signals.add("timing");
-        if (c.samePasswordPhc) signals.add("password");
+        if (c.ipTiming) signals.add("ip-timing");
+        if (c.samePasswordPhc) signals.add(c.rarePassword ? "rare-password" : "password");
         return String.join("+", signals);
     }
 }

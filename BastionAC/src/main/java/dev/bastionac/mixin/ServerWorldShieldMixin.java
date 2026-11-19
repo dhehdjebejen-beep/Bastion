@@ -21,6 +21,6 @@ public abstract class ServerWorldShieldMixin {
     // and stone turning into glass is exactly such a change that opens a face.
     @Inject(method = "updateListeners", at = @At("HEAD"))
     private void bastionac$reveal(BlockPos pos, BlockState oldState, BlockState newState, int flags, CallbackInfo ci) {
-        OreShield.onBlockChanged((ServerWorld) (Object) this, pos, oldState, newState);
+        dev.bastionac.core.Guard.run("ore shield", () -> OreShield.onBlockChanged((ServerWorld) (Object) this, pos, oldState, newState));
     }
 }

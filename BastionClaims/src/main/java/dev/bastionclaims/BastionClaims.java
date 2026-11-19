@@ -90,6 +90,10 @@ public final class BastionClaims implements DedicatedServerModInitializer {
         });
 
         ClaimEvents.register();
+        // Fires frozen on spawn and in claims before the fire fix go out once their chunk loads.
+        net.fabricmc.fabric.api.event.lifecycle.v1.ServerChunkEvents.CHUNK_LOAD.register(
+                dev.bastionclaims.core.StaleFireSweep::onChunkLoad);
+        ServerTickEvents.END_SERVER_TICK.register(dev.bastionclaims.core.StaleFireSweep::tick);
         // A copper golem belongs to the claim it was built in. See ProtectionService#adoptGolem.
         net.fabricmc.fabric.api.event.lifecycle.v1.ServerEntityEvents.ENTITY_LOAD.register(
                 (entity, world) -> dev.bastionclaims.core.ProtectionService.adoptGolem(entity));

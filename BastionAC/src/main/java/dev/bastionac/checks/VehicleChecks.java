@@ -7,7 +7,7 @@ import dev.bastionac.core.Lang;
 import dev.bastionac.core.MathUtil;
 import dev.bastionac.core.PlayerData;
 import net.minecraft.entity.Entity;
-import net.minecraft.entity.vehicle.BoatEntity;
+import net.minecraft.entity.vehicle.AbstractBoatEntity;
 import net.minecraft.entity.vehicle.AbstractMinecartEntity;
 import net.minecraft.network.packet.c2s.play.VehicleMoveC2SPacket;
 import net.minecraft.registry.tag.BlockTags;
@@ -81,6 +81,7 @@ public final class VehicleChecks {
             d.vehicleAirTicks = 0;
             d.vehicleBuffer = 0;
             d.vehicleAirBuffer = 0;
+            d.lastVehHDist = 0;
         }
 
         Vec3d pos = packet.position();
@@ -101,6 +102,7 @@ public final class VehicleChecks {
         double sdx = vehicle.getX() - d.lastVehX;
         double sdz = vehicle.getZ() - d.lastVehZ;
         if (MathUtil.horizontal(sdx, sdz) > 8.0 || Math.abs(vehicle.getY() - d.lastVehY) > 8.0) {
+            d.lastVehicleResyncMs = System.currentTimeMillis();
             anchor(d, pos);
             return Action.NONE;
         }
@@ -108,16 +110,57 @@ public final class VehicleChecks {
         boolean settling = tick - d.vehicleSinceTick < MOUNT_GRACE_TICKS;
         boolean velocityActive = tick < d.velocityGraceUntil;
         World world = player.getEntityWorld();
-        Env env = scan(world, vehicle);
+        Env env = scan(world, vehicle, pos);
+        if (env.bubble) {
+            d.vehicleGraceUntil = Math.max(d.vehicleGraceUntil, tick + 25);
+            velocityActive = true;
+        }
+
+        boolean camelDash = false;
+        if (vehicle instanceof net.minecraft.entity.passive.CamelEntity camel) {
+            if (camel.isDashing()
+                    || MathUtil.horizontal(vehicle.getVelocity().x, vehicle.getVelocity().z) > 0.42
+                    || dy > 0.25) {
+                d.camelDashGraceUntil = Math.max(d.camelDashGraceUntil, tick + 40);
+            }
+            camelDash = tick < d.camelDashGraceUntil;
+        }
 
         Action action = Action.NONE;
 
         // ---------------- SPEED ----------------
         if (!settling) {
             double limit = baseSpeed(vehicle);
+            if (camelDash) {
+                limit = Math.max(limit, 2.45);
+            } else if (vehicle instanceof net.minecraft.entity.passive.CamelEntity) {
+                limit = Math.max(limit, d.lastVehHDist * 0.91 + 0.16);
+            }
             if (env.ice) limit *= 5.0;       // blue ice boats genuinely fly along
             else if (env.rail) limit *= 2.2; // powered rails push a minecart hard
-            if (env.liquid) limit *= 1.2;
+            if (env.liquid) {
+                limit *= 1.25;
+                if (vehicle instanceof AbstractBoatEntity) {
+                    limit = Math.max(limit, d.lastVehHDist * 0.95 + 0.15);
+                    if (hasDolphinBoost(world, player, vehicle)) {
+                        limit = Math.max(limit * 1.85, 1.48);
+                    }
+                }
+            }
+            // A boat on plain ground barely moves: it pushes off with 0.04 a
+            // tick and keeps only the block's slipperiness of its speed, so on
+            // grass, stone or sand it tops out near 0.06 a tick. The flat 0.65
+            // above is the water ceiling; on land it let BoatSpeed drive across
+            // fields at ten blocks a second untouched (13.11, owner's test).
+            // Momentum from water or ice decays by that same slipperiness each
+            // tick, so the previous packet's speed carries over, decayed.
+            if (vehicle instanceof AbstractBoatEntity && env.support && !env.liquid && !env.ice
+                    && !env.rail && !env.slowing) {
+                double s = Math.min(0.9, Math.max(0.6, env.slip));
+                double terminal = 0.04 * s / (1.0 - s);
+                double land = Math.max(terminal * 1.5 + 0.10, d.lastVehHDist * s + 0.04 + 0.06);
+                limit = Math.min(limit, land);
+            }
             if (velocityActive) limit += Math.max(0, d.velocityBudget);
             limit *= Math.max(0.9, BastionAC.config().general.speedToleranceMultiplier);
 
@@ -133,11 +176,12 @@ public final class VehicleChecks {
             } else {
                 d.vehicleBuffer = Math.max(0, d.vehicleBuffer - 0.5);
             }
+            d.lastVehHDist = Math.min(hDist, limit);
         }
 
         // ---------------- ASCENT (BoatFly) ----------------
         boolean supported = env.support || env.liquid || env.climbable || env.rail;
-        if (supported || settling || velocityActive || vehicle.hasPassenger(e -> false)) {
+        if (supported || settling || velocityActive || camelDash || vehicle.hasPassenger(e -> false)) {
             d.vehicleAirTicks = 0;
         } else {
             d.vehicleAirTicks++;
@@ -145,7 +189,7 @@ public final class VehicleChecks {
         // A rideable entity that can genuinely fly under its own power is exempt:
         // the happy ghast is a mount, not an exploit.
         boolean canFlyItself = canFly(vehicle);
-        boolean free = !canFlyItself && !supported && !env.slowing && !settling && !velocityActive;
+        boolean free = !canFlyItself && !supported && !env.slowing && !settling && !velocityActive && !camelDash;
         if (free && dy > 0.02) {
             if (d.vehicleAirTicks > ASCENT_PACKETS) {
                 d.vehicleAirBuffer += 1;
@@ -186,6 +230,7 @@ public final class VehicleChecks {
             // anchor on the refused packet first and then teleport to the
             // anchor — the setback delivered the vehicle to exactly the spot
             // the cheat asked for (3.5 beta, audit).
+            d.lastVehicleResyncMs = System.currentTimeMillis();
             vehicle.requestTeleport(vehicle.getX(), vehicle.getY(), vehicle.getZ());
             anchor(d, new Vec3d(vehicle.getX(), vehicle.getY(), vehicle.getZ()));
         } else {
@@ -203,12 +248,27 @@ public final class VehicleChecks {
 
     /** Per-tick horizontal ceiling for a vehicle on flat ground, before terrain bonuses. */
     private static double baseSpeed(Entity vehicle) {
-        if (vehicle instanceof BoatEntity) return 0.65;
+        if (vehicle instanceof AbstractBoatEntity) return 0.65; // rafts and chest boats too
         if (vehicle instanceof AbstractMinecartEntity) return 0.65;
+        if (vehicle instanceof net.minecraft.entity.passive.CamelEntity) return 1.05;
         if (vehicle instanceof net.minecraft.entity.passive.AbstractHorseEntity) return 0.80;
         if (vehicle instanceof net.minecraft.entity.passive.PigEntity
                 || vehicle instanceof net.minecraft.entity.passive.StriderEntity) return 0.45;
         return 1.0; // unknown rideable: be generous, this check is not its judge
+    }
+
+    private static boolean hasDolphinBoost(World world, ServerPlayerEntity player, Entity vehicle) {
+        if (player.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.DOLPHINS_GRACE)) return true;
+        if (vehicle instanceof net.minecraft.entity.LivingEntity lv
+                && lv.hasStatusEffect(net.minecraft.entity.effect.StatusEffects.DOLPHINS_GRACE)) {
+            return true;
+        }
+        try {
+            return !world.getEntitiesByClass(net.minecraft.entity.passive.DolphinEntity.class,
+                    vehicle.getBoundingBox().expand(14.0), Entity::isAlive).isEmpty();
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     /** Entities that legitimately move under their own power in the air. */
@@ -225,17 +285,24 @@ public final class VehicleChecks {
     private static final class Env {
         boolean support;
         boolean liquid;
+        boolean bubble;
         boolean climbable;
         boolean ice;
         boolean rail;
         /** Cobweb, powder snow, scaffolding, honey: a fall there can be near zero. */
         boolean slowing;
+        /** Highest slipperiness under the hull (0.6 for ordinary blocks). */
+        double slip = 0.6;
     }
 
-    /** Probes the cells the hull actually rests in — collision shapes, not "is it air". */
-    private static Env scan(World world, Entity vehicle) {
+    /** Probes the cells the hull actually rests in — both current server box and claimed packet box. */
+    private static Env scan(World world, Entity vehicle, Vec3d claimedPos) {
         Env env = new Env();
-        Box box = vehicle.getBoundingBox();
+        Box serverBox = vehicle.getBoundingBox();
+        Box packetBox = serverBox.offset(claimedPos.x - vehicle.getX(),
+                claimedPos.y - vehicle.getY(),
+                claimedPos.z - vehicle.getZ());
+        Box box = serverBox.union(packetBox);
         try {
             // Anything solid in the thin slab just beneath the hull is support.
             Box below = new Box(box.minX, box.minY - 0.35, box.minZ, box.maxX, box.minY + 0.05, box.maxZ);
@@ -247,7 +314,12 @@ public final class VehicleChecks {
                     net.minecraft.util.math.MathHelper.floor(box.maxY), net.minecraft.util.math.MathHelper.floor(box.maxZ))) {
                 var state = world.getBlockState(pos);
                 if (state.isAir()) continue;
+                if (pos.getY() < box.minY) env.slip = Math.max(env.slip, state.getBlock().getSlipperiness());
                 if (!state.getFluidState().isEmpty()) env.liquid = true;
+                if (state.isOf(net.minecraft.block.Blocks.BUBBLE_COLUMN)) {
+                    env.liquid = true;
+                    env.bubble = true;
+                }
                 if (state.isIn(BlockTags.CLIMBABLE)) env.climbable = true;
                 if (state.isIn(BlockTags.ICE)) env.ice = true;
                 if (state.isIn(BlockTags.RAILS)) { env.rail = true; env.support = true; }

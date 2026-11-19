@@ -8,6 +8,7 @@ import dev.bastionac.argus.features.Features;
 import dev.bastionac.argus.features.MiningFeatures;
 import dev.bastionac.argus.features.MovementFeatures;
 import dev.bastionac.argus.features.PacketFeatures;
+import dev.bastionac.argus.features.VehicleFeatures;
 import dev.bastionac.core.Lang;
 import dev.bastionac.telemetry.SessionData;
 import dev.bastionac.telemetry.TelemetryIO;
@@ -63,13 +64,30 @@ final class Analysis {
     private static final Map<Integer, Float> SLIP = new ConcurrentHashMap<>();
     private static final Map<Integer, Integer> CATEGORY = new ConcurrentHashMap<>();
 
-    static final MovementFeatures.BlockInfo BLOCKS = raw -> SLIP.computeIfAbsent(raw, r -> {
+    static final MovementFeatures.BlockInfo BLOCKS = new MovementFeatures.BlockInfo() {
+      public float slipperiness(int raw) { return SLIP.computeIfAbsent(raw, r -> {
         try {
             return Block.getStateFromRawId(r).getBlock().getSlipperiness();
         } catch (Throwable t) {
             return 0.6f;
         }
-    });
+      }); }
+      public boolean spear(int raw) {
+          var item=net.minecraft.registry.Registries.ITEM.get(raw);
+          return item!=null&&item.getComponents().contains(net.minecraft.component.DataComponentTypes.KINETIC_WEAPON);
+      }
+      public float useMultiplier(int raw) {
+          if(raw<0)return Float.NaN;
+          var item=net.minecraft.registry.Registries.ITEM.get(raw);
+          if(item==null)return Float.NaN;
+          if(spear(raw))return 1f;
+          var action=item.getDefaultStack().getUseAction();
+          return switch(action) {
+              case EAT, DRINK, BLOCK, BOW, CROSSBOW, SPEAR -> .2f;
+              default -> Float.NaN;
+          };
+      }
+    };
 
     static final MiningFeatures.Classifier CLASSIFY = raw -> CATEGORY.computeIfAbsent(raw, r -> {
         try {
@@ -78,6 +96,27 @@ final class Analysis {
             return dev.bastionac.telemetry.TelemetryFormat.CTX_SOLID;
         }
     });
+
+    static final VehicleFeatures.Context VEHICLES = new VehicleFeatures.Context() {
+        public String vehicle(int storedType) {
+            if (storedType <= 0) return null;
+            var type = net.minecraft.registry.Registries.ENTITY_TYPE.get(storedType - 1);
+            return type == null ? null : net.minecraft.registry.Registries.ENTITY_TYPE.getId(type).toString();
+        }
+
+        public VehicleFeatures.Surface surface(int raw) {
+            var state = Block.getStateFromRawId(raw);
+            var block = state.getBlock();
+            var kind = VehicleFeatures.SurfaceKind.UNKNOWN;
+            if (state.isAir()) kind = VehicleFeatures.SurfaceKind.AIR;
+            else if (!state.getFluidState().isEmpty()) kind = VehicleFeatures.SurfaceKind.LIQUID;
+            else if (block.getSlipperiness() > 0.9f) kind = VehicleFeatures.SurfaceKind.ICE;
+            else if (block != net.minecraft.block.Blocks.SLIME_BLOCK && block != net.minecraft.block.Blocks.HONEY_BLOCK
+                    && state.isFullCube(net.minecraft.world.EmptyBlockView.INSTANCE, net.minecraft.util.math.BlockPos.ORIGIN))
+                kind = VehicleFeatures.SurfaceKind.LAND;
+            return new VehicleFeatures.Surface(kind, block.getSlipperiness());
+        }
+    };
 
     private Analysis() {}
 
@@ -100,6 +139,7 @@ final class Analysis {
             for (int i = 0; i < n; i++) {
                 step(p, i, n);
                 MovementFeatures.analyze(sessions.get(i), out.features, BLOCKS);
+                VehicleFeatures.analyze(sessions.get(i), out.features, VEHICLES);
             }
             at(p, ArgusProgress.Stage.PACKETS);
             for (int i = 0; i < n; i++) {

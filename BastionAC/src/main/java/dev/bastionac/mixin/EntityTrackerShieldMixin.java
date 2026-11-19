@@ -28,8 +28,9 @@ public abstract class EntityTrackerShieldMixin implements EspShield.Recheck {
     @Inject(method = "updateTrackedStatus(Lnet/minecraft/server/network/ServerPlayerEntity;)V",
             at = @At("HEAD"), cancellable = true)
     private void bastionac$espShield(ServerPlayerEntity player, CallbackInfo ci) {
-        if (this.entity == player || !EspShield.judges(this.entity)) return;
-        if (!EspShield.allowed(player, this.entity)) {
+        if (this.entity == player || !dev.bastionac.core.Guard.call("esp shield", () -> EspShield.judges(this.entity), false)) return;
+        // On a failure the viewer is let through: vanilla tracking, as without the shield.
+        if (!dev.bastionac.core.Guard.call("esp shield", () -> EspShield.allowed(player, this.entity), true)) {
             this.stopTracking(player);
             ci.cancel();
         }

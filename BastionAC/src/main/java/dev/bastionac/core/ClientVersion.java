@@ -26,6 +26,9 @@ public final class ClientVersion {
     private static volatile boolean resolved;
     private static volatile Object api;
     private static volatile Method getPlayerVersion;
+    private static volatile Method getProtocolById;
+    private static volatile Method protoIsKnown;
+    private static volatile Method protoGetName;
 
     private ClientVersion() {}
 
@@ -40,6 +43,13 @@ public final class ClientVersion {
                 Method m = Class.forName("com.viaversion.viaversion.api.ViaAPI").getMethod("getPlayerVersion", UUID.class);
                 api = a;
                 getPlayerVersion = m;
+                try {
+                    Class<?> pv = Class.forName("com.viaversion.viaversion.api.protocol.version.ProtocolVersion");
+                    getProtocolById = pv.getMethod("getProtocol", int.class);
+                    protoIsKnown = pv.getMethod("isKnown");
+                    protoGetName = pv.getMethod("getName");
+                } catch (Throwable ignored) {
+                }
                 BastionAC.LOGGER.info("ViaVersion found: client protocol versions are taken into account");
             } catch (ClassNotFoundException e) {
                 // No Via: every client is native.
@@ -53,6 +63,7 @@ public final class ClientVersion {
 
     /** The client's protocol number, or -1 when unknown (no Via, or not tracked yet). */
     public static int protocolOf(UUID player) {
+        if (player == null) return -1;
         resolve();
         Method m = getPlayerVersion;
         if (m == null) return -1;
@@ -62,6 +73,50 @@ public final class ClientVersion {
         } catch (Throwable t) {
             return -1;
         }
+    }
+
+    /** Human-readable Minecraft version string for a protocol number (ViaVersion + fallback table). */
+    public static String versionLabel(int proto) {
+        if (proto <= 0) {
+            return viaPresent() ? "1.21.11 (нативная)" : "1.21.11";
+        }
+        resolve();
+        Method gp = getProtocolById;
+        Method ik = protoIsKnown;
+        Method gn = protoGetName;
+        if (gp != null && ik != null && gn != null) {
+            try {
+                Object pv = gp.invoke(null, proto);
+                if (pv != null && Boolean.TRUE.equals(ik.invoke(pv))) {
+                    Object name = gn.invoke(pv);
+                    if (name instanceof String s && !s.isBlank() && !s.equalsIgnoreCase("UNKNOWN")) {
+                        return s + " (proto " + proto + ")";
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
+        }
+        String mc = switch (proto) {
+            case 777 -> "26.3";
+            case 776 -> "26.2";
+            case 775 -> "26.1";
+            case 774 -> "1.21.11";
+            case 773 -> "1.21.9–1.21.10";
+            case 772 -> "1.21.7–1.21.8";
+            case 771 -> "1.21.6";
+            case 770 -> "1.21.5";
+            case 769 -> "1.21.4";
+            case 768 -> "1.21.2–1.21.3";
+            case 767 -> "1.21–1.21.1";
+            case 766 -> "1.20.5–1.20.6";
+            case 765 -> "1.20.3–1.20.4";
+            default -> null;
+        };
+        return mc != null ? mc + " (proto " + proto + ")" : "proto " + proto;
+    }
+
+    public static String versionLabel(UUID player) {
+        return versionLabel(protocolOf(player));
     }
 
     /** ViaVersion is installed and its API answered. */

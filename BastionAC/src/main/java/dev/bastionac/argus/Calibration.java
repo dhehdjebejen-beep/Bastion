@@ -150,9 +150,35 @@ public final class Calibration {
         maxCleanScore = 0;
         missedCheaters = 0;
         if (samples.isEmpty()) return;
-        Fit f = optimise(samples, prior, 2.0, 2000);
+        // The number of cleared cases must not overwhelm the informative positive
+        // class after a version migration. Preserve explicit sample weights while
+        // giving both classes the same total weight, as in laboratory training.
+        double negativeWeight=samples.stream().filter(s->!s.cheater()).mapToDouble(Sample::weight).sum();
+        double positiveWeight=samples.stream().filter(s->s.cheater()&&s.informative()).mapToDouble(Sample::weight).sum();
+        double positiveScale=negativeWeight>0&&positiveWeight>0 ? negativeWeight/positiveWeight : 1;
+        List<Sample> balanced=samples.stream().map(s->new Sample(s.evidence(),s.signals(),s.cheater(),
+                s.weight()*(s.cheater()?positiveScale:1))).toList();
+        Fit f = optimise(balanced, prior, 2.0, 2000);
         bias = f.bias;
         weights.putAll(f.weights);
+        // A class-balanced fit still has to respect the owner's cleared examples.
+        // Project their positive logit coordinates below the existing suspect line.
+        // This cannot increase any other cleared score; no decision threshold changes.
+        double clearedLimit=Math.log(suspectLine/(1-suspectLine))-1e-6;
+        for(Sample s:samples) if(!s.cheater()) {
+            for(int it=0;it<200&&logit(s.evidence(),s.signals())>clearedLimit;it++) {
+                double excess=logit(s.evidence(),s.signals())-clearedLimit;
+                double norm=bias>MIN_BIAS?1:0;
+                if(s.signals()>0&&weight(SIG)>MIN_WEIGHT)norm+=s.signals()*s.signals();
+                for(var e:s.evidence().entrySet())if(e.getValue()>0&&weight(e.getKey())>MIN_WEIGHT)norm+=e.getValue()*e.getValue();
+                if(norm==0)break;
+                double step=excess/norm;
+                bias=Math.max(MIN_BIAS,bias-step);
+                if(s.signals()>0)weights.put(SIG,Math.max(MIN_WEIGHT,weight(SIG)-step*s.signals()));
+                for(var e:s.evidence().entrySet())if(e.getValue()>0)
+                    weights.put(e.getKey(),Math.max(MIN_WEIGHT,weight(e.getKey())-step*e.getValue()));
+            }
+        }
         for (Sample s : samples) {
             double p = Stats.sigmoid(logit(s.evidence(), s.signals()));
             if (!s.cheater()) maxCleanScore = Math.max(maxCleanScore, p);

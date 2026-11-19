@@ -101,6 +101,34 @@ public final class MovementChecks {
         return 60;
     }
 
+    /**
+     * A step up onto a block's edge: from the ground, or, as vanilla also steps when a fall meets
+     * a collision, in the middle of coming down. 03.11 a jump across jungle slabs came down at
+     * 76,30, stepped onto a slab's top at 76,5, and the next jump was measured from 75,5 (HighJump 1,75).
+     * Pure.
+     */
+    static boolean steppedUp(boolean wasGrounded, double lastDy, double lastY, double newY) {
+        return (wasGrounded || lastDy < 0) && newY > lastY && newY - lastY <= 0.6;
+    }
+
+    /** Still moving down this fast after the "landing": a wall was brushed, the fall goes on. Pure. */
+    static boolean stillFalling(double lastDy) {
+        return lastDy < -0.3;
+    }
+
+    /**
+     * Whether a rise is the server's own doing: it threw the player upward since the last landing
+     * (or just before it). The throw outlasts the velocity grace: 03.11 a fall's damage echoed a
+     * jump's 0.42 back to the client, a second 0.42 on top of the first (Spider 1.67), and an
+     * explosion carried a player 2.82 up (HighJump), both a few ticks after the grace ran out. Pure.
+     */
+    /** How long the levitation's momentum is excused after the effect ends (3.7.0 b21). */
+    static final int LEVITATION_TAIL_TICKS = 60;
+
+    static boolean thrownUp(long impulseTick, long tick, int graceTicks) {
+        return impulseTick >= 0 && tick - impulseTick <= graceTicks;
+    }
+
     /** Blocks taken off the measured descent before the NoFall outcome check bills it. */
     static final double NOFALL_DESCENT_SLACK = 1.0;
 
@@ -127,11 +155,18 @@ public final class MovementChecks {
                 || player.isInvulnerable() || !player.isAlive()) {
             return;
         }
+        // Water put down at the last moment and scooped back up: the fall ended in water, and by the
+        // time this is settled the water is gone. Every NoFall alert of 07.11-08.11 was this clutch.
+        if (tick - d.lastWaterBucketTick <= 20) {
+            return;
+        }
         // Still falling four ticks after the "landing": it was a shaft wall the
         // wide support box brushed on the way down, not a floor. Vanilla rightly
         // charged nothing, and this used to bill the player for it in mid-air
         // (26.10: 3 HP on a drop that ended in water further down).
-        if (d.airTicks >= 2 && d.lastDy < -0.3) {
+        // 03.11: the wall touched every other tick kept airTicks at 1, and 8.5 blocks were billed
+        // in mid-air at 1.25 a tick. Moving down that fast is falling, whatever the box brushed.
+        if (stillFalling(d.lastDy)) {
             return;
         }
         double safe = player.getAttributeValue(EntityAttributes.SAFE_FALL_DISTANCE);
@@ -147,8 +182,15 @@ public final class MovementChecks {
             d.noFallBuffer = Math.max(0, d.noFallBuffer - 0.5);
             return;
         }
-        BastionAC.flag(player, d, CheckType.NOFALL, String.format(
-                Lang.t("падение %.1f бл: урон %.0f из положенных %d"), descent, applied, expected));
+        String details = String.format(Lang.t("падение %.1f бл: урон %.0f из положенных %d"), descent, applied, expected);
+        // The minigames switch damage off when they like, so nothing is charged or held against the
+        // player there; what was seen still goes on record for the analysis.
+        if (!player.getEntityWorld().getRegistryKey().getValue().getNamespace().equals("minecraft")) {
+            dev.bastionac.core.AcJournal.write("observe", d.name, player.getUuidAsString(), "nofall", 0, details, null);
+            dev.bastionac.telemetry.Telemetry.note(player.getUuid(), "nofall observed: " + details);
+            return;
+        }
+        BastionAC.flag(player, d, CheckType.NOFALL, details);
         // The landing's own damage put the player into hurt cooldown, which
         // would silently swallow this charge (vanilla only applies damage above
         // the last hit while it lasts). The bill is not a new hit; clear it.
@@ -213,14 +255,50 @@ public final class MovementChecks {
         return false;
     }
 
+    /**
+     * Clears stale {@code isUsingItem()} state when the active item has become
+     * empty (e.g. vanilla 1.21.11 {@code LivingEntity.tickActiveItemStack}
+     * comparing {@code Items.AIR == Items.AIR} after an offhand shield breaks
+     * mid-block, keeping {@code isUsingItem()} true for up to 60 minutes).
+     */
+    public static boolean clearStaleEmptyUse(ServerPlayerEntity player, PlayerData d) {
+        return clearStaleEmptyUse(player.isUsingItem(), player.getActiveItem().isEmpty(), d, player::clearActiveItem);
+    }
+
+    static boolean clearStaleEmptyUse(boolean usingItem, boolean activeEmpty, PlayerData d, Runnable clearAction) {
+        if (!usingItem || !activeEmpty) return false;
+        clearAction.run();
+        if (d != null) {
+            d.usingItemSinceTick = -1;
+            d.noSlowShadow = -1;
+            d.noSlowBuffer = 0;
+            d.useAttackStreak = 0;
+        }
+        return true;
+    }
+
+    /**
+     * Items whose use-state can remain set on the server after the client has
+     * dropped or lost the item without a matching release packet.
+     */
+    public static boolean isDesyncProneUseItem(net.minecraft.item.ItemStack stack) {
+        return stack.isEmpty()
+                || stack.isOf(net.minecraft.item.Items.SHIELD)
+                || stack.contains(net.minecraft.component.DataComponentTypes.KINETIC_WEAPON);
+    }
+
     public static Action onMove(ServerPlayerEntity player, PlayerData d, PlayerMoveC2SPacket packet) {
         long tick = BastionAC.serverTick();
         long now = System.currentTimeMillis();
 
         d.recordMovePacket(now);
+        // 3.7.0 b21: a dig started in the air finishes at ground speed once the client stands.
+        if (d.miningPos != null && packet.isOnGround()) d.miningSawGround = true;
+        if (player.hasStatusEffect(StatusEffects.LEVITATION)) d.lastLevitationTick = tick;
         // Context is one-shot: never let a non-alerting BigMove sample leak into
         // an unrelated later check for the same player.
         d.clearShadowDetail();
+        clearStaleEmptyUse(player, d);
         var general = BastionAC.config().general;
         if (general.shadowTelemetryEnabled) {
             int packetCount = ShadowTelemetry.recordMovePacket(player.getUuid());
@@ -364,7 +442,9 @@ public final class MovementChecks {
                 double iatStd = d.burstIatStd(general.blinkBurstOverdraw + 4);
                 d.resetBurst();
                 d.blinkTokens = 0; // restart the bucket after a verdict
-                if (iatStd < general.blinkMaxIatStdMs) {
+                // 08.11: all 261 alerts of the week came after the tick ends had stopped for as long
+                // as the moves — a stalled connection whose backlog TCP hands over in one piece.
+                if (iatStd < general.blinkMaxIatStdMs && !d.netStalledNear(arrived)) {
                     d.blinkStreak++;
                     if (d.blinkStreak >= 2) {
                         d.blinkStreak = 0;
@@ -392,7 +472,8 @@ public final class MovementChecks {
             // mode 1) and lands the fall early on the server. It was invisible:
             // this branch returned before any ground check looked at it.
             if (packet.isOnGround() && !movementExempt && !d.lastSupport && !d.lastEnvSupport
-                    && d.airTicks > 2 && d.lastDy < -0.1) {
+                    && d.airTicks > 2 && d.lastDy < -0.1
+                    && !d.ghostUnder(tick, player.getX(), player.getY(), player.getZ())) {
                 BastionAC.flag(player, d, CheckType.NOFALL,
                         String.format(Lang.t("onGround=true без координат в падении (%.1f бл от верха)"), d.fallPeakY - d.lastY));
             }
@@ -475,6 +556,11 @@ public final class MovementChecks {
         double footLimit = FOOT_TELEPORT_H * Math.max(1.0, speedAttr / 0.13);
         boolean footTeleport = onFoot && hDist > footLimit;
         if (hDist > bigMoveLimit || dy > bigMoveLimit || -dy > descentAllow || footTeleport) {
+            // The server is waiting for a teleport to be confirmed: vanilla throws this position
+            // away and the player has not moved at all. 04.11 a client fell 9 blocks in chunks that
+            // had not arrived, the way back was stuck in the network for 18 s, and each packet of it
+            // standing there read as a nine-block jump. A cheat gains nothing from this window.
+            if (d.outstandingTeleports() > 0) return finish(player, d, Action.NONE, tick);
             if (general.shadowTelemetryEnabled) {
                 ShadowTelemetry.recordBigMoveCandidate();
                 d.setShadowDetail(String.format(java.util.Locale.ROOT,
@@ -576,8 +662,8 @@ public final class MovementChecks {
                 env.cushionBelow |= start.cushionBelow;
             }
         }
-        if (!env.groundBelow && packet.isOnGround() && d.lastGroundedOnFace
-                && newY > d.lastY && newY - d.lastY <= 0.6 && floorFaceNear(player, world, newX, newY, newZ)) {
+        if (!env.groundBelow && packet.isOnGround() && steppedUp(d.lastGroundedOnFace, d.lastDy, d.lastY, newY)
+                && floorFaceNear(player, world, newX, newY, newZ)) {
             // A step-up onto a slab or a block edge ends with the hitbox over the
             // step by however far the tick carried it, sometimes by less than the
             // foot probe's hair (HighJump 1,75 after a step from 138,5 to 139,0).
@@ -665,7 +751,11 @@ public final class MovementChecks {
         if (velocityActive) avgLimit += Math.max(0, d.velocityBudget);
 
         double avgSpeed = d.pushSpeedSampleAndAvg(hDist);
-        if (!env.web && !env.powder && avgSpeed > avgLimit && hDist > groundMax * 1.1) {
+        // КСК (13.11): its arena freezes players through the speed attribute in the duel cell and
+        // moves them itself (dashes, leaps, cell teleports) — the attribute-based limit means
+        // nothing there and flagged the owner at 0,27 bl/tick against 0,26.
+        boolean scriptedArena = player.getEntityWorld().getRegistryKey().getValue().getNamespace().equals("ksk");
+        if (!scriptedArena && !env.web && !env.powder && avgSpeed > avgLimit && hDist > groundMax * 1.1) {
             d.speedBuffer += 1;
             if (d.speedBuffer > 4) {
                 d.speedBuffer = 2;
@@ -691,7 +781,7 @@ public final class MovementChecks {
         boolean groundStable = env.support && d.lastSupport && packet.isOnGround() && d.lastPacketGround
                 && !env.liquid && !env.entitySupport;
         d.lastPacketGround = packet.isOnGround();
-        if (groundStable && tick >= d.bounceGraceUntil) {
+        if (!scriptedArena && groundStable && tick >= d.bounceGraceUntil) {
             double groundLimit = (groundMax * 1.3 + 0.03) * tol;
             if (d.iceMemoryTicks > 0) groundLimit *= 1.9;
             // Knockback: keep the check LIVE but widen the limit by the measured
@@ -743,55 +833,77 @@ public final class MovementChecks {
                     && !env.entitySupport && d.iceMemoryTicks == 0 && tick >= d.bounceGraceUntil
                     && d.noSlowLastHDist >= 0;
             if (usingFor > general.noSlowGraceTicks && judgeable) {
-                float useMul = player.getActiveItem().getOrDefault(
+                net.minecraft.item.ItemStack activeStack = player.getActiveItem();
+                net.minecraft.component.type.UseEffectsComponent useEffects = activeStack.getOrDefault(
                         net.minecraft.component.DataComponentTypes.USE_EFFECTS,
-                        net.minecraft.component.type.UseEffectsComponent.DEFAULT).speedMultiplier();
-                float slip = world.getBlockState(BlockPos.ofFloored(newX, newY - 0.5000001, newZ))
-                        .getBlock().getSlipperiness();
-                // The step starts from vanilla's own prediction of the last
-                // tick when there is one, not from what the client claimed: a
-                // NoSlow is only ~0.02 a tick over vanilla in the air, inside
-                // any per-tick slack, but the excess adds up tick after tick.
-                double base = d.noSlowShadow >= 0 ? d.noSlowShadow : d.noSlowLastHDist;
-                double step = noSlowStep(base, d.noSlowGroundBefore, d.noSlowLastGround, dy,
-                        // The jump boost follows the client's sprint; the
-                        // server's flag can lag behind it (19.10: a sprint-hop
-                        // with an item, the key held, the flag off).
-                        player.isSprinting() || player.getPlayerInput().sprint(),
-                        player.getAttributeValue(EntityAttributes.MOVEMENT_SPEED),
-                        useMul, slip, player.isSneaking());
-                double bound = noSlowSlack(step, d.noSlowLastGround);
-                if (velocityActive) bound += Math.max(0, d.velocityBudget);
-                if (general.debugChecks) {
-                    BastionAC.LOGGER.info("[DEBUG noslow] {} h={} bound={} usingFor={} ground={}/{} buffer={}",
-                            d.name, String.format("%.3f", hDist), String.format("%.3f", bound),
-                            usingFor, d.noSlowLastGround, groundNow, String.format("%.1f", d.noSlowBuffer));
-                }
-                // Shoved by a mob, a boat or another player: vanilla adds
-                // that push to the step. Asked only when the step was exceeded.
-                boolean shoved = hDist > bound && !world.getOtherEntities(player,
-                        player.getBoundingBox().expand(0.6, 0.3, 0.6),
-                        e -> e.isPushable() && e != player.getVehicle()).isEmpty();
-                // Vanilla's prediction carries on; a slower client (a wall, a
-                // corner) pulls it down, a faster one never pushes it up.
-                d.noSlowShadow = shoved || velocityActive ? -1 : Math.min(step, hDist);
-                if (shoved) {
-                    // Neither evidence nor an excuse.
-                } else if (hDist > bound) {
-                    d.noSlowBuffer += 1;
-                    // Six ticks over the vanilla step: the server keeps
-                    // isUsingItem() until the client's release lands, so a
-                    // ping's worth of full-speed ticks after letting go is honest.
-                    if (d.noSlowBuffer > 5) {
-                        d.noSlowBuffer = 1;
-                        boolean mitigate = BastionAC.flag(player, d, CheckType.NOSLOW,
-                                String.format(Lang.t("%.2f бл/тик с предметом (ванильный предел %.2f)"), hDist, bound));
-                        if (mitigate || BastionAC.instantSetback(d)) {
-                            action = Action.max(action, Action.SETBACK);
-                        }
-                    }
-                } else {
+                        net.minecraft.component.type.UseEffectsComponent.DEFAULT);
+                float useMul = useEffects.speedMultiplier();
+                boolean canSprintUsing = useEffects.canSprint();
+                boolean kineticWeapon = activeStack.contains(net.minecraft.component.DataComponentTypes.KINETIC_WEAPON);
+                if (!noSlowApplicable(useMul, canSprintUsing, kineticWeapon)) {
+                    // Items that neither slow the player down nor block sprinting (1.21.11 spears:
+                    // UseEffectsComponent(canSprint=true, speedMultiplier=1.0f), KINETIC_WEAPON)
+                    // have no item-use slowdown in vanilla; the main SPEED check above already
+                    // enforces the full-speed ground/air envelope.
+                    d.noSlowShadow = -1;
                     d.noSlowBuffer = Math.max(0, d.noSlowBuffer - 1);
+                } else {
+                    float slip = world.getBlockState(BlockPos.ofFloored(newX, newY - 0.5000001, newZ))
+                            .getBlock().getSlipperiness();
+                    // The step starts from vanilla's own prediction of the last
+                    // tick when there is one, not from what the client claimed: a
+                    // NoSlow is only ~0.02 a tick over vanilla in the air, inside
+                    // any per-tick slack, but the excess adds up tick after tick.
+                    double base = d.noSlowShadow >= 0 ? d.noSlowShadow : d.noSlowLastHDist;
+                    boolean sprintingNow = player.isSprinting() || player.getPlayerInput().sprint();
+                    double useSpeedAttr = effectiveNoSlowSpeedAttr(
+                            player.getAttributeValue(EntityAttributes.MOVEMENT_SPEED),
+                            player.isSprinting(), player.getPlayerInput().sprint(), canSprintUsing);
+                    double step = noSlowStep(base, d.noSlowGroundBefore, d.noSlowLastGround, dy,
+                            // The jump boost follows the client's sprint; the
+                            // server's flag can lag behind it (19.10: a sprint-hop
+                            // with an item, the key held, the flag off).
+                            sprintingNow,
+                            useSpeedAttr,
+                            useMul, slip, player.isSneaking());
+                    double bound = noSlowSlack(step, d.noSlowLastGround) + 0.005;   // "0,06 при пределе 0,06"
+                    if (velocityActive) bound += Math.max(0, d.velocityBudget);
+                    if (general.debugChecks) {
+                        BastionAC.LOGGER.info("[DEBUG noslow] {} h={} bound={} usingFor={} ground={}/{} buffer={}",
+                                d.name, String.format("%.3f", hDist), String.format("%.3f", bound),
+                                usingFor, d.noSlowLastGround, groundNow, String.format("%.1f", d.noSlowBuffer));
+                    }
+                    // Shoved by a mob, a boat or another player: vanilla adds
+                    // that push to the step. Asked only when the step was exceeded.
+                    boolean shoved = hDist > bound && !world.getOtherEntities(player,
+                            player.getBoundingBox().expand(0.6, 0.3, 0.6),
+                            e -> e.isPushable() && e != player.getVehicle()).isEmpty();
+                    // Vanilla's prediction carries on; a slower client (a wall, a
+                    // corner) pulls it down, a faster one never pushes it up.
+                    d.noSlowShadow = shoved || velocityActive ? -1 : Math.min(step, hDist);
+                    if (shoved) {
+                        // Neither evidence nor an excuse.
+                    } else if (hDist > bound) {
+                        d.noSlowBuffer += 1;
+                        // Six ticks over the vanilla step: the server keeps
+                        // isUsingItem() until the client's release lands, so a
+                        // ping's worth of full-speed ticks after letting go is honest.
+                        if (d.noSlowBuffer > 5 && isDesyncProneUseItem(activeStack)) {
+                            // Full speed behind a raised shield or stale spear: the server's idea of it is stale, as
+                            // with a swing behind one. It is put down, nobody is flagged.
+                            player.clearActiveItem();
+                            d.noSlowBuffer = 0;
+                        } else if (d.noSlowBuffer > 5) {
+                            d.noSlowBuffer = 1;
+                            boolean mitigate = BastionAC.flag(player, d, CheckType.NOSLOW,
+                                    String.format(Lang.t("%.2f бл/тик с предметом (ванильный предел %.2f)"), hDist, bound));
+                            if (mitigate || BastionAC.instantSetback(d)) {
+                                action = Action.max(action, Action.SETBACK);
+                            }
+                        }
+                    } else {
+                        d.noSlowBuffer = Math.max(0, d.noSlowBuffer - 1);
+                    }
                 }
             } else {
                 d.noSlowShadow = -1;
@@ -863,7 +975,10 @@ public final class MovementChecks {
         // the outcome NoFall did since 2.22) always gave 0, so that detector
         // never once fired.
         double dropBeforeLanding = d.fallPeakY - newY;
-        boolean resting =env.support || env.liquid || env.climbable || env.web || env.powder || env.bubble;
+        // The client stands on its own copy of a block the server refused (the spawn guard): 07.11 a
+        // player bridging by the spawn was "in the air for 26 ticks", a Spider and a NoFall.
+        boolean ghostLanding = packet.isOnGround() && d.ghostUnder(tick, newX, newY, newZ) && Math.abs(newY - d.ghostTopY) < 0.05;
+        boolean resting = env.support || env.liquid || env.climbable || env.web || env.powder || env.bubble || ghostLanding;
         if (resting) {
             d.airTicks = 0;
             d.hoverStreak = 0;
@@ -926,6 +1041,9 @@ public final class MovementChecks {
             // Keep counting, and never below the tick vanilla needs for this speed.
             d.fallTicks = Math.max(d.fallTicks + (int) Math.min(moveGap, 10), ticksForFallSpeed(-dy));
         } else if (!resting && dy < 0) {
+            // A fall that began before anything was counted (a login in mid-air, the end of a grace):
+            // it is as old as its speed says. 07.11 one at 2.8 bl/tick was held to an eighth tick.
+            if (d.fallTicks == 0 && d.lastDy < -0.1) d.fallTicks = ticksForFallSpeed(-d.lastDy);
             d.fallTicks += (int) Math.min(moveGap, 10);
             if (moveGap == 1 && d.fallTicks >= 3) {
                 double cap = maxVanillaFallSpeed(d.fallTicks) * 1.15 + 0.10;
@@ -961,6 +1079,9 @@ public final class MovementChecks {
         // special medium resets the height baseline — NOT a side wall (which the
         // wide support box counts as "resting"). This is what un-blinds Spider.
         boolean footing = env.groundBelow || env.climbable || env.liquid || env.web || env.powder || env.bubble;
+        // A bubble column throws the player clear of the water: the rise after it is its momentum.
+        if (env.bubble) d.upwardImpulseTick = tick;
+        if (footing && d.upwardImpulseTick >= 0 && tick - d.upwardImpulseTick > 10) d.upwardImpulseTick = -1;
         if (footing) {
             d.climbBaseY = newY;
             // A new take-off: the HighJump latch belongs to the previous one.
@@ -974,7 +1095,8 @@ public final class MovementChecks {
         // ---------------- FLY ----------------
         if (!resting) {
             boolean bounce = tick < d.bounceGraceUntil;
-            boolean levitating = player.hasStatusEffect(StatusEffects.LEVITATION);
+            boolean levitating = player.hasStatusEffect(StatusEffects.LEVITATION)
+                    || tick - d.lastLevitationTick <= LEVITATION_TAIL_TICKS;
             boolean slowFalling = player.hasStatusEffect(StatusEffects.SLOW_FALLING);
             int maxJumpTicks = 14;
             StatusEffectInstance jump = player.getStatusEffect(StatusEffects.JUMP_BOOST);
@@ -1007,11 +1129,13 @@ public final class MovementChecks {
         // and needs a landing to chain, so a height gain past that against a wall
         // with no footing in between is unambiguous.
         if (!footing && dy > 0.0) {
-            boolean levitating = player.hasStatusEffect(StatusEffects.LEVITATION);
-            boolean bounce = tick < d.bounceGraceUntil;
+            boolean levitating = player.hasStatusEffect(StatusEffects.LEVITATION)
+                    || tick - d.lastLevitationTick <= LEVITATION_TAIL_TICKS;
+            boolean bounce = tick < d.bounceGraceUntil || thrownUp(d.upwardImpulseTick, tick, 60);
             double maxJumpGain = 1.35;
             StatusEffectInstance jb = player.getStatusEffect(StatusEffects.JUMP_BOOST);
             if (jb != null) maxJumpGain += (jb.getAmplifier() + 1) * 2.0; // Jump Boost jumps go much higher
+            if (d.ghostUnder(tick, newX, newY, newZ)) d.climbBaseY = Math.max(d.climbBaseY, d.ghostTopY);
             double climbGain = newY - d.climbBaseY;
             if (climbGain > maxJumpGain && !levitating && !bounce && !velocityActive
                     && againstWall(world, newX, newY, newZ)) {
@@ -1038,6 +1162,9 @@ public final class MovementChecks {
             double maxGain = 1.35;
             StatusEffectInstance jb = player.getStatusEffect(StatusEffects.JUMP_BOOST);
             if (jb != null) maxGain += (jb.getAmplifier() + 1) * 2.0;
+            // The client stands on a floor right under its feet (a slab, a stair): that is where this
+            // jump starts, whatever the footing scan read (06.11: walking up a slab staircase, "2,00").
+            if (packet.isOnGround() && floorWithin(player, world, newX, newY, newZ, 0.6)) d.climbBaseY = newY;
             double base = d.climbBaseY;
             // Towering into a refused cell (someone's claim, a spawn guard):
             // the client stands on its own block for a moment and jumps off
@@ -1050,7 +1177,8 @@ public final class MovementChecks {
             }
             double gain = newY - base;
             boolean exempt = player.hasStatusEffect(StatusEffects.LEVITATION)
-                    || tick < d.bounceGraceUntil || velocityActive;
+                    || tick - d.lastLevitationTick <= LEVITATION_TAIL_TICKS
+                    || tick < d.bounceGraceUntil || velocityActive || thrownUp(d.upwardImpulseTick, tick, 60);
             if (gain > maxGain + 0.35 && !exempt && d.highJumpBase != d.climbBaseY) {
                 d.highJumpBase = d.climbBaseY;
                 boolean mitigate = BastionAC.flag(player, d, CheckType.FLY, String.format(
@@ -1109,8 +1237,6 @@ public final class MovementChecks {
                     || player.hasStatusEffect(StatusEffects.LEVITATION)
                     || player.isGliding() || player.isUsingRiptide() || player.hasVehicle()
                     || player.isInvulnerable()
-                    // Прятки switch all damage off in their arena, so no fall is ever billed there.
-                    || player.getEntityWorld().getRegistryKey().getValue().getNamespace().equals("hideseek")
                     || tick < d.bounceGraceUntil
                     // A wind charge / explosion changes how vanilla bills the fall.
                     || tick - d.lastExplosionTick < 200;
@@ -1143,7 +1269,9 @@ public final class MovementChecks {
         // produce this pattern at all; between them the two cover both the
         // sustained spoof and the single well-timed packet.
         boolean claimedGround = packet.isOnGround();
-        if (claimedGround && !env.support && !env.liquid && !env.climbable && !env.bubble && d.airTicks > 2) {
+        long arrivedAt = d.currentArrivalMs > 0 ? d.currentArrivalMs : System.currentTimeMillis();
+        if (claimedGround && !env.support && !env.liquid && !env.climbable && !env.bubble && d.airTicks > 2
+                && !d.netStalledNear(arrivedAt)) {
             d.groundBuffer += 1;
             if (d.groundBuffer > 3) {
                 d.groundBuffer = 1;
@@ -1291,6 +1419,19 @@ public final class MovementChecks {
      * 0.0255 + 0.2 = 0.4345, recorded 0.435.
      * Sneaking scales the input by 0.3. No slack here: see {@link #noSlowSlack}.
      */
+    static boolean noSlowApplicable(float useMul, boolean canSprint, boolean kineticWeapon) {
+        if (kineticWeapon) return false;
+        return useMul < 1.0f || !canSprint;
+    }
+
+    static double effectiveNoSlowSpeedAttr(double serverSpeedAttr, boolean serverSprinting,
+                                           boolean clientSprintInput, boolean canSprintUsing) {
+        if (!serverSprinting && clientSprintInput && canSprintUsing) {
+            return serverSpeedAttr * 1.3;
+        }
+        return serverSpeedAttr;
+    }
+
     static double noSlowStep(double lastH, boolean groundBefore, boolean lastGround, double dy, boolean sprinting,
                              double speedAttr, float useMul, float slip, boolean sneaking) {
         double input = 0.98 * useMul * (sneaking ? 0.3 : 1.0);
@@ -1322,9 +1463,17 @@ public final class MovementChecks {
      * balance as the player timer, kept separately.
      */
     public static void vehicleTimerArrival(ServerPlayerEntity player, PlayerData d, long nowMs) {
+        if (d.netStalledNear(nowMs) || nowMs - d.lastVehicleResyncMs <= 1_500L) {
+            d.vehicleTimer.settle();
+            return;
+        }
         var g = BastionAC.config().general;
-        double balance = d.vehicleTimer.onTick(nowMs, g.timerLagBankMs);
-        if (balance >= -g.timerMaxAheadMs) return;
+        double bank = Math.max(g.timerLagBankMs, 650.0);
+        double balance = d.vehicleTimer.onTick(nowMs, bank);
+        if (balance >= -g.timerMaxAheadMs) {
+            d.vehicleTimerBuffer = Math.max(0, d.vehicleTimerBuffer - 0.25);
+            return;
+        }
         double ahead = -balance;
         d.vehicleTimer.settle();
         var srv = BastionAC.server();
@@ -1335,9 +1484,12 @@ public final class MovementChecks {
         if (player.isRemoved() || BastionAC.data(player) != d) return;
         long tick = BastionAC.serverTick();
         if (player.isCreative() || player.isSpectator() || BastionAC.isAuthFrozen(player)) return;
-        if (d.isFullyExempt(tick)) return;
+        if (d.isFullyExempt(tick) || d.netStalledNear(System.currentTimeMillis())) return;
         net.minecraft.entity.Entity vehicle = player.getRootVehicle();
         if (vehicle == null || vehicle == player) return;
+        d.vehicleTimerBuffer += aheadMs >= 800.0 ? 2.0 : 1.0;
+        if (d.vehicleTimerBuffer < 2.0) return;
+        d.vehicleTimerBuffer = 0.5;
         // Flag only: the packets already played out, and the anchor is the
         // latest accepted one — there is no earlier spot to put it back to.
         BastionAC.flag(player, d, CheckType.TIMER, String.format(java.util.Locale.ROOT,
@@ -1345,8 +1497,12 @@ public final class MovementChecks {
     }
 
     public static void timerArrival(ServerPlayerEntity player, PlayerData d, long nowMs, boolean tickEnd) {
+        if (tickEnd) d.noteTickEnd(nowMs);
         int kind = d.tickEndKind;
-        boolean tickClock = kind == 1;
+        // Tick ends from the first one on, before the client's version is known as well: the switch
+        // of clocks used to start the balance from zero right after the login, and a slow connection
+        // still delivering the ticks of the queue read as a timer (08.11, five of six alerts).
+        boolean tickClock = kind != 2;
         if (tickEnd != tickClock) return;
         var g = BastionAC.config().general;
         double balance = d.timer.onTick(nowMs, g.timerLagBankMs);

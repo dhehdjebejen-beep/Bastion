@@ -234,6 +234,7 @@ public final class ClientChecks {
         boolean first = !d.sendsTickEnd;
         d.sendsTickEnd = true;
         int moves = Math.max(0, d.movesThisClientTick - d.teleportConfirmsThisClientTick);
+        int teleportConfirms = d.teleportConfirmsThisClientTick;
         d.movesThisClientTick = 0;
         d.teleportConfirmsThisClientTick = 0;
         int dyCount = d.tickDyCount;
@@ -257,14 +258,18 @@ public final class ClientChecks {
             // Unknown while Via is still setting the connection up: ask again next tick.
             if (proto > 0 || !dev.bastionac.core.ClientVersion.viaPresent()) {
                 d.tickEndKind = proto > 0 && proto < dev.bastionac.core.ClientVersion.FIRST_REAL_TICK_END ? 2 : 1;
-                // The timer switches clocks (move packets → tick ends): start it from neutral.
-                d.timer.requestReset();
+                // An old client: the timer switches to the clock of its move packets, from neutral.
+                // A new one keeps the tick clock it has been on since the login (08.11).
+                if (d.tickEndKind == 2) d.timer.requestReset();
             }
         }
         if (d.tickEndKind == 2) return;
 
         double step = stepHeight(d.tickDys, dyCount);
-        if (step > 0) {
+        // A server teleport inside the tick (a correction onto a 15/16 path or farmland) restarts the
+        // heights from the corrected Y, and the jump's own +0.42/+0.753 then read as a step
+        // (3.7.0 b21: both "NCP-step" of 08.11-11.11 came right after a teleport confirm).
+        if (step > 0 && teleportConfirms == 0) {
             BastionAC.flag(player, d, CheckType.STEP, String.format(java.util.Locale.ROOT,
                     Lang.t("подъём на %.1f бл за тик через пакеты +%.3f/+%.3f (NCP-step)"), step, d.tickDys[0], d.tickDys[1]));
         }

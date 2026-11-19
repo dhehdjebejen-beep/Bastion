@@ -8,6 +8,7 @@ import dev.bastionac.argus.features.FeatureSet;
 import dev.bastionac.argus.features.MiningFeatures;
 import dev.bastionac.argus.features.MovementFeatures;
 import dev.bastionac.argus.features.PacketFeatures;
+import dev.bastionac.argus.features.VehicleFeatures;
 import dev.bastionac.config.ACConfig;
 import dev.bastionac.telemetry.SessionData;
 import dev.bastionac.telemetry.TelemetryReader;
@@ -132,16 +133,61 @@ final class ArgusLab {
         byte[] bytes = sim.play();
         try {
             SessionData s = TelemetryReader.readRaw(bytes);
-            FeatureSet fs = new FeatureSet();
-            MovementFeatures.analyze(s, fs, raw -> 0.6f);
-            PacketFeatures.analyze(s, fs);
-            CombatFeatures.analyze(s, fs);
-            ClientFeatures.analyze(s, fs);
-            MiningFeatures.analyze(s, fs, raw -> raw, rock);
+            FeatureSet fs = measure(s, rock, false, Boolean.getBoolean("argus4.legacy"));
             return new Played(sc.name(), sc.cheat(), sc.level(), sc.cheat() != null, "u" + p.seed, fs);
         } catch (Exception e) {
             throw new IllegalStateException("lab session " + p.seed + " " + sc.name(), e);
         }
+    }
+
+    /** Same extractors as live analysis. Legacy movement is compiled from the frozen local snapshot. */
+    static FeatureSet measure(SessionData s, WorldSample rock, boolean real, boolean legacy) {
+        FeatureSet fs = new FeatureSet();
+        if(!real)s.itemRange=raw->raw==99999?4.5:3;
+        MovementFeatures.BlockInfo blocks = real ? Analysis.BLOCKS : new MovementFeatures.BlockInfo() {
+            public float slipperiness(int raw) { return raw==3?.98f:.6f; }
+            public float useMultiplier(int raw) { return raw==99998?.2f:Float.NaN; }
+            public boolean spear(int raw) {return raw==99999;}
+        };
+        if (legacy) {
+            try {
+                Class.forName("dev.bastionac.argus.features.Argus4LegacyMovement")
+                        .getMethod("analyze", SessionData.class, FeatureSet.class, MovementFeatures.BlockInfo.class)
+                        .invoke(null, s, fs, blocks);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("Run tools/argus4.ps1 to compile the frozen extractor", e);
+            }
+        } else {
+            MovementFeatures.analyze(s, fs, blocks);
+            VehicleFeatures.analyze(s, fs, real ? Analysis.VEHICLES : LabSimulator.VEHICLE_CONTEXT);
+        }
+        if (legacy) {
+            try {
+                Class.forName("dev.bastionac.argus.features.Argus4LegacyPacket")
+                        .getMethod("analyze", SessionData.class, FeatureSet.class).invoke(null, s, fs);
+            } catch (ReflectiveOperationException e) {
+                throw new IllegalStateException("Run tools/argus4.ps1 prepare to compile the frozen extractor", e);
+            }
+        } else PacketFeatures.analyze(s, fs);
+        if (legacy) {
+            try {
+                Class.forName("dev.bastionac.argus.features.Argus4LegacyCombat")
+                        .getMethod("analyze",SessionData.class,FeatureSet.class).invoke(null,s,fs);
+                // The frozen classifier is a distinct nested interface; adapt its
+                // single category operation without changing the original algorithm.
+                Class<?> type=Class.forName("dev.bastionac.argus.features.Argus4LegacyMining$Classifier");
+                Object classifier=java.lang.reflect.Proxy.newProxyInstance(type.getClassLoader(),new Class[]{type},
+                        (proxy,method,args)->real?Analysis.CLASSIFY.category((Integer)args[0]):args[0]);
+                Class.forName("dev.bastionac.argus.features.Argus4LegacyMining")
+                        .getMethod("analyze",SessionData.class,FeatureSet.class,type,WorldSample.class)
+                        .invoke(null,s,fs,classifier,rock);
+            } catch (ReflectiveOperationException e) {throw new IllegalStateException("Compile frozen combat/mining via tools/argus4.ps1 prepare",e);}
+        } else {
+            CombatFeatures.analyze(s, fs);
+            MiningFeatures.analyze(s, fs, real ? Analysis.CLASSIFY : raw -> raw, rock);
+        }
+        ClientFeatures.analyze(s, fs);
+        return fs;
     }
 
     /** Combat modules a toggler switches on for a fight. */
@@ -182,6 +228,15 @@ final class ArgusLab {
             out.add(new Scenario(Cheat.SPEED, 0.1 + 0.4 * r.nextDouble(), Map.of(Cheat.TIMER, 0.1 + 0.3 * r.nextDouble())));
             out.add(new Scenario(Cheat.AIM_ASSIST, 0.2 + 0.8 * r.nextDouble(), Map.of(Cheat.REACH, 0.15 + 0.3 * r.nextDouble())));
             out.add(new Scenario(Cheat.XRAY, 0.15 + 0.5 * r.nextDouble(), Map.of(Cheat.BLINK, 0.2 + 0.5 * r.nextDouble())));
+        }
+        // Sparse isolated jumps need their own training coverage: frequent jumps
+        // saturate the likelihood before its weight learns the single-event range.
+        // Append with a separate random stream to preserve every earlier profile.
+        Random sparse = new Random(seed ^ 0x4f1bbcdcL);
+        for (double lower : new double[]{0.025, 0.05, 0.10}) {
+            for (int k = 0; k < perCheat; k++) {
+                out.add(new Scenario(Cheat.CLICK_TP, lower * (1 + sparse.nextDouble())));
+            }
         }
         return out;
     }
@@ -228,6 +283,30 @@ final class ArgusLab {
         } finally {
             pool.shutdownNow();
         }
+    }
+
+    /** Legal fast hands across the supported latency, jitter and sensitivity endpoints. */
+    static List<Played> handCoverageCorpus(long from, WorldSample rock) {
+        List<Profile> profiles=new ArrayList<>();
+        for(int ping:new int[]{5,55,120,270,420})for(double fight:new double[]{.08,.3,.6})
+            for(int minutes:new int[]{5,10})for(double sensitivity:new double[]{.03,.5,1})for(double skill:new double[]{.6,1}) {
+                int index=profiles.size();
+                Profile p=stressed(from++);
+                double[] jitter=ping<120?new double[]{2,10,20}:new double[]{25,55,85};
+                p.pingMs=ping;p.jitterMs=jitter[(index/2+index/6)%3];p.sensitivity=sensitivity;p.aimSkill=skill;
+                p.cps=new double[]{4,9,14}[(index/3)%3];p.clickSigma=new double[]{.08,.16,.35}[(index/2+index/6)%3];
+                p.fight=fight;p.dig=.05;p.minutes=minutes;
+                profiles.add(p);
+            }
+        ExecutorService pool=Executors.newFixedThreadPool(Math.max(1,Runtime.getRuntime().availableProcessors()));
+        try {
+            List<Future<Played>> jobs=new ArrayList<>();
+            for(Profile profile:profiles)jobs.add(pool.submit(()->play(profile,new Scenario(null,0),rock)));
+            List<Played> out=new ArrayList<>();
+            for(Future<Played> job:jobs)out.add(job.get());
+            return out;
+        } catch(Exception e) {throw new IllegalStateException(e);}
+        finally {pool.shutdownNow();}
     }
 
     /**
@@ -482,6 +561,133 @@ final class ArgusLab {
 
     /** No honest training session may score above this under the prior. */
     static final double HONEST_CEILING = 0.25;
+
+    /** Session and encounter estimates of the same hit property share one honest budget. */
+    static final List<List<String>> HIT_PROPERTY_GROUPS = List.of(
+            List.of("cmb.aim_lc_center", "enc.aim_lc_center"),
+            List.of("cmb.aim_center", "enc.aim_center"),
+            List.of("cmb.reach_over", "enc.reach_over"));
+
+    private static boolean projectContribution(Map<String,Double> weights, Map<String,Double> evidence,
+                                               Iterable<String> keys, double budget) {
+        double sum=0,norm=0;
+        for(String key:keys) {
+            double e=evidence.getOrDefault(key,0.0),w=weights.getOrDefault(key,1.0);
+            sum+=w*e;
+            if(e>0&&w>Calibration.MIN_WEIGHT)norm+=e*e;
+        }
+        double excess=sum-budget;
+        if(excess<=1e-12||norm==0)return false;
+        for(String key:keys) {
+            double e=evidence.getOrDefault(key,0.0);
+            if(e>0)weights.put(key,Math.max(Calibration.MIN_WEIGHT,
+                    weights.getOrDefault(key,1.0)-excess*e/norm));
+        }
+        return true;
+    }
+
+    private static boolean projectHonest(Map<String,Double> weights, Calibration.Sample sample, double allowed) {
+        boolean changed=projectContribution(weights,sample.evidence(),sample.evidence().keySet(),allowed);
+        // Pooling the same hits over two time scales provides coverage, not
+        // independent confirmation. Enforce their joint cap on training rows.
+        for(var group:HIT_PROPERTY_GROUPS)
+            changed|=projectContribution(weights,sample.evidence(),group,HONEST_BUDGET);
+        return changed;
+    }
+
+    /** Weighted real examples use their own training-only server norms. No held-out rows enter here. */
+    static Calibration.Prior trainEvidenceBagged(List<List<Calibration.Sample>> bags, String version) {
+        return trainEvidenceBagged(bags,version,List.of());
+    }
+
+    static Calibration.Prior trainEvidenceBagged(List<List<Calibration.Sample>> bags, String version,
+                                                 List<Calibration.Sample> requiredPositives) {
+        List<Calibration.Sample> honest = bags.stream().flatMap(List::stream).filter(s -> !s.cheater()).toList();
+        Map<String, Double> caps = new TreeMap<>();
+        for (Calibration.Sample s : honest) s.evidence().forEach((k,e) -> {
+            if (e > 0) caps.merge(k, HONEST_BUDGET / e, Math::min);
+        });
+        Map<String, Double> sum = new TreeMap<>();
+        Map<String, Integer> seen = new TreeMap<>();
+        for (List<Calibration.Sample> bag : bags) {
+            double h = bag.stream().filter(s -> !s.cheater()).mapToDouble(Calibration.Sample::weight).sum();
+            // The optimiser discards positives with no observed evidence. They
+            // must not dilute the weight of the informative positive class.
+            double c = bag.stream().filter(s -> s.cheater() && s.informative())
+                    .mapToDouble(Calibration.Sample::weight).sum();
+            List<Calibration.Sample> balanced = bag.stream().map(s -> new Calibration.Sample(s.evidence(),
+                    s.signals(), s.cheater(), s.weight() * (s.cheater() && c > 0 ? h / c : 1))).toList();
+            Calibration.Fit fit = EvidenceOptimiser.optimise(balanced, Calibration.Prior.NEUTRAL, .02, caps);
+            fit.weights().forEach((k,w) -> {
+                sum.merge(k,w,Double::sum);
+                seen.merge(k,1,Integer::sum);
+            });
+        }
+        Map<String,Double> weights=new TreeMap<>();
+        sum.forEach((k,w) -> weights.put(k,Math.max(Calibration.MIN_WEIGHT,
+                Math.min(LAB_MAX_WEIGHT,(w+bags.size()-seen.get(k))/bags.size()))));
+        // The task constrains bias to [-3,-2.5]. Project excess honest contribution towards
+        // the runtime's minimum weight instead of silently lowering bias as far as -6.
+        // If even the minimum is infeasible, leave it measurable and reject the candidate.
+        double allowed=3+Math.log(HONEST_CEILING/(1-HONEST_CEILING));
+        // Project a violated honest half-space using only its own coordinates.
+        // A globally shared scale also reduced unrelated, harmless coordinates,
+        // although those reductions could not improve the violated example.
+        for(int iteration=0;iteration<200;iteration++) {
+            boolean changed=false;
+            for(Calibration.Sample s:honest) {
+                changed|=projectHonest(weights,s,allowed);
+            }
+            if(!changed)break;
+        }
+        // The labelled real TRAIN positives are release constraints, independently
+        // of held-out incidents. Project weights into their margins and the honest
+        // ceiling/budgets. Infeasibility remains measurable rather than raising caps.
+        for(int iteration=0;iteration<500&&!requiredPositives.isEmpty();iteration++) {
+            for(Calibration.Sample s:requiredPositives) {
+                double logitSum=0,norm=0,reserve=0;
+                for(var e:s.evidence().entrySet()) {
+                    double w=weights.getOrDefault(e.getKey(),1.0);
+                    logitSum+=w*e.getValue();reserve+=.001*e.getValue();
+                    double cap=Math.min(LAB_MAX_WEIGHT,caps.getOrDefault(e.getKey(),LAB_MAX_WEIGHT));
+                    if(w<cap)norm+=e.getValue()*e.getValue();
+                }
+                double deficit=3+Math.log(.95/.05)+reserve-logitSum;
+                if(deficit>0&&norm>0)for(var e:s.evidence().entrySet()) {
+                    double cap=Math.max(Calibration.MIN_WEIGHT,Math.min(LAB_MAX_WEIGHT,caps.getOrDefault(e.getKey(),LAB_MAX_WEIGHT)));
+                    weights.put(e.getKey(),Math.min(cap,weights.getOrDefault(e.getKey(),1.0)+deficit*e.getValue()/norm));
+                }
+            }
+            for(Calibration.Sample s:honest) {
+                projectHonest(weights,s,allowed);
+            }
+        }
+        weights.replaceAll((k,w)->Math.floor(w*1000)/1000);
+        return new Calibration.Prior(version,-3,weights);
+    }
+
+    /** Brief independent laboratory resets: two to four renewed vanilla jump impulses. */
+    static List<Played> shortAirJumpCorpus(long seed,int per,boolean legacy) {
+        List<Played> out=new ArrayList<>();
+        for(int events=2;events<=4;events++)for(int interval=2;interval<=4;interval++)for(int k=0;k<per;k++) {
+            Random random=new Random(seed);
+            PhysicsReplayTest.Sim sim=new PhysicsReplayTest.Sim();
+            sim.x=random.nextDouble()*20;sim.z=random.nextDouble()*20;sim.yaw=random.nextFloat()*360-180;
+            int lead=30+random.nextInt(20),tail=40+random.nextInt(40);
+            for(int i=0;i<lead;i++)sim.tick(true,false);
+            sim.tick(true,true);
+            for(int event=0;event<events;event++) {
+                for(int i=0;i<interval;i++)sim.tick(true,false);
+                sim.vy=.42;sim.vz+=.2;sim.tick(true,true);
+            }
+            for(int i=0;i<tail;i++)sim.tick(true,false);
+            try {
+                out.add(new Played("AIR_JUMP_SHORT@"+events+":"+interval,Cheat.AIR_JUMP,events/4.0,true,
+                        "short-"+(seed++),measure(sim.read(),null,false,legacy)));
+            } catch(Exception e) {throw new IllegalStateException(e);}
+        }
+        return out;
+    }
 
     /** A model that is exactly the given prior, no labels. */
     static Calibration model(Calibration.Prior p) {

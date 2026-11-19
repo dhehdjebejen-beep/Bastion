@@ -190,8 +190,13 @@ public final class XrayTracker {
         d.xrayValuable++;
         // Coal and copper come in big veins, often open to the air on a hillside: clearing one
         // after a stretch of tunnelling is no jump in luck. 02.11 a 59-block coal vein at y 61-66
-        // ("скрытых 0") raised four purity-drop warnings. They still count everywhere else.
-        if (!state.isIn(BlockTags.COAL_ORES) && !state.isIn(BlockTags.COPPER_ORES)) d.xrayWindowOres++;
+        // ("скрытых 0") raised four purity-drop warnings. The high ratio leaves them out too: the
+        // custom terrain grows mountains with coal on the surface, and 66 open ores to 100 stone
+        // raised a high-ratio warning the same evening. They still count everywhere else.
+        if (!state.isIn(BlockTags.COAL_ORES) && !state.isIn(BlockTags.COPPER_ORES)) {
+            d.xrayWindowOres++;
+            d.xrayRatioOres++;
+        }
         if (!hasAdjacentAir) {
             d.xrayHidden++;
             d.xrayHiddenOreFamily = fam;
@@ -225,11 +230,21 @@ public final class XrayTracker {
         return fam;
     }
 
+    /**
+     * X-ray shows what is behind stone. A miner who has not taken one ore with all faces covered is
+     * working what can be seen: 03.11 six "jumps" at 138-272 ores with «скрытых 0», a cave with its
+     * walls full of ore. No verdict on the ratio alone. Pure.
+     */
+    public static boolean foundBuried(int hiddenOres) {
+        return hiddenOres >= 2;
+    }
+
     private static void judgeRatio(ServerPlayerEntity player, PlayerData d) {
         // Fire once per threshold crossing, not per block: compare against
         // the baseline so the verdict lands on the first stone-like break
         // that completes the evidence window.
-        if (d.xrayStoneLike == RATIO_STONE_BASELINE && isHighRatio(d.xrayValuable, d.xrayStoneLike)) {
+        if (d.xrayStoneLike == RATIO_STONE_BASELINE && isHighRatio(d.xrayRatioOres, d.xrayStoneLike)
+                && foundBuried(d.xrayHidden)) {
             feed(player, d, KIND_RATIO, 4);
         }
     }
@@ -248,7 +263,7 @@ public final class XrayTracker {
                 return;
             }
             if (d.xrayWindowStone >= DROP_WINDOW_STONE || d.xrayWindowOres >= DROP_MIN_ORES * 3) {
-                if (isPurityDrop(d.xrayWindowOres, d.xrayWindowStone)) {
+                if (isPurityDrop(d.xrayWindowOres, d.xrayWindowStone) && foundBuried(d.xrayHidden)) {
                     feed(player, d, KIND_DROP, 5);
                     d.xrayWindowStone = 0;
                     d.xrayWindowOres = 0;
@@ -382,6 +397,7 @@ public final class XrayTracker {
         d.xrayPrefixFrozen = false;
         d.xrayWindowStone = 0;
         d.xrayWindowOres = 0;
+        d.xrayRatioOres = 0;
         d.xrayLastHiddenAlertMs = 0;
         d.xrayHiddenSinceAlert = 0;
     }

@@ -22,6 +22,7 @@ public final class MaxCoreBridge {
     private static volatile boolean resolved;
     private static volatile Method isActive;
     private static volatile Method allowedBlockId;
+    private static volatile Method warmup;
 
     private static void resolve() {
         if (resolved) return;
@@ -36,6 +37,12 @@ public final class MaxCoreBridge {
             isActive = null;
             allowedBlockId = null;
         }
+        try {
+            warmup = Class.forName("dev.maxcore.manager.TeleportWarmupService")
+                    .getMethod("beginNamed", ServerPlayerEntity.class, String.class, java.util.function.Consumer.class);
+        } catch (ReflectiveOperationException e) {
+            warmup = null;
+        }
     }
 
     /**
@@ -49,6 +56,23 @@ public final class MaxCoreBridge {
         return isBuilding(p)
                 ? Lang.t("&e⚠ Режим стройки: &cВКЛ&e — хранилища и сундуки закрывает ОН, не приват")
                 : Lang.t("&7Режим стройки: &aВЫКЛ");
+    }
+
+    /**
+     * Runs {@code then} after MaxCore's teleport warmup (three seconds standing still), the same
+     * as /home and /spawn there. Without MaxCore it runs at once, as before.
+     */
+    public static void afterWarmup(ServerPlayerEntity p, java.util.function.Consumer<ServerPlayerEntity> then) {
+        resolve();
+        if (warmup == null) {
+            then.accept(p);
+            return;
+        }
+        try {
+            warmup.invoke(null, p, "CLAIM", then);
+        } catch (ReflectiveOperationException e) {
+            then.accept(p);
+        }
     }
 
     /** Whether this player is currently in MaxCore's build mode. */

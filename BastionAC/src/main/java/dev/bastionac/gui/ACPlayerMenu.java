@@ -26,7 +26,8 @@ final class ACPlayerMenu {
         MinecraftServer srv = admin.getEntityWorld().getServer();
         ServerPlayerEntity target = srv.getPlayerManager().getPlayer(name);
         if (target == null) {
-            admin.sendMessage(TextFmt.literal(Lang.t("&c[BAC] Игрок ") + name + Lang.t(" не в сети")), false);
+            // Offline: the dossier reads everything stored about the account (3.7.0 b21).
+            ACDossierMenu.openByName(admin, name);
             return;
         }
         openCard(admin, target.getUuid());
@@ -44,8 +45,12 @@ final class ACPlayerMenu {
             double totalVl = d == null ? 0 : d.vl.snapshot().values().stream().mapToDouble(Double::doubleValue).sum();
             String name = target.getGameProfile().name();
             String flag = totalVl <= 0 ? Lang.t("&aчисто") : totalVl < 5 ? "&eVL " + fmt(totalVl) : "&cVL " + fmt(totalVl);
+            String ver = d != null && d.clientVersionLabel != null && !d.clientVersionLabel.isEmpty()
+                    ? d.clientVersionLabel : dev.bastionac.core.ClientVersion.versionLabel(target.getUuid());
+            String brand = d != null && d.brand != null ? " &8(" + d.brand + ")" : "";
             gui.button(slot++, GuiItems.head(name, (totalVl >= 5 ? "&c" : "&a") + name,
                             Lang.t("&7Состояние: ") + flag,
+                            Lang.t("&7Клиент: &f") + ver + brand,
                             Lang.t("&7Пинг: &f") + target.networkHandler.getLatency() + Lang.t(" мс"),
                             Lang.t("&8➜ карточка игрока")),
                     () -> openCard(admin, target.getUuid()));
@@ -81,6 +86,10 @@ final class ACPlayerMenu {
                     .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
                     .forEach(e -> vlLore.add("&7" + e.getKey().key + ": &f" + fmt(e.getValue())));
         }
+        String ver = d != null && d.clientVersionLabel != null && !d.clientVersionLabel.isEmpty()
+                ? d.clientVersionLabel : dev.bastionac.core.ClientVersion.versionLabel(uuid);
+        vlLore.add(Lang.t("&7Версия клиента: &f") + ver + Lang.t(" &8· бренд: &f") + (d != null && d.brand != null ? d.brand : "?"));
+        vlLore.add(Lang.t("&7Пинг: &f") + target.networkHandler.getLatency() + Lang.t(" мс"));
         vlLore.add(Lang.t("&8Всего алертов в истории: &7") + HistoryManager.alertCountFor(uuid));
         if (d != null) {
             String xray = dev.bastionac.core.XrayTracker.summary(d);
@@ -95,6 +104,10 @@ final class ACPlayerMenu {
                 Lang.t("&8➜ открыть")), () -> ACHistoryMenu.openPlayerAlerts(admin, uuid, name, 0));
         gui.button(25, GuiItems.item(Items.IRON_BARS, Lang.t("&c🔨 История наказаний игрока"),
                 Lang.t("&8➜ открыть")), () -> ACHistoryMenu.openPlayerPunishments(admin, uuid, name, 0));
+        gui.button(24, GuiItems.item(Items.KNOWLEDGE_BOOK, Lang.t("&6📂 Полное досье"),
+                Lang.t("&7Алерты по проверкам, Аргус, наказания,"),
+                Lang.t("&7сессии, адреса, связи, бан по IP"),
+                Lang.t("&8➜ открыть")), () -> ACDossierMenu.open(admin, uuid, name));
 
         // The link register, filtered to this account: the question "who else
         // is this person" belongs on the card you are already looking at.

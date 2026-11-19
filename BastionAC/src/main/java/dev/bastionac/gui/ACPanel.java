@@ -35,7 +35,7 @@ public final class ACPanel {
                 Lang.t("&7Алерты, сетбэк, кик, грейс…"), Lang.t("&8➜ открыть")), () -> ACSettingsMenu.openGeneral(admin));
 
         gui.button(14, GuiItems.item(Items.TARGET, Lang.t("&6🎯 Проверки"),
-                Lang.t("&715 проверок: пороги и веса"), Lang.t("&8➜ открыть")), () -> ACSettingsMenu.openChecks(admin));
+                Lang.t("&7Проверок: &f") + dev.bastionac.core.CheckType.values().length + Lang.t(" &7— пороги и веса"), Lang.t("&8➜ открыть")), () -> ACSettingsMenu.openChecks(admin));
 
         gui.button(15, GuiItems.item(Items.NETHERITE_SWORD, Lang.t("&4🧨 Наказания"),
                 Lang.t("&7Авто-бан, пороги, сроки"), Lang.t("&8➜ открыть")), () -> ACSettingsMenu.openPunishment(admin));

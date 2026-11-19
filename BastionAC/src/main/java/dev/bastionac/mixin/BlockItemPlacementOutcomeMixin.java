@@ -22,8 +22,10 @@ public abstract class BlockItemPlacementOutcomeMixin {
     @Inject(method = "place", at = @At("RETURN"))
     private void bastionac$recordPlacementOutcome(ItemPlacementContext context,
                                                   CallbackInfoReturnable<ActionResult> cir) {
-        if (!BastionAC.config().general.shadowTelemetryEnabled) return;
-        if (!(context.getPlayer() instanceof ServerPlayerEntity)) return;
-        ShadowTelemetry.recordPlacementOutcome(cir.getReturnValue().isAccepted());
+        dev.bastionac.core.Guard.run("placement telemetry", () -> {
+            if (!BastionAC.config().general.shadowTelemetryEnabled) return;
+            if (!(context.getPlayer() instanceof ServerPlayerEntity)) return;
+            ShadowTelemetry.recordPlacementOutcome(cir.getReturnValue().isAccepted());
+        });
     }
 }

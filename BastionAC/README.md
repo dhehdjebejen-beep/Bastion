@@ -7,6 +7,41 @@ mod. It started as a targeted answer to **Meteor** and its forks and grew into a
 general engine; version 2.24 added a full pass over **Wurst 7**, built from that
 client's own source and defaults.
 
+## New in 4.0
+
+- **Causal offline prediction engines in Argus:**
+  - `MovementPredictionEngine` adds `move.pred_offset`, `pred.input_offset`,
+    `pred.noslow`, and `pred.kb_ignore` from session telemetry replay;
+  - `CombatPredictionEngine` adds `cmb.hitbox_miss`, `cmb.backtrack`,
+    `cmb.snap_back`, `cmb.angular_jerk`, and `cmb.step_entropy`;
+  - expands `Features.ALL` from 40 to **59 features** (with 47 trained weights
+    in `bastionac/argus-prior.json`, `lab-4.0.0`).
+- **Exact teleport handshake & reaction gates:**
+  - `MovementFeatures` verifies each confirmed server teleport (`tpSentId` and
+    quantized 1/4096 coordinates) as a single-use allowance rather than a blind
+    time window, eliminating honest `move.teleport` false positives and raising
+    its trained prior weight to `2.5` (`CLICK_TP`: 34/36 suspect, 33/36 guilty);
+  - `CombatFeatures` keeps `3.5σ` across the 17-lag search (`cmb.track_lag`) and
+    separates the 3-lag instant check (`r ∈ {-1, 0, +1}`) with a `2.8σ`
+    Bonferroni gate (`3·P(Z > 2.8) = 0.0077 < 0.01`) so positive
+    `cmb.track_instant` signals (`>= 0.15`) are no longer masked when the full
+    17-lag curve is inconclusive, while keeping honest negative controls intact.
+- **Convergent training & `lab-4.0.0` model:**
+  - `EvidenceOptimiser` (laboratory FISTA projected solver, `<= 1e-8` projected
+    residual) trains 3 bags across synthetic and player-disjoint real sessions
+    under the strict honest budget (`<= 1.2` logit per feature);
+  - held-out detection: **825/900 (91.7 %)** across all 25 cheat scenarios with
+    norms (**800/900 = 88.9 %** cold), **435/504 (86.3 %)** across the 14 base
+    modules (**410/504 = 81.3 %** cold), **0/500** honest and **0/500** stress
+    false positives, **196/196** held-out real clean (`max 0.0920`), **90/90**
+    fresh honest clean (`max 0.0920` live).
+- **Runtime hardening:** concurrent maps (`ConcurrentHashMap`) in `EspShield`
+  and `OreShield`, vanilla spear range support (`player.getAttackRange()`), and
+  cleanup of stale empty item-use state across desync-prone items.
+- **Load benchmark (4.0.0):** rotated 50-player 2-core run adds +5.8 % of one
+  core (MSPT 40.1 ms vs 41.6 ms plain, `0` alerts), clustered 32-block run
+  17.6 ms vs 21.6 ms plain / 24.5 ms Grim ([report](BENCHMARK.md)).
+
 ## New in 3.7
 
 3.6 never reached this repository; everything since 3.5.0-beta is in 3.7.0.
@@ -455,17 +490,21 @@ Selected `general` keys: `maxCps` 14 (hits above it are dropped), `joinGraceTick
 | `caseRetentionDays` | 60 | closed cases are kept this long |
 | `worldSampleBlocksPerTick` | 6000 | how fast the X-ray test may read the world |
 
-Features (40, `Features.ALL`) by group:
-- **Movement** — `move.air_gain`, `air_turn`, `ground_gain`, `rise`, `fall_fast`,
-  `jump_nokey`, `move_nokey`, `input_dir`, `sprint_noforward`, `teleport`.
-- **Packets** — `pkt.tick_rate`, `extra_moves`, `timer_episodes`, `blind_stall`,
+Features (59, `Features.ALL`; 47 weights shipped in `bastionac/argus-prior.json`) by group:
+- **Movement** (19) — `move.pred_offset`, `pred.input_offset`, `pred.noslow`,
+  `pred.kb_ignore`, `move.air_gain`, `air_turn`, `ground_gain`, `rise`,
+  `fall_fast`, `jump_nokey`, `move_nokey`, `sprint_noforward`, `input_dir`,
+  `teleport`, `air_jump`, `wall_climb`, `veh.land_speed`, `veh.rise`, `veh.hover`.
+- **Packets** (6) — `pkt.tick_rate`, `extra_moves`, `timer_episodes`, `blind_stall`,
   `phase_loops`, `ping_gap`.
-- **Combat** — `cmb.reach`, `reach_lc`, `reach_over`, `aim_error`, `aim_lc_error`,
+- **Combat** (26) — `cmb.hitbox_miss`, `backtrack`, `snap_back`, `angular_jerk`,
+  `step_entropy`, `reach`, `reach_lc`, `reach_over`, `aim_error`, `aim_lc_error`,
   `aim_center`, `aim_lc_center`, `track_lag`, `track_instant`, `snap`, `rot_const`,
-  `gcd_off`, `yaw_grid`, `yaw_wrap`, `click_rhythm`, `rhythm_kurt`, `blind_hit`.
-- **Client** — `cli.brand_spoof`, `cheat_channel`.
-- **Mining** — `mine.reveal_z`, `diamond_reveal_z`, `discovery_rate`,
-  `diamond_discovery`, `wall_breaks`.
+  `gcd_off`, `yaw_grid`, `yaw_wrap`, `click_rhythm`, `rhythm_kurt`, `blind_hit`,
+  `enc.aim_lc_center`, `enc.aim_lc_error`, `enc.aim_center`, `enc.reach_over`.
+- **Client** (2) — `cli.brand_spoof`, `cheat_channel`.
+- **Mining** (6) — `mine.reveal_z`, `diamond_reveal_z`, `discovery_rate`,
+  `diamond_discovery`, `hidden_probe`, `wall_breaks`.
 
 Six are *hard* — a vanilla client cannot produce them at all, so they may stand
 on their own: `move.jump_nokey`, `move.teleport`, `pkt.tick_rate`, `cmb.yaw_wrap`,
@@ -473,7 +512,7 @@ on their own: `move.jump_nokey`, `move.teleport`, `pkt.tick_rate`, `cmb.yaw_wrap
 
 Each feature is scored against the server's own median/MAD of honest players and
 the player's history, then combined by a logistic model whose prior ships in
-`bastionac/argus-prior.json` and is refined by staff labels.
+`bastionac/argus-prior.json` (`lab-4.0.0`) and is refined by staff labels.
 
 ### Telemetry
 
@@ -487,7 +526,7 @@ low-priority thread; `tools/btl_dump.py` prints one as text.
 
 | Path | What |
 |---|---|
-| `config/bastionac/config.json` | settings; schema version 15, migrated on start without overwriting the admin's own values |
+| `config/bastionac/config.json` | settings; schema version 18, migrated on start without overwriting the admin's own values |
 | `config/bastionac/bans.json` · `history.json` · `networks.json` · `frozen.json` | bans and ban history, alert/punishment history, linked-account map, frozen players |
 | `config/bastionac/argus/cases.json` · `baselines.json` · `model.json` | Argus cases, server norms, the trained weights |
 | `logs/bastionac/sessions/` | session telemetry |
@@ -507,7 +546,7 @@ and sets verdicts in BastionAuth's link ledger.
 
 ```bash
 ./gradlew build      # JDK 21 → build/libs/bastionac-<version>+build.<N>.jar
-./gradlew test       # 221 unit tests
+./gradlew test       # 351 unit tests (runtests.ps1 on Windows non-ASCII paths)
 ./gradlew argusLab   # Argus Lab bench; --args="500 12 --write" retrains the prior
 ```
 

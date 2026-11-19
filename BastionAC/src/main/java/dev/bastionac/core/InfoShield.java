@@ -193,6 +193,8 @@ public final class InfoShield {
     }
 
     private static Packet<?> loudSound(ServerPlayerEntity to, PlaySoundS2CPacket sound) {
+        // Прятки live by the ear: a sound there says where it comes from, by design.
+        if (to.getEntityWorld().getRegistryKey().getValue().getNamespace().equals("hideseek")) return sound;
         Vec3d src = new Vec3d(sound.getX(), sound.getY(), sound.getZ());
         Vec3d at = towards(to.getEyePos(), src, LOUD_SOUND_KEEP);
         if (at == null) return sound;

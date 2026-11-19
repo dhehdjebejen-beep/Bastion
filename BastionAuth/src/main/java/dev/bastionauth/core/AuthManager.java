@@ -372,8 +372,153 @@ public final class AuthManager {
         if (cfg.bruteForce.blockJoinsFromBlockedIp && ipBlocks.isBlocked(secrets.ipHmac(ip), now)) {
             return text("join.denied.ipBlocked");
         }
+        if (isBindableIp(ip)) {
+            Database.IpBanRow ban = ipBanOf(secrets.ipHmac(ip), now);
+            if (ban != null) {
+                BastionAuth.LOGGER.info("Join of {} refused: address banned ({})", name, Secrets.maskIp(ip));
+                return ipBanScreen(ban);
+            }
+        }
         pendingIps.put(profile.id(), new PendingIp(ip, now));
         return null;
+    }
+
+    // ------------------------------------------------------------------
+    // 1.15: address bans and the full address history (owner 12.11)
+    // ------------------------------------------------------------------
+
+    private volatile java.util.List<Database.IpBanRow> ipBans = java.util.List.of();
+
+    public void reloadIpBans() {
+        ipBans = java.util.List.copyOf(db.activeIpBans(System.currentTimeMillis()));
+    }
+
+    /** The ban in force on this address, or null. */
+    public Database.IpBanRow ipBanOf(String ipHmac, long now) {
+        if (ipHmac == null) return null;
+        for (Database.IpBanRow b : ipBans) {
+            if ((b.expiresAt() == 0 || b.expiresAt() > now) && constantTimeEquals(b.ipHmac(), ipHmac)) return b;
+        }
+        return null;
+    }
+
+    private static Text ipBanScreen(Database.IpBanRow ban) {
+        String until = ban.expiresAt() == 0 ? "навсегда"
+                : java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+                        .withZone(java.time.ZoneId.systemDefault()).format(java.time.Instant.ofEpochMilli(ban.expiresAt()));
+        String reason = ban.reason() == null || ban.reason().isBlank() ? "не указана" : ban.reason();
+        return Text.literal("§c§lВаш IP-адрес заблокирован\n\n§7Срок: §f" + until + "\n§7Причина: §f" + reason);
+    }
+
+    /**
+     * Bans every address an account was ever seen on, the account offline too. {@code minutes}
+     * below 0 is forever. Online players on those addresses are disconnected. Returns a report.
+     */
+    public String banAddressesOf(String nameOrUuid, long minutes, String reason, String by) {
+        try {
+            UserRecord user = userOf(nameOrUuid);
+            if (user == null) return "§cАккаунт §f" + nameOrUuid + " §cне найден.";
+            long now = System.currentTimeMillis();
+            long expires = minutes < 0 ? 0 : now + minutes * 60_000L;
+            java.util.List<Database.IpRow> ips = db.ipHistoryOf(user.uuid());
+            if (ips.isEmpty()) return "§cУ §f" + user.username() + " §cнет ни одного известного адреса.";
+            java.util.Set<String> banned = new java.util.HashSet<>();
+            for (Database.IpBanRow b : ipBans) banned.add(b.ipHmac());
+            int added = 0;
+            for (Database.IpRow r : ips) {
+                if (banned.contains(r.ipHmac())) continue;
+                db.addIpBan(r.ipHmac(), r.ip(), user.uuid(), user.username(), reason, by, now, expires);
+                added++;
+            }
+            reloadIpBans();
+            int kicked = 0;
+            for (ServerPlayerEntity p : java.util.List.copyOf(server.getPlayerManager().getPlayerList())) {
+                PlayerAuthState st = states.get(p.getUuid());
+                if (st == null || !isBindableIp(st.ip)) continue;
+                Database.IpBanRow b = ipBanOf(secrets.ipHmac(st.ip), now);
+                if (b != null) {
+                    p.networkHandler.disconnect(ipBanScreen(b));
+                    kicked++;
+                }
+            }
+            db.audit(now, "IP_BAN", user.uuid(), user.username(), null,
+                    "by=" + by + " addresses=" + added + " minutes=" + minutes + " reason=" + reason);
+            BastionAuth.LOGGER.info("[IPBAN] {} banned {} address(es) of {} ({} min): {}", by, added, user.username(), minutes, reason);
+            return "§aЗаблокировано адресов: §f" + added + " §7(аккаунт §f" + user.username() + "§7, всего известно "
+                    + ips.size() + ")" + (kicked > 0 ? " §7Отключено игроков: §f" + kicked : "");
+        } catch (Exception e) {
+            BastionAuth.LOGGER.warn("Address ban failed for {}: {}", nameOrUuid, e.toString());
+            return "§cНе удалось заблокировать: " + e.getMessage();
+        }
+    }
+
+    public String liftAddressBansOf(String nameOrUuid, String by) {
+        try {
+            UserRecord user = userOf(nameOrUuid);
+            if (user == null) return "§cАккаунт §f" + nameOrUuid + " §cне найден.";
+            int n = db.liftIpBansOf(user.uuid(), System.currentTimeMillis());
+            reloadIpBans();
+            db.audit(System.currentTimeMillis(), "IP_UNBAN", user.uuid(), user.username(), null, "by=" + by + " lifted=" + n);
+            return n == 0 ? "§eУ §f" + user.username() + " §eнет действующих блокировок адресов."
+                    : "§aСнято блокировок адресов: §f" + n + " §7(" + user.username() + ")";
+        } catch (Exception e) {
+            return "§cНе удалось снять: " + e.getMessage();
+        }
+    }
+
+    /** A registered account by name (any case) or uuid; null when there is none. */
+    public UserRecord userOf(String nameOrUuid) throws java.sql.SQLException {
+        if (nameOrUuid == null || nameOrUuid.isBlank()) return null;
+        String s = nameOrUuid.trim();
+        if (s.length() == 36 && s.charAt(8) == '-') {
+            UserRecord byId = db.getByUuid(s);
+            if (byId != null) return byId;
+        }
+        return db.getByNameLower(s.toLowerCase(Locale.ROOT));
+    }
+
+    /** Staff dossier lines (legacy colour codes): the account, every address, bans in force. */
+    public java.util.List<String> dossierLines(String nameOrUuid) {
+        java.util.List<String> out = new java.util.ArrayList<>();
+        try {
+            UserRecord user = userOf(nameOrUuid);
+            if (user == null) {
+                out.add("§7Аккаунт не зарегистрирован в авторизации.");
+                return out;
+            }
+            java.time.format.DateTimeFormatter f = java.time.format.DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm")
+                    .withZone(java.time.ZoneId.systemDefault());
+            java.util.function.LongFunction<String> at = ms -> ms <= 0 ? "—" : f.format(java.time.Instant.ofEpochMilli(ms));
+            out.add("§7Регистрация: §f" + at.apply(user.createdAt()));
+            out.add("§7Последний вход: §f" + at.apply(user.lastLoginAt()));
+            out.add("§7Неудачных попыток пароля подряд: §f" + user.failedAttempts()
+                    + (user.lockedUntil() > System.currentTimeMillis() ? " §c(заблокирован до " + at.apply(user.lockedUntil()) + ")" : ""));
+            long now = System.currentTimeMillis();
+            java.util.List<Database.IpRow> ips = db.ipHistoryOf(user.uuid());
+            out.add("§7Адреса (" + ips.size() + "):");
+            int shown = 0;
+            for (Database.IpRow r : ips) {
+                if (++shown > 12) {
+                    out.add("§8  … и ещё " + (ips.size() - 12));
+                    break;
+                }
+                String addr = r.ip() != null ? "§f" + r.ip() : r.ipMasked() != null ? "§7" + r.ipMasked() + " §8(до 1.15 — только маска)"
+                        : "§8скрыт (до 1.15 хранился только отпечаток)";
+                String banned = ipBanOf(r.ipHmac(), now) != null ? " §c[бан IP]" : "";
+                out.add("  " + addr + banned + " §8" + at.apply(r.firstSeen()) + " → " + at.apply(r.lastSeen())
+                        + (r.logins() > 0 ? " §7входов: §f" + r.logins() : ""));
+            }
+            for (Database.IpBanRow b : ipBans) {
+                if (user.uuid().equals(b.uuid())) {
+                    out.add("§cБан адресов: §f" + (b.reason() == null ? "" : b.reason()) + " §7(" + b.bannedBy() + ", "
+                            + (b.expiresAt() == 0 ? "навсегда" : "до " + at.apply(b.expiresAt())) + ")");
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            out.add("§cОшибка чтения авторизации: " + e.getMessage());
+        }
+        return out;
     }
 
     private static String ipOf(SocketAddress address) {
@@ -426,6 +571,14 @@ public final class AuthManager {
         // Every join counts, a resumed one too: it makes the address shared
         // for the sessions of every other account that waits on it.
         addressSightings.note(ipHmac, uuid, now);
+        // 1.15: the full address goes to the history the staff dossier reads.
+        if (ipHmac != null) {
+            String fullIp = ip;
+            try {
+                executor.execute(() -> db.recordIp(uuid.toString(), ipHmac, fullIp, Secrets.maskIp(fullIp), now));
+            } catch (RejectedExecutionException ignored) {
+            }
+        }
         st.agreementDone = hasAcceptedAgreement(player);
         boolean opNoResume = isOperator(player) && opStrict(uuid);
         // An IP session is weaker than a password and far weaker than a
@@ -585,6 +738,58 @@ public final class AuthManager {
         }
     }
 
+    /**
+     * Every account against every other, with what is stored (08.11). Links used to be looked for
+     * only at a join, with the material of that moment: an account made before the fingerprints
+     * existed, or a password fingerprint that appeared later, was never compared again. Pairs
+     * nobody decided on take the corrected model's score; decided pairs keep theirs; new pairs
+     * from "likely" up are reported as at a join. Runs on the auth worker.
+     */
+    void rescanLinks() {
+        try {
+            long now = System.currentTimeMillis();
+            AccountLinker linker = new AccountLinker(AccountLinker.Weights.defaults(),
+                    cfg.linking.timingWindowHours * 3_600_000L);
+            AccountLinker.Grade reportFrom;
+            try {
+                reportFrom = AccountLinker.Grade.valueOf(cfg.linking.reportGrade.trim().toUpperCase(Locale.ROOT));
+            } catch (IllegalArgumentException e) {
+                reportFrom = AccountLinker.Grade.LIKELY;
+            }
+            LinkRescan.Result r = LinkRescan.compute(db, linker, now);
+            for (LinkRescan.Rescore x : r.rescores()) {
+                db.rescoreOpenLink(x.uuidA(), x.uuidB(), x.score(), x.grade().name(), x.signals(), now);
+                db.audit(now, "LINK_RESCORED", x.uuidA(), x.nameA(), null,
+                        "with=" + x.nameB() + " " + x.oldScore() + "->" + x.score() + " " + x.grade() + " " + x.signals());
+            }
+            int archived = 0;
+            for (LinkRescan.Cleared x : r.cleared()) {
+                String why = "recount " + x.oldScore() + "->" + x.score()
+                        + " was=" + (x.oldSignals() == null ? "" : x.oldSignals()) + " now=" + x.signals();
+                if (!db.archiveOpenLink(x.uuidA(), x.uuidB(), why, now)) continue;
+                archived++;
+                db.audit(now, "LINK_CLEARED", x.uuidA(), x.nameA(), null, "with=" + x.nameB() + " " + why);
+            }
+            for (LinkRescan.Added x : r.added()) {
+                db.upsertLink(x.uuid(), x.name(), x.otherUuid(), x.otherName(), x.score(), x.grade().name(), x.signals(), now);
+                db.audit(now, "LINKED_ACCOUNT", x.uuid(), x.name(), null,
+                        "rescan grade=" + x.grade() + " with=" + x.otherName() + " score=" + x.score() + " signals=" + x.describe());
+                if (x.grade().ordinal() >= reportFrom.ordinal()) {
+                    BastionAuth.LOGGER.warn("LinkedAccountDetected: {} <-> {} ({} - score {}, re-check)",
+                            x.name(), x.otherName(), x.grade(), x.score());
+                    BastionAuth.reportLinkedAccount(x.name(), x.uuid(), x.otherName(), x.otherUuid(),
+                            x.signals(), x.grade().name(), String.valueOf(x.score()));
+                }
+            }
+            int rescored = r.rescores().size(), added = r.added().size();
+            int accounts = r.accounts();
+            BastionAuth.LOGGER.info("[LINKS] re-check: {} account(s), {} pair(s) rescored, {} new, {} no longer linked (archived)",
+                    accounts, rescored, added, archived);
+        } catch (Exception e) {
+            BastionAuth.LOGGER.warn("Link re-check failed: {}", e.toString());
+        }
+    }
+
     /** Freeze visuals + prompts. Also used by /logout and admin unregister. */
     private void beginAuthPhase(ServerPlayerEntity player, PlayerAuthState st, boolean registered) {
         AuthConfig cfg = this.cfg;
@@ -695,6 +900,10 @@ public final class AuthManager {
 
     public void tick() {
         tickCounter++;
+        // The ledger, re-checked: five minutes after the start, then once a day (08.11).
+        if (tickCounter == 20L * 60 * 5 || (tickCounter > 20L * 60 * 5 && tickCounter % (20L * 60 * 60 * 24) == 0)) {
+            executor.execute(this::rescanLinks);
+        }
         Limbo.tick(server);
         if (tickCounter % 20 == 0) ChatGate.releaseStragglers(server, this::heldHeader);
         if (!channelCaptureDue.isEmpty()) {

@@ -208,6 +208,7 @@ public final class BastionAC implements DedicatedServerModInitializer {
         // exemption window.
         int graceTicks = 5 + Math.min(11, (int) Math.ceil(horiz * 6.0));
         d.velocityGraceUntil = Math.max(d.velocityGraceUntil, tick + graceTicks);
+        if (velocity.y > 0.05) d.upwardImpulseTick = tick;
 
         // Anti-KB: arm a ping-pinned verification transaction (KnockbackVerifier).
         if (config.check(CheckType.VELOCITY.key).enabled) {
@@ -494,7 +495,7 @@ public final class BastionAC implements DedicatedServerModInitializer {
 
         // Authoritative damage veto: guarantees a flagged combat hit deals no
         // damage even if the packet cancel is bypassed.
-        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> {
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) -> dev.bastionac.core.Guard.call("damage hook", () -> {
             // NoFall evidence: remember that vanilla actually tried to charge
             // this player for a fall. The check compares the descent it
             // measured itself against whether this ever fired — an outcome
@@ -530,15 +531,19 @@ public final class BastionAC implements DedicatedServerModInitializer {
                 }
             }
             return true;
-        });
+        }, true));
 
-        ServerPlayConnectionEvents.JOIN.register((handler, sender, srv) -> {
+        ServerPlayConnectionEvents.JOIN.register((handler, sender, srv) -> dev.bastionac.core.Guard.run("join", () -> {
             ServerPlayerEntity player = handler.player;
             PlayerData d = new PlayerData(player.getUuid(), player.getGameProfile().name());
             d.joinGraceUntil = tick + config.general.joinGraceTicks;
             d.lastWorld = player.getEntityWorld();
+            d.clientProtocol = dev.bastionac.core.ClientVersion.protocolOf(player.getUuid());
+            d.clientVersionLabel = dev.bastionac.core.ClientVersion.versionLabel(d.clientProtocol);
             d.resetMovement(player.getX(), player.getY(), player.getZ());
             DATA.put(player.getUuid(), d);
+            LOGGER.info("[BAC] Подключился {} ({}) — версия клиента: {}",
+                    player.getGameProfile().name(), player.getUuid(), d.clientVersionLabel);
             dev.bastionac.core.FreezeManager.onJoin(player);
             dev.bastionac.core.PlayerContextBuffer.attach(player);
             dev.bastionac.core.ReconTracker.attach(player);
@@ -550,9 +555,9 @@ public final class BastionAC implements DedicatedServerModInitializer {
             // Staff signal (never an action): the joiner's subnet matches a
             // recent ban's subnet. Checked after the join completes.
             srv.execute(() -> dev.bastionac.core.NetworkRegistry.checkJoinOnBannedIp(player));
-        });
+        }));
 
-        ServerPlayConnectionEvents.DISCONNECT.register((handler, srv) -> {
+        ServerPlayConnectionEvents.DISCONNECT.register((handler, srv) -> dev.bastionac.core.Guard.run("disconnect", () -> {
             ServerPlayerEntity player = handler.player;
             PlayerData leaving = DATA.get(player.getUuid());
             String sessionFile = dev.bastionac.telemetry.Telemetry.currentFile(player.getUuid());
@@ -582,26 +587,26 @@ public final class BastionAC implements DedicatedServerModInitializer {
             // The chain itself deliberately survives the rejoin — see
             // AttackChainDetector's javadoc. It is pruned by time, not by
             // disconnect, so a relog cannot reset the score.
-        });
+        }));
 
-        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> {
+        ServerPlayerEvents.AFTER_RESPAWN.register((oldPlayer, newPlayer, alive) -> dev.bastionac.core.Guard.run("respawn", () -> {
             PlayerData d = DATA.get(newPlayer.getUuid());
             if (d == null) return;
             d.respawnGraceUntil = tick + config.general.joinGraceTicks;
             d.lastWorld = newPlayer.getEntityWorld();
             d.teleportPending = false;
-            d.timer.requestReset();
+            if (d.tickEndKind == 2) d.timer.requestReset();
             dev.bastionac.telemetry.Telemetry.life(newPlayer, dev.bastionac.telemetry.TelemetryFormat.LIFE_RESPAWN);
             d.clearMining(); // a break armed before dying can never be closed
             d.resetMovement(newPlayer.getX(), newPlayer.getY(), newPlayer.getZ());
             d.resetMovePackets();
-        });
+        }));
 
         // Dimension travel (nether/End portals, End exit) repositions the
         // player without a requestTeleport, so movement checks would otherwise
         // see a huge single-packet jump. Reset and grant a solid grace here —
         // this is what killed the "BigMove on End exit" false positive.
-        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) -> {
+        ServerEntityWorldChangeEvents.AFTER_PLAYER_CHANGE_WORLD.register((player, origin, destination) -> dev.bastionac.core.Guard.run("world change", () -> {
             // Anti-ESP starts from nothing in the new world, as viewer and as target. Answers cached
             // in a minigame arena (where the shield shows everyone) must not carry over and show a
             // player through walls for the few ticks until the next judgement.
@@ -611,23 +616,25 @@ public final class BastionAC implements DedicatedServerModInitializer {
             // A minigame arena holds its players frozen at the start (Hunger Games) and moves them
             // about with its own teleports; the first half-minute there gave Timer alerts (02.11).
             String ns = destination.getRegistryKey().getValue().getNamespace();
-            d.respawnGraceUntil = tick + (ns.equals("hideseek") || ns.equals("hungergames") ? 600 : 100);
+            d.respawnGraceUntil = tick + (ns.equals("hideseek") || ns.equals("hungergames") || ns.equals("ksk") ? 600 : 100);
             d.lastWorld = destination;
-            d.teleportPending = false;
-            d.timer.requestReset();
+            boolean awaitsConfirm = player.networkHandler != null
+                    && ((dev.bastionac.mixin.PlayNetworkHandlerAccessor) player.networkHandler)
+                            .bastionac$requestedTeleportPos() != null;
+            d.afterWorldChange(awaitsConfirm, player.getX(), player.getY(), player.getZ(), tick);
             dev.bastionac.telemetry.Telemetry.life(player, dev.bastionac.telemetry.TelemetryFormat.LIFE_WORLD);
             d.clearMining();
             d.resetMovement(player.getX(), player.getY(), player.getZ());
             d.resetMovePackets();
-        });
+        }));
 
         // Begin before C2S packet handlers execute in this tick. This only resets
         // counters for the shadow telemetry; the anti-cheat tick cadence remains
         // unchanged and all enforcement stays in its existing paths.
-        ServerTickEvents.START_SERVER_TICK.register(srv ->
-                ShadowTelemetry.beginTick(tick + 1, lastTickDurationNanos));
+        ServerTickEvents.START_SERVER_TICK.register(srv -> dev.bastionac.core.Guard.run("tick start", () ->
+                ShadowTelemetry.beginTick(tick + 1, lastTickDurationNanos)));
 
-        ServerTickEvents.END_SERVER_TICK.register(srv -> {
+        ServerTickEvents.END_SERVER_TICK.register(srv -> dev.bastionac.core.Guard.run("tick", () -> {
             tick++;
             long nano = System.nanoTime();
             lastTickDurationNanos = lastTickNanos == 0 ? 0 : nano - lastTickNanos;
@@ -637,14 +644,14 @@ public final class BastionAC implements DedicatedServerModInitializer {
             }
             lastTickNanos = nano;
 
-            HitboxHistory.snapshot(srv);
-            HistoryManager.tick(tick);
-            dev.bastionac.telemetry.Telemetry.tick(srv, tick);
-            dev.bastionac.argus.Argus.tick(srv, tick);
-            if (tick % 20 == 0) dev.bastionac.core.EntityKnowledge.sweep();
-            dev.bastionac.core.FreezeManager.tick(srv, tick);
-            dev.bastionac.core.EspShield.tick(srv, tick);
-            dev.bastionac.core.OreShield.tick(srv, tick);
+            dev.bastionac.core.Guard.run("hitbox history", () -> HitboxHistory.snapshot(srv));
+            dev.bastionac.core.Guard.run("history", () -> HistoryManager.tick(tick));
+            dev.bastionac.core.Guard.run("telemetry", () -> dev.bastionac.telemetry.Telemetry.tick(srv, tick));
+            dev.bastionac.core.Guard.run("argus", () -> dev.bastionac.argus.Argus.tick(srv, tick));
+            if (tick % 20 == 0) dev.bastionac.core.Guard.run("entity knowledge", dev.bastionac.core.EntityKnowledge::sweep);
+            dev.bastionac.core.Guard.run("freeze", () -> dev.bastionac.core.FreezeManager.tick(srv, tick));
+            dev.bastionac.core.Guard.run("esp shield", () -> dev.bastionac.core.EspShield.tick(srv, tick));
+            dev.bastionac.core.Guard.run("ore shield", () -> dev.bastionac.core.OreShield.tick(srv, tick));
 
             // Staff-presence feed for the evasion tracker: every admin join
             // or approach arms the "collapse" watch on busy players. Cheap —
@@ -683,8 +690,15 @@ public final class BastionAC implements DedicatedServerModInitializer {
                     PlayerData pd = DATA.get(p.getUuid());
                     if (pd == null || pd.brandChecked) continue;
                     if (pd.brand == null) pd.brand = clientBrand(p);
+                    pd.clientProtocol = dev.bastionac.core.ClientVersion.protocolOf(p.getUuid());
+                    pd.clientVersionLabel = dev.bastionac.core.ClientVersion.versionLabel(pd.clientProtocol);
                     dev.bastionac.checks.ClientChecks.checkBrand(p, pd);
-                    if (pd.brandChecked) dev.bastionac.telemetry.Telemetry.clientInfo(p, pd.brand);
+                    if (pd.brandChecked) {
+                        dev.bastionac.telemetry.Telemetry.clientInfo(p, pd.brand);
+                        LOGGER.info("[BAC] Клиент {}: версия {}, бренд «{}», пинг {} мс",
+                                p.getGameProfile().name(), pd.clientVersionLabel,
+                                pd.brand != null ? pd.brand : "?", p.networkHandler.getLatency());
+                    }
                 }
             }
 
@@ -711,22 +725,22 @@ public final class BastionAC implements DedicatedServerModInitializer {
                     && tick % general.shadowReportIntervalTicks == 0) {
                 LOGGER.info("[SHADOW] {}", ShadowTelemetry.summary());
             }
-        });
+        }));
 
         CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
                 ACCommands.register(dispatcher));
 
         // Telemetry: every block a player breaks, with how exposed it was while it still stood.
         net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.BEFORE.register((world, player, pos, state, be) -> {
-            if (player instanceof ServerPlayerEntity sp) dev.bastionac.telemetry.Telemetry.beforeBreak(sp, pos);
+            if (player instanceof ServerPlayerEntity sp) dev.bastionac.core.Guard.run("break telemetry", () -> dev.bastionac.telemetry.Telemetry.beforeBreak(sp, pos));
             return true;
         });
         net.fabricmc.fabric.api.event.player.PlayerBlockBreakEvents.AFTER.register((world, player, pos, state, be) -> {
-            if (player instanceof ServerPlayerEntity sp) dev.bastionac.telemetry.Telemetry.broken(sp, pos, state);
+            if (player instanceof ServerPlayerEntity sp) dev.bastionac.core.Guard.run("break telemetry", () -> dev.bastionac.telemetry.Telemetry.broken(sp, pos, state));
         });
         ServerLivingEntityEvents.AFTER_DEATH.register((entity, source) -> {
             if (entity instanceof ServerPlayerEntity sp) {
-                dev.bastionac.telemetry.Telemetry.life(sp, dev.bastionac.telemetry.TelemetryFormat.LIFE_DEATH);
+                dev.bastionac.core.Guard.run("death telemetry", () -> dev.bastionac.telemetry.Telemetry.life(sp, dev.bastionac.telemetry.TelemetryFormat.LIFE_DEATH));
             }
         });
 

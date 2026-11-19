@@ -38,6 +38,12 @@ public final class SessionData {
     public boolean hasInput;
 
     public final Prim.Longs tickEndT = new Prim.Longs();
+    /** Derived read-time context, not a telemetry record: the file's complete
+     * client clock from its valid header start through the requested upper bound.
+     * Keeping the prefix prevents a cropped window from losing an earlier pause. */
+    public boolean clockHistoryAvailable;
+    public long clockTicks;
+    public long clockToMs = Long.MIN_VALUE;
     public final Prim.Longs serverTickT = new Prim.Longs();
     public final Prim.Longs inputT = new Prim.Longs();
     public final Prim.Ints inputBits = new Prim.Ints();
@@ -110,6 +116,14 @@ public final class SessionData {
     public final Prim.Ints placeItem = new Prim.Ints();
 
     public final Prim.Longs useT = new Prim.Longs();
+    /** Existing version-one item payload retained during decoding. */
+    public final Prim.Ints useItem = new Prim.Ints(), useHand = new Prim.Ints();
+    public final Prim.Floats useYaw = new Prim.Floats(), usePitch = new Prim.Floats();
+    /** Last item use before a cropped window; no additional wire record. */
+    public int priorUseItem = -1;
+    public long priorUseT = Long.MIN_VALUE;
+    /** Optional local item contract for a standalone laboratory; never serialized. */
+    public transient java.util.function.IntToDoubleFunction itemRange;
     public final Prim.Longs swingT = new Prim.Longs();
     public final Prim.Longs slotT = new Prim.Longs();
     public final Prim.Ints slotValue = new Prim.Ints();

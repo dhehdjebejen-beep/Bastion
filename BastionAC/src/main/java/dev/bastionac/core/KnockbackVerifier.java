@@ -190,6 +190,9 @@ public final class KnockbackVerifier {
         // Verdict.
         double moved = (x - d.kbAnchorX) * d.kbDirX + (z - d.kbAnchorZ) * d.kbDirZ;
         double need = d.kbMinDisp * 0.9 - 0.03;
+        // A sprint hit of its own multiplies the attacker's speed by 0.6, the knockback just taken
+        // included: 4 of the 7 Velocity flags of 05.11-07.11 were players trading blows.
+        if (BastionAC.serverTick() - d.lastAttackTick <= BastionAC.config().general.velocityVerifyTicks + 10L) need *= 0.6;
         boolean judged = d.kbMinDisp >= MIN_JUDGED && !d.kbBlocked && !wallInPath(player, d);
         d.kbPending = false;
         d.kbActive = false;

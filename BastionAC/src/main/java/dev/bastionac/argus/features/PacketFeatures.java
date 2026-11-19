@@ -16,19 +16,27 @@ public final class PacketFeatures {
     private PacketFeatures() {}
 
     public static void analyze(SessionData s, FeatureSet out) {
-        boolean tickClock = s.tickEndT.n > 200 && (s.protocol < 0 || s.protocol >= 768);
+        boolean tickProtocol = s.protocol < 0 || s.protocol >= 768;
+        boolean tickClock = s.tickEndT.n > 200 && tickProtocol;
         double hours = Math.max(1e-6, s.durationMs() / 3_600_000.0);
         Prim.Longs events = quietEvents(s);
 
         if (tickClock) tickRate(s, out);
-        // A second in which the client overdrew its lag credit by 350 ms or more.
-        // With a 3-second credit an honest connection never gets there; a timer does it again and again.
+        // One episode is one crossing of 350 ms, however long the balance stays down there. Every
+        // second used to count: 04.11 a stall left an honest client at -379 ms, and 97 "episodes"
+        // in 104 seconds banned it. And the client must really have gained time around that moment
+        // — a stall and the burst after it gain nothing, a timer keeps what it took.
         int episodes = 0;
+        boolean below = false;
         for (SessionData.State st : s.states) {
-            if (st.timerWorst <= -350) {
+            boolean now = st.timerWorst <= -350;
+            // Short modern sessions retain their observed clock. Insufficient
+            // duration for a rate estimate does not prove accumulated timer gain.
+            if (now && !below && (!tickProtocol || gainedTime(s.tickEndT, st.t))) {
                 episodes++;
                 out.moment("pkt.timer_episodes", st.t);
             }
+            below = now;
         }
         out.perHour("pkt.timer_episodes", episodes, hours);
         if (tickClock) extraMoves(s, out);
@@ -38,22 +46,60 @@ public final class PacketFeatures {
         phaseLoops(s, out, hours);
     }
 
-    /** Every 10-second stretch without a pause: ticks per second. A vanilla client is locked to 20. */
-    static void tickRate(SessionData s, FeatureSet out) {
-        long[] t = s.tickEndT.a;
-        int n = s.tickEndT.n;
-        int start = 0;
-        for (int i = 1; i < n; i++) {
-            if (t[i] - t[i - 1] > 1000) {   // a pause ends the stretch
-                start = i;
-                continue;
-            }
-            if (t[i] - t[start] >= 10_000) {
-                double rate = (i - start) * 1000.0 / (t[i] - t[start]);
-                out.sample("pkt.tick_rate", rate);
-                start = i;
-            }
+    /** Half of the window an episode is checked in: wider than any stall and its burst. */
+    private static final long GAIN_WINDOW_MS = 30_000;
+    /** Ticks over real time that count as a gain: 300 ms, just under the 350 of an episode. */
+    private static final int GAIN_TICKS = 6;
+
+    /** Whether the client sent more ticks than real time allows in the minute around {@code t}. */
+    static boolean gainedTime(dev.bastionac.telemetry.Prim.Longs ticks, long t) {
+        int count = 0;
+        long first = Long.MAX_VALUE, last = Long.MIN_VALUE;
+        long boundary = Long.MAX_VALUE;
+        for (int i = 0; i < ticks.n; i++) if (ticks.a[i] >= t - GAIN_WINDOW_MS && ticks.a[i] <= t + GAIN_WINDOW_MS) {
+            boundary = ticks.a[i] + 1000;
+            break;
         }
+        for (int i = 0; i < ticks.n; i++) {
+            long at = ticks.a[i];
+            // Establish an observed clock after the first second. Login queues
+            // can be spread over several milliseconds rather than exactly zero.
+            if (at < boundary || at > t + GAIN_WINDOW_MS) continue;
+            count++;
+            first = Math.min(first, at);
+            last = Math.max(last, at);
+        }
+        // The first arrival has no observed preceding interval. All markers in
+        // that same TCP cohort may have accumulated before the window or login.
+        // Start the clock at its final marker; later bursts retain their wait.
+        for (int i = 0; i < ticks.n; i++) if (ticks.a[i] == first) count--;
+        count++;
+        if (count < 2) return false;
+        return count - 1 - (last - first) / 50.0 >= GAIN_TICKS;
+    }
+
+    /**
+     * Rate over the complete available file history through this window's end.
+     * Neither internal sampling boundaries nor the first arriving tick may
+     * remove the waiting time that explains a later burst. The reader keeps
+     * prefix counts even for a cropped window, bounded by that window's end.
+     *
+     * A support unit requires ten seconds and 200 recorded tick markers.
+     * Repeated aggregate samples encode coverage, not independent estimates; across files MEDIAN
+     * weights each file's rate by its available duration. Brief acceleration
+     * can be diluted by earlier play, which is the conservative tradeoff.
+     */
+    static void tickRate(SessionData s, FeatureSet out) {
+        if (!s.clockHistoryAvailable || s.clockTicks < 2 || s.clockToMs <= s.startMs) return;
+        long span = s.clockToMs - s.startMs;
+        if (span < 10_000) return;
+        // Subtract the inclusive first endpoint. All later ticks, including
+        // the complete initial burst, retain the header-to-arrival wait.
+        double rate = (s.clockTicks - 1) * 1000.0 / span;
+        // A large empty gap (or an implausibly old numeric header) cannot
+        // manufacture support or allocate more samples than the observed data.
+        long support = Math.min(span / 10_000, s.clockTicks / 200);
+        for (long units = support; units > 0; units--) out.sample("pkt.tick_rate", rate);
     }
 
     /** Ticks with two or more positions and no teleport confirm to explain the extra one. */
@@ -93,7 +139,7 @@ public final class PacketFeatures {
             long a = t[i - 1], b = t[i];
             if (b - a < 600) continue;
             if (anyIn(quiet, a - 10_000, b + 500)) continue;   // respawn, teleport, world change: loading screens
-            if (anyIn(s.pongT, a + 100, b - 50)) {
+            if (answeredPromptly(s, a + 100, b - 50)) {
                 count++;
                 out.moment("pkt.blind_stall", a);
             }
@@ -101,19 +147,64 @@ public final class PacketFeatures {
         out.perHour("pkt.blind_stall", count, hours);
     }
 
+    /**
+     * A ping answered in the gap at the client's usual speed: the connection was alive and only the
+     * movement stopped. A client whose game froze (a lag spike) answers late, if at all — 04.11 and
+     * 07.11 two players' stalls were "alive" by pings that took two seconds to come back.
+     */
+    static boolean answeredPromptly(SessionData s, long from, long to) {
+        if (s.pongRtt.n == 0) return false;
+        double[] all = new double[s.pongRtt.n];
+        for (int i = 0; i < all.length; i++) all[i] = s.pongRtt.a[i];
+        double usual = Stats.median(all);
+        int alive=0;
+        for (int i = MovementFeatures.lowerBound(s.pongT.a, s.pongT.n, from); i < s.pongT.n && s.pongT.a[i] <= to; i++) {
+            // A response sent before this gap may spend its RTT queued together
+            // with movement. It cannot establish an active main thread in the gap.
+            long sent=s.pongT.a[i]-s.pongRtt.a[i];
+            if (sent>=from && s.pongRtt.a[i] <= usual * 1.5 + 100 && ++alive>=2) return true;
+        }
+        return false;
+    }
+
     /** Keep-alive round trip minus our own pings around it. */
+    /**
+     * How much later each keep-alive came back than the pings sent after it. A faked ping holds the
+     * keep-alive alone, so pings sent after it overtake it; a stalled connection delivers them all in
+     * one burst, the keep-alive no later than the pings behind it. Round trips alone said nothing: a
+     * keep-alive goes out every 15 s, a ping every 2 s, and in the same stall the older packet simply
+     * waited longer (08.11: a ban for "954 ms of faked ping", and 350 ms on another jittery player).
+     */
     static void pingGap(SessionData s, FeatureSet out) {
         for (int i = 0; i < s.keepAliveT.n; i++) {
-            long t = s.keepAliveT.a[i];
-            int lo = MovementFeatures.lowerBound(s.pongT.a, s.pongT.n, t - 10_000);
-            int cnt = 0;
-            double[] near = new double[Math.max(0, Math.min(s.pongT.n - lo, 32))];
-            for (int j = lo; j < s.pongT.n && s.pongT.a[j] <= t + 10_000 && cnt < near.length; j++) {
-                near[cnt++] = s.pongRtt.a[j];
+            long arrived = s.keepAliveT.a[i];
+            long sent = arrived - s.keepAliveRtt.a[i];
+            long overtaken = Long.MAX_VALUE;
+            boolean sameBurst = false;
+            int lo = MovementFeatures.lowerBound(s.pongT.a, s.pongT.n, sent);
+            for (int j = lo; j < s.pongT.n && s.pongT.a[j] <= arrived + 50; j++) {
+                long pongSent = s.pongT.a[j] - s.pongRtt.a[j];
+                if (pongSent <= sent) continue;
+                if (s.pongT.a[j] < arrived - 50) overtaken = Math.min(overtaken, s.pongT.a[j]);
+                else sameBurst = true;
             }
+            // A ping sent after it came back first: it was held back by that much.
+            if (overtaken != Long.MAX_VALUE) {
+                out.sample("pkt.ping_gap", arrived - overtaken);
+                continue;
+            }
+            // It came in with a ping sent after it: the connection held them all.
+            if (sameBurst) {
+                out.sample("pkt.ping_gap", 0);
+                continue;
+            }
+            // Nothing sent after it came back first: against the pings around it, as before.
+            int a0 = MovementFeatures.lowerBound(s.pongT.a, s.pongT.n, arrived - 10_000);
+            int cnt = 0;
+            double[] near = new double[Math.max(0, Math.min(s.pongT.n - a0, 32))];
+            for (int j = a0; j < s.pongT.n && s.pongT.a[j] <= arrived + 10_000 && cnt < near.length; j++) near[cnt++] = s.pongRtt.a[j];
             if (cnt < 2) continue;
-            double[] v = java.util.Arrays.copyOf(near, cnt);
-            out.sample("pkt.ping_gap", s.keepAliveRtt.a[i] - Stats.median(v));
+            out.sample("pkt.ping_gap", s.keepAliveRtt.a[i] - Stats.median(java.util.Arrays.copyOf(near, cnt)));
         }
     }
 

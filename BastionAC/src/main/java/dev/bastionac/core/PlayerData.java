@@ -41,6 +41,8 @@ public final class PlayerData {
     public long bounceGraceUntil;
 
     public volatile long velocityGraceUntil;
+    /** The tick the server last threw this player upward, until the landing after it; -1 when none. */
+    public volatile long upwardImpulseTick = -1;
     public volatile double velocityBudget;
 
     public World lastWorld;
@@ -86,16 +88,93 @@ public final class PlayerData {
     public double vehicleBuffer;
     public double vehicleAirBuffer;
     public int vehicleAirTicks;
+    /** Horizontal distance of the last accepted vehicle packet — a boat coasting off ice or water decays from it. */
+    public double lastVehHDist;
     /** Tick the player mounted; physics needs a moment to settle after boarding. */
     public long vehicleSinceTick = -1_000_000L;
+    /** Server tick until which a camel dash impulse / post-dash slide is active. */
+    public long camelDashGraceUntil = -1_000_000L;
+    /** Wall-clock ms of the last server-side vehicle teleport/setback resync. */
+    public volatile long lastVehicleResyncMs = -1_000_000L;
+    /** Buffer for vehicle timer overdraws so a single lag flush does not alert immediately. */
+    public double vehicleTimerBuffer;
 
     // ---------------- air place ----------------
     public double airPlaceBuffer;
     /** Clicks through a wall, decaying on every clean one (InteractWalls). */
     public double interactWallsBuffer;
+    /** Last wall-clock ms and block pos of an InteractWalls refusal (RTT feedback loop guard). */
+    public long lastInteractWallsRefuseMs = -1_000_000L;
+    public long lastInteractWallsRefusePos = Long.MIN_VALUE;
+    private final long[] recentTouchedPos = new long[12];
+    private final long[] recentTouchedMs = new long[12];
+    private int recentTouchedIdx;
+
+    public void noteTouchedBlock(long posLong, long nowMs) {
+        recentTouchedPos[recentTouchedIdx] = posLong;
+        recentTouchedMs[recentTouchedIdx] = nowMs;
+        recentTouchedIdx = (recentTouchedIdx + 1) % recentTouchedPos.length;
+    }
+
+    public boolean wasRecentlyTouched(long posLong, long nowMs, long windowMs) {
+        for (int i = 0; i < recentTouchedPos.length; i++) {
+            long t = recentTouchedMs[i];
+            if (t > 0 && nowMs - t <= windowMs && recentTouchedPos[i] == posLong) return true;
+        }
+        return false;
+    }
     /** A refused block placement under the player (3.4): the top the client may stand on for a moment. */
     public double ghostTopY = Double.NEGATIVE_INFINITY;
     public int ghostX, ghostZ;
+
+    /** A refused block right under the feet, still standing on the client's side of the world. */
+    public boolean ghostUnder(long tick, double x, double y, double z) {
+        return tick < ghostSupportUntil && Math.abs(x - (ghostX + 0.5)) <= 1.3 && Math.abs(z - (ghostZ + 0.5)) <= 1.3
+                && ghostTopY <= y + 0.01 && ghostTopY >= y - 2.6;
+    }
+
+    // 08.11: the connection itself stalled. A stall of the tick ends as long as the stall of the
+    // moves is the network; a Blink module holds the moves back and lets the tick ends through.
+    /** Shortest pause of the tick ends that counts as a stall of the connection. */
+    public static final long NET_STALL_MS = 400;
+    /** How long after a stall packets may still be arriving in its burst. */
+    public static final long NET_STALL_BURST_MS = 3000;
+    private volatile long lastTickEndArrivalMs = -1;
+    private volatile long tickStallEndMs = -1;
+    private volatile long tickStallMs;
+
+    /** Tick ends seen so far (netty thread only writes). */
+    private volatile long clientTicks;
+    /** The client tick count stamped on the packet being handled now (server thread). */
+    public long currentArrivalTicks = -1;
+
+    public long clientTicks() {
+        return clientTicks;
+    }
+
+    /** One tick end came off the wire (netty thread). */
+    public void noteTickEnd(long nowMs) {
+        clientTicks++;
+        long last = lastTickEndArrivalMs;
+        lastTickEndArrivalMs = nowMs;
+        if (last > 0 && nowMs - last >= NET_STALL_MS) {
+            tickStallMs = nowMs - last;
+            tickStallEndMs = nowMs;
+        }
+    }
+
+    /** Whether a packet that arrived at {@code atMs} came in the burst after a stall of the whole connection. */
+    public boolean netStalledNear(long atMs) {
+        long end = tickStallEndMs;
+        return tickEndKind != 2 && end > 0 && Math.abs(atMs - end) <= NET_STALL_BURST_MS;
+    }
+
+    public long tickStallMs() {
+        return tickStallMs;
+    }
+
+    /** Last tick a water (or powder snow) bucket was used: the classic clutch that ends a fall. */
+    public long lastWaterBucketTick = Long.MIN_VALUE / 2;
     public long ghostSupportUntil = -1;
     /**
      * The point of the last interact-at on an entity (3.3.2): a vanilla
@@ -178,6 +257,9 @@ public final class PlayerData {
     // ---------------- client identity ----------------
     /** Brand string from the minecraft:brand payload, lower-case; null until it arrives. */
     public volatile String brand;
+    /** Protocol number and human-readable client version resolved via ViaVersion (or native 1.21.11). */
+    public volatile int clientProtocol = -1;
+    public volatile String clientVersionLabel = "1.21.11";
     /** Tick at which the brand/channel consistency check should run (once, a few seconds after join). */
     public long brandCheckTick = -1;
     public boolean brandChecked;
@@ -304,6 +386,24 @@ public final class PlayerData {
         // armed Anti-KB transaction would measure the teleport itself as "no
         // knockback movement" and convict. Drop it; the next knockback re-arms.
         clearKbVerify();
+    }
+
+    /**
+     * After the player changed worlds. A teleport into another world sends its position packet
+     * before the change is announced, and the client's last move from the old world can still
+     * come in before the client confirms. Vanilla ignores moves until that confirm, so the
+     * checks wait too while vanilla waits: clearing the wait here judged that stale packet
+     * against the new world (bigmove 8018 bl, Overworld to the Nether, 02.11).
+     */
+    public void afterWorldChange(boolean vanillaAwaitsConfirm, double x, double y, double z, long tick) {
+        if (vanillaAwaitsConfirm) {
+            beginTeleport(x, y, z, tick);
+        } else {
+            teleportPending = false;
+        }
+        // The tick clock runs on through a change of worlds: ticks sent before it still arrive after
+        // it on a slow connection, and a reset read them as running ahead (08.11). Old clients only.
+        if (tickEndKind == 2) timer.requestReset();
     }
 
     /** Resets movement tracking to the given point (after teleport confirm). */
@@ -837,6 +937,10 @@ public final class PlayerData {
     public double miningStartDelta;
     /** Hotbar slot the armed mining session started with. */
     public int miningSlot = -1;
+    /** The client's tick count when the dig started (-1: unknown). */
+    public long miningStartClientTicks = -1;
+    /** Last tick this player attacked anything (knockback after a sprint hit is cut to 0.6). */
+    public long lastAttackTick = Long.MIN_VALUE / 2;
 
     /**
      * Drops the armed mining session without judging it. Used everywhere the
@@ -847,7 +951,21 @@ public final class PlayerData {
     public void clearMining() {
         miningPos = null;
         miningSlot = -1;
+        miningSawGround = false;
     }
+
+    /**
+     * The client reported standing on a floor during the dig (3.7.0 b21). A dig started in the air
+     * is five times slower only until the landing: 11.11, a jump onto a vein read "4 ticks instead
+     * of ~13" while the client had dug four ticks on its feet.
+     */
+    public boolean miningSawGround;
+    /**
+     * Last server tick the player levitated (3.7.0 b21). The climb goes on for a moment after the
+     * effect runs out, with no floor anywhere: ten "HighJump 6-10 blocks" on 11.11 were shulker
+     * bullets in the End, flagged at the very tick the effect ended.
+     */
+    public long lastLevitationTick = Long.MIN_VALUE / 2;
 
     /** Confirmed-violation buffers for the world checks. */
     public double packetMineBuffer;
@@ -910,6 +1028,8 @@ public final class PlayerData {
     public int xrayWindowStone;
     /** Valuable ores inside the purity-drop window (since the freeze). */
     public int xrayWindowOres;
+    /** Valuable ores of the session without coal and copper: what the high-ratio verdict weighs. */
+    public int xrayRatioOres;
     /** When staff were last told about a hidden-ore break (throttle; verdicts are never throttled). */
     public long xrayLastHiddenAlertMs;
     /** Hidden-ore breaks since that alert, reported together in the next one. */

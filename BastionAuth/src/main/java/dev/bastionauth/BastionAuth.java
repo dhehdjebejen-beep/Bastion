@@ -156,6 +156,34 @@ public final class BastionAuth implements DedicatedServerModInitializer {
         }
     }
 
+    // ------------------------------------------------------------------
+    // 1.15: the staff dossier and address bans, for BastionAC's panel and MaxCore
+    // ------------------------------------------------------------------
+
+    /** Dossier lines with legacy colour codes: registration, logins, every address (full from 1.15), bans. */
+    public static java.util.List<String> dossier(String nameOrUuid) {
+        AuthManager m = manager;
+        if (m == null) return java.util.List.of("§7Авторизация не запущена.");
+        try {
+            return m.dossierLines(nameOrUuid);
+        } catch (Throwable t) {
+            return java.util.List.of("§cОшибка: " + t);
+        }
+    }
+
+    /** Bans every address of an account (offline too). minutes < 0 = forever. Returns a report line. */
+    public static String banAddresses(String nameOrUuid, long minutes, String reason, String by) {
+        AuthManager m = manager;
+        if (m == null) return "§cАвторизация не запущена.";
+        return m.banAddressesOf(nameOrUuid, minutes, reason, by);
+    }
+
+    public static String liftAddressBans(String nameOrUuid, String by) {
+        AuthManager m = manager;
+        if (m == null) return "§cАвторизация не запущена.";
+        return m.liftAddressBansOf(nameOrUuid, by);
+    }
+
     /** The registered uuid behind a name, or an empty string. Case-insensitive. */
     public static String uuidOfName(String name) {
         AuthManager m = manager;
@@ -350,8 +378,16 @@ public final class BastionAuth implements DedicatedServerModInitializer {
         AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) ->
                 player instanceof ServerPlayerEntity p && isBlocked(p) ? ActionResult.FAIL : ActionResult.PASS);
 
-        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) ->
-                AuthCommands.register(dispatcher));
+        CommandRegistrationCallback.EVENT.register((dispatcher, registryAccess, environment) -> {
+            AuthCommands.register(dispatcher);
+            dev.bastionauth.command.IpBanCommands.register(dispatcher);
+        });
+
+        // 1.15: address bans live in the database.
+        ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+            AuthManager m = manager;
+            if (m != null) m.reloadIpBans();
+        });
 
         LOGGER.info("BastionAuth loaded");
     }

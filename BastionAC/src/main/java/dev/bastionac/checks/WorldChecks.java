@@ -57,6 +57,9 @@ public final class WorldChecks {
             // FastBreak. An out-of-reach START is ignored, so the timer never
             // starts; well past the range it is also a violation in its own right
             // — a vanilla client raycasts within reach and cannot produce one.
+            // Riding (a chair on a stair included), the server holds the player at the seat while a
+            // client that never sat down walks on (08.11: 54 blocks from the chair). No verdict.
+            if (player.hasVehicle()) reach = 0;
             if (reach > player.getBlockInteractionRange() + 1.0) {
                 d.clearMining();
                 if (reach > player.getBlockInteractionRange() + REACH_FLAG_MARGIN) {
@@ -91,6 +94,7 @@ public final class WorldChecks {
             // sweeps. Rate and aim are the only things left to measure on them.
             double delta = breakingDelta(player, world, pos);
             if (nuker(player, d, pos, delta >= 1.0)) return Action.CANCEL;
+            d.noteTouchedBlock(pos.asLong(), System.currentTimeMillis());
             // Insta-mine: vanilla destroys the block inside this very packet
             // (ServerPlayerInteractionManager -> finishMining "insta mine") and the
             // client, having broken it locally, sends neither STOP nor ABORT. Arming
@@ -115,8 +119,10 @@ public final class WorldChecks {
 
             d.miningPos = pos;
             d.miningStartTick = tick;
+            d.miningStartClientTicks = d.tickEndKind == 1 ? d.currentArrivalTicks : -1;
             d.miningStartDelta = delta;
             d.miningSlot = player.getInventory().getSelectedSlot();
+            d.miningSawGround = player.isOnGround();
             return Action.NONE;
         }
 
@@ -128,6 +134,7 @@ public final class WorldChecks {
         if (a == PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK) {
             BlockPos pos = packet.getPos();
             BlockPos armed = d.miningPos;
+            boolean sawGround = d.miningSawGround;
             d.clearMining();
             if (armed == null || !armed.equals(pos)) return Action.NONE;
 
@@ -150,6 +157,7 @@ public final class WorldChecks {
 
             // The block may have been destroyed by someone else meanwhile.
             if (world.getBlockState(pos).isAir()) return Action.NONE;
+            d.noteTouchedBlock(pos.asLong(), System.currentTimeMillis());
 
             // X-ray statistics: judge the break's shape before FastBreak
             // consumes it — the state (and its neighbours) are still live
@@ -161,7 +169,21 @@ public final class WorldChecks {
             }
 
             double nowDelta = breakingDelta(player, world, pos);
+            // Started in the air, finished on the feet: vanilla digs at ground speed from the tick
+            // the client stands, and after a stalled connection the server's own ground flag can
+            // still be the old one (3.7.0 b21, 11.11).
+            if (sawGround && !player.isOnGround()
+                    && !player.isSubmergedIn(net.minecraft.registry.tag.FluidTags.WATER)) {
+                nowDelta *= 5.0;
+            }
             long elapsed = tick - d.miningStartTick;
+            // How long the client itself dug: its tick ends between the START and this STOP, in the
+            // order they came off the wire. The server's own clock reads a dig that arrived in the
+            // burst after a stall as 0 ticks: all 37 FastBreak flags of 04.11-08.11 (the client had
+            // dug the full time in every one).
+            if (d.miningStartClientTicks >= 0 && d.currentArrivalTicks >= d.miningStartClientTicks) {
+                elapsed = Math.max(elapsed, d.currentArrivalTicks - d.miningStartClientTicks);
+            }
 
             double delta = Math.max(d.miningStartDelta, nowDelta);
             if (delta > 0 && delta < 1.0) {
@@ -209,8 +231,10 @@ public final class WorldChecks {
      * at point-blank the centre alone can be tens of degrees off the crosshair.
      */
     private static boolean nuker(ServerPlayerEntity player, PlayerData d, BlockPos pos, boolean instant) {
-        int distinct = instant ? d.recordBreakAndCountDistinct(pos.asLong(), System.currentTimeMillis()) : 0;
-        if (distinct > 22) {
+        long nowMs = System.currentTimeMillis();
+        int distinct = instant ? d.recordBreakAndCountDistinct(pos.asLong(), nowMs) : 0;
+        // The burst after a stalled connection hands over a second of grass at once (08.11).
+        if (distinct > 22 && !d.netStalledNear(nowMs)) {
             d.nukerBuffer += 1;
             if (d.nukerBuffer >= 2) {
                 d.nukerBuffer = 0;
@@ -220,11 +244,17 @@ public final class WorldChecks {
             d.nukerBuffer = Math.max(0, d.nukerBuffer - 0.5);
         }
 
+        if (d.netStalledNear(d.currentArrivalMs > 0 ? d.currentArrivalMs : nowMs)) return false;
+        // A block overlapping the player's own hitbox (standing in crops/grass/1x1 hole) has its
+        // centre below eye level even when its top half is right in front of the camera.
+        if (player.getBoundingBox().expand(0.35).intersects(new net.minecraft.util.math.Box(pos))) {
+            return false;
+        }
         Vec3d eye = player.getEyePos();
         Vec3d toBlock = Vec3d.ofCenter(pos).subtract(eye);
-        if (toBlock.lengthSquared() > 0.25) {
+        if (toBlock.lengthSquared() > 0.36) {
             double cos = toBlock.normalize().dotProduct(player.getRotationVec(1.0F));
-            if (cos < -0.1) {
+            if (cos < -0.15) {
                 d.nukerAimBuffer += 1;
                 if (d.nukerAimBuffer >= 3) {
                     d.nukerAimBuffer = 1;
@@ -359,6 +389,7 @@ public final class WorldChecks {
      */
     private static boolean interactWalls(ServerPlayerEntity player, PlayerData d, PlayerInteractBlockC2SPacket packet) {
         if (!BastionAC.config().check(CheckType.INTERACTWALLS.key).enabled) return false;
+        if (d.netStalledNear(d.currentArrivalMs > 0 ? d.currentArrivalMs : System.currentTimeMillis())) return false;
         BlockHitResult hit = packet.getBlockHitResult();
         if (hit == null) return false;
         BlockPos target = hit.getBlockPos();
@@ -366,14 +397,15 @@ public final class WorldChecks {
         World world = player.getEntityWorld();
         // Farther than any interaction: the server refuses it anyway, and reach is not this check's business.
         if (player.getEyePos().squaredDistanceTo(point) > 7.0 * 7.0) return false;
-        Boolean seen = seenFromSomewhere(player, d, eye -> seesClick(world, player, eye, point, target));
+        Boolean seen = seenFromSomewhere(player, d, eye -> seesClick(world, player, d, eye, point, target));
         if (seen == null) return false;
         if (seen) {
             interactWallsClean(d);
             return false;
         }
         resync(player, packet);
-        interactWallsViolation(player, d, String.format(Lang.t("клик сквозь блок по %s на %d %d %d"),
+        interactWallsViolation(player, d, target, !XrayTracker.hasAdjacentAir(world, target), String.format(
+                Lang.t("клик сквозь блок по %s на %d %d %d"),
                 world.getBlockState(target).getBlock().getName().getString(),
                 target.getX(), target.getY(), target.getZ()));
         return true;
@@ -387,12 +419,17 @@ public final class WorldChecks {
      */
     private static boolean breakWalls(ServerPlayerEntity player, PlayerData d, PlayerActionC2SPacket packet) {
         if (!BastionAC.config().check(CheckType.INTERACTWALLS.key).enabled) return false;
+        // 08.11: only a dig that starts is a look at a block. Nothing is won by swiping grass through
+        // a wall, and a dig in the burst after a stall was aimed from where the player stood seconds ago.
+        if (packet.getAction() != PlayerActionC2SPacket.Action.START_DESTROY_BLOCK) return false;
+        if (d.netStalledNear(d.currentArrivalMs > 0 ? d.currentArrivalMs : System.currentTimeMillis())) return false;
+        if (player.getEntityWorld().getBlockState(packet.getPos()).getHardness(player.getEntityWorld(), packet.getPos()) == 0.0f) return false;
         BlockPos pos = packet.getPos();
         net.minecraft.util.math.Direction face = packet.getDirection();
         World world = player.getEntityWorld();
-        Vec3d[] points = facePoints(pos, face);
+        Vec3d[] points = targetPoints(world, pos, face);
         Boolean seen = seenFromSomewhere(player, d, eye -> {
-            for (Vec3d p : points) if (seesClick(world, player, eye, p, pos)) return true;
+            for (Vec3d p : points) if (seesClick(world, player, d, eye, p, pos)) return true;
             return false;
         });
         if (seen == null) return false;
@@ -402,15 +439,58 @@ public final class WorldChecks {
         }
         player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.BlockUpdateS2CPacket(pos, world.getBlockState(pos)));
         player.networkHandler.sendPacket(new net.minecraft.network.packet.s2c.play.PlayerActionResponseS2CPacket(packet.getSequence()));
-        interactWallsViolation(player, d, String.format(Lang.t("ломание сквозь блок: %s на %d %d %d"),
+        interactWallsViolation(player, d, pos, !XrayTracker.hasAdjacentAir(world, pos), String.format(
+                Lang.t("ломание сквозь блок: %s на %d %d %d"),
                 world.getBlockState(pos).getBlock().getName().getString(), pos.getX(), pos.getY(), pos.getZ()));
         return true;
+    }
+
+    /**
+     * Where the clicked face can be: on the cell's own face, and for a block that is not a full
+     * cube also on each face of its shape that points the same way. The underside of an
+     * upside-down stair lies half a block inside the cell, in the notch beside the step; judged on
+     * the cell's bottom, it was "covered" by the stone under the stair and the break was refused
+     * as through a wall (InteractWalls 2,0 on cobblestone stairs, 02.11).
+     */
+    static Vec3d[] targetPoints(World world, BlockPos pos, net.minecraft.util.math.Direction face) {
+        Vec3d[] cell = facePoints(pos, face);
+        net.minecraft.util.shape.VoxelShape shape = world.getBlockState(pos).getOutlineShape(world, pos);
+        if (shape.isEmpty() || net.minecraft.block.Block.isShapeFullCube(shape)) return cell;
+        java.util.List<Vec3d> out = new java.util.ArrayList<>(java.util.Arrays.asList(cell));
+        int boxes = 0;
+        for (net.minecraft.util.math.Box b : shape.getBoundingBoxes()) {
+            if (++boxes > 6) break;
+            out.addAll(java.util.Arrays.asList(shapeFacePoints(pos, b, face)));
+        }
+        return out.toArray(new Vec3d[0]);
+    }
+
+    /** The centre and four inset corners of one box's face, a hair outside it, in world space. */
+    static Vec3d[] shapeFacePoints(BlockPos pos, net.minecraft.util.math.Box b, net.minecraft.util.math.Direction face) {
+        double eps = 0.02;
+        double x0 = pos.getX() + b.minX, x1 = pos.getX() + b.maxX;
+        double y0 = pos.getY() + b.minY, y1 = pos.getY() + b.maxY;
+        double z0 = pos.getZ() + b.minZ, z1 = pos.getZ() + b.maxZ;
+        double cx = (x0 + x1) / 2, cy = (y0 + y1) / 2, cz = (z0 + z1) / 2;
+        double ix = (x1 - x0) * 0.45, iy = (y1 - y0) * 0.45, iz = (z1 - z0) * 0.45;
+        boolean pos_ = face.getDirection() == net.minecraft.util.math.Direction.AxisDirection.POSITIVE;
+        double[][] uv = {{0, 0}, {1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+        Vec3d[] out = new Vec3d[uv.length];
+        for (int i = 0; i < uv.length; i++) {
+            double a = uv[i][0], c = uv[i][1];
+            out[i] = switch (face.getAxis()) {
+                case X -> new Vec3d(pos_ ? x1 + eps : x0 - eps, cy + a * iy, cz + c * iz);
+                case Y -> new Vec3d(cx + a * ix, pos_ ? y1 + eps : y0 - eps, cz + c * iz);
+                case Z -> new Vec3d(cx + a * ix, cy + c * iy, pos_ ? z1 + eps : z0 - eps);
+            };
+        }
+        return out;
     }
 
     /** The centre of a block face and four points near its corners, a hair outside the face. */
     static Vec3d[] facePoints(BlockPos pos, net.minecraft.util.math.Direction face) {
         Vec3d c = Vec3d.ofCenter(pos).add(face.getOffsetX() * 0.5, face.getOffsetY() * 0.5, face.getOffsetZ() * 0.5);
-        double[][] uv = {{0, 0}, {0.35, 0.35}, {0.35, -0.35}, {-0.35, 0.35}, {-0.35, -0.35}};
+        double[][] uv = {{0, 0}, {0.45, 0.45}, {0.45, -0.45}, {-0.45, 0.45}, {-0.45, -0.45}};
         Vec3d[] out = new Vec3d[uv.length];
         for (int i = 0; i < uv.length; i++) {
             double a = uv[i][0], b = uv[i][1];
@@ -435,14 +515,16 @@ public final class WorldChecks {
             if (sees.test(player.getEyePos())) return true;
             double eyeH = player.getEyeY() - player.getY();
             double px = player.getX(), py = player.getY(), pz = player.getZ();
+            double dx = px - d.prevMoveX, dy = py - d.prevMoveY, dz = pz - d.prevMoveZ;
             double[][] feet = {
                     {d.prevMoveX, d.prevMoveY, d.prevMoveZ},
-                    {px + (px - d.prevMoveX), py + (py - d.prevMoveY), pz + (pz - d.prevMoveZ)},
+                    {px + dx, py + dy, pz + dz},
+                    {d.prevMoveX - dx, d.prevMoveY - dy, d.prevMoveZ - dz},
             };
             for (double[] f : feet) {
                 // Only a step away: before the first accepted move the previous position is not known.
                 double sx = f[0] - px, sy = f[1] - py, sz = f[2] - pz;
-                if (sx * sx + sy * sy + sz * sz > 4.0) continue;
+                if (sx * sx + sy * sy + sz * sz > 6.25) continue;
                 if (sees.test(new Vec3d(f[0], f[1] + eyeH, f[2]))) return true;
             }
             for (float h : new float[]{1.62f, 1.27f}) {
@@ -456,7 +538,27 @@ public final class WorldChecks {
 
     /** One interaction through a wall: refused by the caller; a streak raises the flag. */
     public static void interactWallsViolation(ServerPlayerEntity player, PlayerData d, String detail) {
-        d.interactWallsBuffer += 1;
+        interactWallsViolation(player, d, null, false, detail);
+    }
+
+    public static void interactWallsViolation(ServerPlayerEntity player, PlayerData d, BlockPos pos, boolean enclosed, String detail) {
+        long now = System.currentTimeMillis();
+        long pingMs = player.networkHandler != null ? Math.max(0, player.networkHandler.getLatency()) : 0;
+        long rttWindow = Math.min(600L, Math.max(180L, pingMs + 150L));
+        if (!enclosed && pos != null) {
+            // While the BlockUpdateS2CPacket from our previous refusal is still in flight to a
+            // high-ping client (200-300 ms), holding the mouse button repeats START/INTERACT on
+            // the same unacknowledged block or immediate neighbour inside the same RTT window.
+            if (pos.asLong() == d.lastInteractWallsRefusePos && now - d.lastInteractWallsRefuseMs < rttWindow) {
+                return;
+            }
+            if (now - d.lastInteractWallsRefuseMs < 120L) {
+                return;
+            }
+        }
+        d.lastInteractWallsRefuseMs = now;
+        if (pos != null) d.lastInteractWallsRefusePos = pos.asLong();
+        d.interactWallsBuffer += enclosed ? 1.5 : 1.0;
         if (d.interactWallsBuffer >= 3) {
             d.interactWallsBuffer = 1;
             BastionAC.flag(player, d, CheckType.INTERACTWALLS, detail);
@@ -468,25 +570,44 @@ public final class WorldChecks {
         d.interactWallsBuffer = Math.max(0, d.interactWallsBuffer - 0.5);
     }
 
+    static boolean seesClick(World world, ServerPlayerEntity player, Vec3d eye, Vec3d point, BlockPos target) {
+        return seesClick(world, player, null, eye, point, target);
+    }
+
     /**
      * Whether nothing stands between the eyes and the clicked point: the
      * client's own ray (block outlines, fluids ignored), run a hair past the
      * point into the clicked block.
      */
-    static boolean seesClick(World world, ServerPlayerEntity player, Vec3d eye, Vec3d point, BlockPos target) {
+    static boolean seesClick(World world, ServerPlayerEntity player, PlayerData d, Vec3d eye, Vec3d point, BlockPos target) {
         Vec3d dir = point.subtract(eye);
         double len = dir.length();
         if (len < 1.0e-3) return true;
         Vec3d end = point.add(dir.multiply(0.02 / len));
-        BlockHitResult r = world.raycast(new net.minecraft.world.RaycastContext(eye, end,
-                net.minecraft.world.RaycastContext.ShapeType.OUTLINE, net.minecraft.world.RaycastContext.FluidHandling.NONE,
-                player));
-        if (r.getType() == net.minecraft.util.hit.HitResult.Type.MISS) return true;
-        if (r.getBlockPos().equals(target)) return true;
-        // The eyes inside a block (crawling, a slab overhead): the client's ray starts there too.
-        if (r.getPos().squaredDistanceTo(eye) < 1.0e-4) return true;
-        // Grazing an edge the clicked block shares with its neighbour.
-        return r.getPos().squaredDistanceTo(point) < 0.05 * 0.05;
+        Vec3d from = eye;
+        long nowMs = System.currentTimeMillis();
+        long recentWindowMs = player != null && player.networkHandler != null
+                ? Math.min(800L, Math.max(350L, player.networkHandler.getLatency() + 250L)) : 350L;
+        // Plants and blocks broken by this player inside the RTT window are not walls.
+        for (int guard = 0; guard < 6; guard++) {
+            BlockHitResult r = world.raycast(new net.minecraft.world.RaycastContext(from, end,
+                    net.minecraft.world.RaycastContext.ShapeType.OUTLINE,
+                    net.minecraft.world.RaycastContext.FluidHandling.NONE, player));
+            if (r.getType() == net.minecraft.util.hit.HitResult.Type.MISS) return true;
+            if (r.getBlockPos().equals(target)) return true;
+            // The eyes inside a block (crawling, a slab overhead): the client's ray starts there too.
+            if (r.getPos().squaredDistanceTo(eye) < 1.0e-4) return true;
+            // Grazing an edge the clicked block shares with its neighbour.
+            if (r.getPos().squaredDistanceTo(point) < 0.08 * 0.08) return true;
+            net.minecraft.block.BlockState hit = world.getBlockState(r.getBlockPos());
+            boolean recentlyTouched = d != null && d.wasRecentlyTouched(r.getBlockPos().asLong(), nowMs, recentWindowMs);
+            if (!recentlyTouched && (!hit.getCollisionShape(world, r.getBlockPos()).isEmpty()
+                    || hit.getHardness(world, r.getBlockPos()) != 0.0f)) {
+                return false;
+            }
+            from = r.getPos().add(dir.multiply(0.01 / len));
+        }
+        return false;
     }
 
     /** Puts back what the client predicted for a refused click: the two blocks, and the sequence it waits for. */

@@ -164,7 +164,7 @@ class ACConfigTest {
                 }
                 """, StandardCharsets.UTF_8);
         ACConfig cfg = ACConfig.loadOrCreate(file, w -> {});
-        assertEquals(16, cfg.general.configVersion);
+        assertEquals(18, cfg.general.configVersion);
         assertFalse(cfg.general.instantMovementSetback);
         assertEquals(8.0, cfg.check("speed").mitigateVl);
         assertTrue(cfg.proactive.alwaysMitigate.contains("spider"));

@@ -34,6 +34,14 @@ public final class TimerBalance {
     /** One vanilla client tick. */
     public static final double TICK_MS = 50.0;
 
+    /**
+     * What an overdraw recovers per client tick, in ms. A settled verdict or a capped stall can
+     * leave an honest client a few hundred ms in the red, and at exactly 20 ticks a second nothing
+     * ever paid that back: 04.11 a player sat at -379 ms for minutes and the next small hiccup was
+     * a second flag. A real timer outruns this: ×1.1 still loses 4 ms a tick.
+     */
+    static final double RECOVERY_MS = 1.0;
+
     private long lastMs = -1;
     private volatile double balance;
     /** Most negative balance since the last {@link #takeWorst()}. */
@@ -61,6 +69,7 @@ public final class TimerBalance {
         if (elapsed < 0) elapsed = 0;
         double b = balance + elapsed - TICK_MS;
         if (b > bankMs) b = bankMs;
+        if (b < 0) b = Math.min(0, b + RECOVERY_MS);
         balance = b;
         if (b < worst) worst = b;
         return b;

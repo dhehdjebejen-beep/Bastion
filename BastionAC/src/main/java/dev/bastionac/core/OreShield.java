@@ -37,6 +37,7 @@ import java.util.Map;
 import java.util.ArrayDeque;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Anti-X-ray and anti-storage-ESP by starving the client (3.6).
@@ -92,9 +93,9 @@ public final class OreShield {
     /** The player the chunk being serialised goes to (set around vanilla's per-player chunk send). */
     private static final ThreadLocal<ServerPlayerEntity> RECIPIENT = new ThreadLocal<>();
     /** player → storage positions sent to them disguised by distance, waiting for a reveal. */
-    private static final Map<UUID, Set<BlockPos>> FAR = new HashMap<>();
+    private static final Map<UUID, Set<BlockPos>> FAR = new ConcurrentHashMap<>();
     /** player → the world those positions are in. */
-    private static final Map<UUID, World> FAR_WORLD = new HashMap<>();
+    private static final Map<UUID, World> FAR_WORLD = new ConcurrentHashMap<>();
 
     private OreShield() {}
 
@@ -247,7 +248,7 @@ public final class OreShield {
     static void noteFar(ServerPlayerEntity to, BlockPos pos) {
         World w = to.getEntityWorld();
         if (FAR_WORLD.put(to.getUuid(), w) != w) FAR.remove(to.getUuid());
-        FAR.computeIfAbsent(to.getUuid(), k -> new HashSet<>()).add(pos.toImmutable());
+        FAR.computeIfAbsent(to.getUuid(), k -> ConcurrentHashMap.newKeySet()).add(pos.toImmutable());
     }
 
     static boolean farFor(ServerPlayerEntity to, World world, BlockPos pos) {

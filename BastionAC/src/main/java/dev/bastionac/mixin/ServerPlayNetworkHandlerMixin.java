@@ -63,7 +63,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
     private PlayerData bastionac$netty(Object packet) {
         if (player == null || !BastionAC.enabled() || player.getEntityWorld().getServer().isOnThread()) return null;
         PlayerData d = BastionAC.data(player);
-        if (d != null) d.arrivals.stamp(packet, System.currentTimeMillis());
+        if (d != null) d.arrivals.stamp(packet, System.currentTimeMillis(), d.clientTicks());
         return d;
     }
 
@@ -89,6 +89,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
         long now = System.currentTimeMillis();
         long at = d.arrivals.arrivalOf(packet, now);
         d.currentArrivalMs = at;
+        d.currentArrivalTicks = d.arrivals.lastTicks();
         return at;
     }
 
@@ -144,6 +145,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
             dev.bastionac.checks.ClientChecks.onRotation(player, d, rawPitch);
             CombatChecks.onRotationSample(player, d, packet.getYaw(player.getYaw()), rawPitch);
         }
+        MovementChecks.clearStaleEmptyUse(player, d);
         if (packet.changesPosition() || packet.changesLook()) {
             // Binary context record per position/rotation packet: timestamp,
             // yaw/pitch, centiblock deltas, state flags. See PlayerContextBuffer.
@@ -357,8 +359,12 @@ public abstract class ServerPlayNetworkHandlerMixin {
         Entity target = packet.getEntity(player.getEntityWorld());
         if (target == null || target == player) return;
         // 3.0: the client must have been shown this entity before it can hit it.
+        // 08.11: the dragon's body parts are never sent as entities — the client makes them itself,
+        // with ids right after the dragon's. A hit on a part is a hit on the dragon the client was
+        // shown; checking the part's own id kicked a player three times in one fight.
+        Entity shown = target instanceof net.minecraft.entity.boss.dragon.EnderDragonPart part ? part.owner : target;
         if (!d.isFullyExempt(BastionAC.serverTick())
-                && !dev.bastionac.core.EntityKnowledge.knows(player.getUuid(), target.getId())) {
+                && !dev.bastionac.core.EntityKnowledge.knows(player.getUuid(), shown.getId())) {
             boolean refuse = BastionAC.flag(player, d, dev.bastionac.core.CheckType.ENTITYPREDICT, String.format(
                     Lang.t("удар по %s (id %d), которую клиенту ещё не показывали — предсказание id (CrystalAura)"),
                     net.minecraft.registry.Registries.ENTITY_TYPE.getId(target.getType()).getPath(), target.getId()));
@@ -401,8 +407,14 @@ public abstract class ServerPlayNetworkHandlerMixin {
             return;
         }
         dev.bastionac.core.PlayerContextBuffer.recordEvent(player, "action", packet.getAction().name());
+        MovementChecks.clearStaleEmptyUse(player, d);
         if (packet.getAction() == PlayerActionC2SPacket.Action.SWAP_ITEM_WITH_OFFHAND) {
             dev.bastionac.checks.ClientChecks.beforeSlotClick(player, d);
+        } else if (packet.getAction() == PlayerActionC2SPacket.Action.STAB
+                && player.isUsingItem()
+                && MovementChecks.isDesyncProneUseItem(player.getActiveItem())) {
+            player.clearActiveItem();
+            d.useAttackStreak = 0;
         }
         if (WorldChecks.onAction(player, d, packet) != Action.NONE) {
             ci.cancel();
@@ -458,6 +470,7 @@ public abstract class ServerPlayNetworkHandlerMixin {
         PlayerData d = BastionAC.data(player);
         if (d == null) return;
         dev.bastionac.telemetry.Telemetry.place(player, packet, bastionac$arrival(d, packet));
+        if (bastionac$isBucket(player.getStackInHand(packet.getHand()))) d.lastWaterBucketTick = BastionAC.serverTick();
         if (dev.bastionac.core.FreezeManager.blocksActions(player)) {
             ci.cancel();
             return;
@@ -482,7 +495,23 @@ public abstract class ServerPlayNetworkHandlerMixin {
         if (bastionac$deadAction(ci)) return;
         if (!bastionac$ready()) return;
         PlayerData d = BastionAC.data(player);
-        if (d != null) dev.bastionac.telemetry.Telemetry.useItem(player, packet, bastionac$arrival(d, packet));
+        if (d != null) {
+            dev.bastionac.telemetry.Telemetry.useItem(player, packet, bastionac$arrival(d, packet));
+            long tick = BastionAC.serverTick();
+            // A vanilla client never right-clicks while it holds an item in use. A click while the
+            // server still has the shield up means the client put it down long ago without the server
+            // hearing of it (08.11: NoSlow at VL 31 on a player walking with a shield in the off hand).
+            if (!MovementChecks.clearStaleEmptyUse(player, d)
+                    && player.isUsingItem()
+                    && MovementChecks.isDesyncProneUseItem(player.getActiveItem())) {
+                player.clearActiveItem();
+            }
+            if (bastionac$isBucket(player.getStackInHand(packet.getHand()))) d.lastWaterBucketTick = tick;
+        }
+    }
+
+    private static boolean bastionac$isBucket(net.minecraft.item.ItemStack stack) {
+        return stack.isOf(net.minecraft.item.Items.WATER_BUCKET) || stack.isOf(net.minecraft.item.Items.POWDER_SNOW_BUCKET);
     }
 
     @Inject(method = "onCommandExecution", at = @At("HEAD"), cancellable = true)

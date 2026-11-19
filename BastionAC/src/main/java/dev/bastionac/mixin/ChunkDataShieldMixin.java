@@ -24,18 +24,18 @@ public abstract class ChunkDataShieldMixin {
     @Redirect(method = "getSectionsPacketSize", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/chunk/WorldChunk;getSectionArray()[Lnet/minecraft/world/chunk/ChunkSection;"))
     private static ChunkSection[] bastionac$sizeSections(WorldChunk chunk) {
-        return OreShield.sectionsForSize(chunk);
+        return dev.bastionac.core.Guard.call("ore shield", () -> OreShield.sectionsForSize(chunk), chunk.getSectionArray());
     }
 
     @Redirect(method = "writeSections", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/chunk/WorldChunk;getSectionArray()[Lnet/minecraft/world/chunk/ChunkSection;"))
     private static ChunkSection[] bastionac$writeSections(WorldChunk chunk) {
-        return OreShield.sectionsForWrite(chunk);
+        return dev.bastionac.core.Guard.call("ore shield", () -> OreShield.sectionsForWrite(chunk), chunk.getSectionArray());
     }
 
     @Redirect(method = "<init>(Lnet/minecraft/world/chunk/WorldChunk;)V", at = @At(value = "INVOKE",
             target = "Lnet/minecraft/world/chunk/WorldChunk;getBlockEntities()Ljava/util/Map;"))
     private Map<BlockPos, BlockEntity> bastionac$blockEntities(WorldChunk chunk) {
-        return OreShield.blockEntities(chunk, chunk.getBlockEntities());
+        return dev.bastionac.core.Guard.call("ore shield", () -> OreShield.blockEntities(chunk, chunk.getBlockEntities()), chunk.getBlockEntities());
     }
 }

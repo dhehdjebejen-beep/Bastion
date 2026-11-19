@@ -114,4 +114,42 @@ class NoSlowVanillaStepTest {
         }
         assertTrue(flags(h, dy, g, true) >= 1);
     }
+
+    @Test
+    void staleEmptyUseIsClearedImmediatelyIncludingTrackingState() {
+        dev.bastionac.core.PlayerData d = new dev.bastionac.core.PlayerData(java.util.UUID.randomUUID(), "TestPlayer");
+        d.usingItemSinceTick = 531_250L;
+        d.noSlowShadow = 0.22;
+        d.noSlowBuffer = 4.0;
+        d.useAttackStreak = 3;
+        boolean[] cleared = {false};
+
+        boolean didClear = MovementChecks.clearStaleEmptyUse(true, true, d, () -> cleared[0] = true);
+        assertTrue(didClear);
+        assertTrue(cleared[0]);
+        assertEquals(-1L, d.usingItemSinceTick);
+        assertEquals(-1.0, d.noSlowShadow);
+        assertEquals(0.0, d.noSlowBuffer);
+        assertEquals(0, d.useAttackStreak);
+    }
+
+    @Test
+    void activeNonEmptyUseIsNotCleared() {
+        dev.bastionac.core.PlayerData d = new dev.bastionac.core.PlayerData(java.util.UUID.randomUUID(), "legit");
+        d.usingItemSinceTick = 100L;
+        d.noSlowShadow = 0.08;
+        d.noSlowBuffer = 2.0;
+        d.useAttackStreak = 1;
+        boolean[] cleared = {false};
+
+        org.junit.jupiter.api.Assertions.assertFalse(
+                MovementChecks.clearStaleEmptyUse(true, false, d, () -> cleared[0] = true));
+        org.junit.jupiter.api.Assertions.assertFalse(
+                MovementChecks.clearStaleEmptyUse(false, true, d, () -> cleared[0] = true));
+        org.junit.jupiter.api.Assertions.assertFalse(cleared[0]);
+        assertEquals(100L, d.usingItemSinceTick);
+        assertEquals(0.08, d.noSlowShadow);
+        assertEquals(2.0, d.noSlowBuffer);
+        assertEquals(1, d.useAttackStreak);
+    }
 }

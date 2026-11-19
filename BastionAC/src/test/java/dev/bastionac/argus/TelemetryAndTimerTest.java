@@ -131,6 +131,29 @@ class TelemetryAndTimerTest {
     }
 
     @Test
+    void longStallNetsOutWithTheWiderBank() {
+        TimerBalance t = new TimerBalance();
+        long now = 0;
+        double worst = 0;
+        for (int i = 0; i < 200; i++) worst = Math.min(worst, t.onTick(now += 50, 10_000));
+        now += 4300;   // 04.11: a mobile connection froze for 4.3 s
+        for (int i = 0; i < 86; i++) worst = Math.min(worst, t.onTick(now, 10_000));
+        for (int i = 0; i < 100; i++) worst = Math.min(worst, t.onTick(now += 50, 10_000));
+        assertTrue(worst > -100, "a stall and its burst must net out, worst " + worst);
+    }
+
+    @Test
+    void anOverdrawHealsAtTwentyTicks() {
+        TimerBalance t = new TimerBalance();
+        long now = 0;
+        t.onTick(now, 10_000);
+        for (int i = 0; i < 7; i++) t.onTick(now, 10_000);   // a burst leaves it about -350
+        assertTrue(t.balance() < -300);
+        for (int i = 0; i < 400; i++) t.onTick(now += 50, 10_000);
+        assertEquals(0.0, t.balance(), 0.001, "an honest 20 ticks a second pays the overdraw back");
+    }
+
+    @Test
     void arrivalClockMatchesByIdentity() {
         ArrivalClock c = new ArrivalClock();
         Object a = new Object(), b = new Object(), lost = new Object(), cc = new Object();

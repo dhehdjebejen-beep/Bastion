@@ -21,10 +21,12 @@ server — players join with an unmodified client and install nothing.
 
 ## The idea
 
-- **Light, as measured.** On a two-core server with 50 players BastionAC adds
-  +0.6 % of one core to the load — within the scatter of the measurement; Grim
-  adds +11.6 % in the same benchmark. Method, repeats, limits and the scripts to
-  reproduce it are in the [benchmark report](BastionAC/BENCHMARK.md).
+- **Light, as measured.** On a two-core server with 50 players BastionAC 4.0 adds
+  +5.8 % of one core across rotated runs (MSPT 40.1 ms vs 41.6 ms plain); Grim
+  adds +6.3 % in the same rotated setup, and rises to +11.6 % / 24.5 ms when
+  players cluster in 32 blocks while BastionAC stays at 17.6 ms. Method,
+  repeats, limits and the scripts to reproduce it are in the
+  [benchmark report](BastionAC/BENCHMARK.md).
 - **Zero trust towards every player.** Before login a player gets nothing: no
   world (empty chunks instead), no chat, no inventory, no commands, no packets
   for their own mods. Trust is never granted for a name, an IP or a "premium"
@@ -62,9 +64,9 @@ server — players join with an unmodified client and install nothing.
 
 | Module | Version | In one line |
 |---|---|---|
-| [**BastionAuth**](BastionAuth) | 1.14.0 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection, a growing per-IP account quota, sessions bound to IP, client profile and launcher installation. Before the password the player waits in spectator mode, away from their real location, and gets empty chunks instead of the world. |
-| [**BastionClaims**](BastionClaims) | 1.21.0 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers and crafters, explosions, fire, projectiles, falling blocks, griefing mobs, allays, copper golems, portals, fishing rods, sculk. Member roles inside a claim, a protected spawn zone, and flags split between owners and staff. Also includes an operator WorldEdit with undo. |
-| [**BastionAC**](BastionAC) | 3.7.0 | Anti-cheat engine: 41 checks, buffered violation levels with decay, lag-compensated combat, protocol invariants, Meteor and Wurst signatures. Full session telemetry and **Argus**, an analytical investigation that reads a player's session and returns a verdict; its model is trained in Argus Lab on synthetic and real sessions and looks at the worst fight of a session (cheats switched on for one fight). A **proactive mode** lets the checks only raise signals while Argus's verdict switches the sanctions on within seconds. 3.7 adds an **info shield**: enclosed ores, buried and far storage, players and items behind walls are not sent to the client. Exploits (book/NBT bombs, creative smuggling, packet floods) are blocked at the protocol. |
+| [**BastionAuth**](BastionAuth) | 1.15.0 | Login and registration for offline-mode servers: Argon2id with a server pepper, a packet firewall before login, TOTP 2FA, multi-account detection with daily ledger recount, address bans (`/банip`) and full login IP history for staff dossiers, a growing per-IP account quota, sessions bound to IP, client profile and launcher installation. Before the password the player waits in spectator mode, away from their real location, and gets empty chunks instead of the world. |
+| [**BastionClaims**](BastionClaims) | 1.21.0 | Land claims protected by server-side mixins, not only client callbacks: pistons, fluids, hoppers, dispensers and crafters, explosions, fire (including extinguishing legacy lava/lightning fire on claims/spawn), projectiles, falling blocks, griefing mobs, allays, copper golems, portals, fishing rods, sculk. Member roles inside a claim, a protected spawn zone, teleport warmup integration, and flags split between owners and staff. Also includes an operator WorldEdit with undo. |
+| [**BastionAC**](BastionAC) | 4.0.0 | Anti-cheat engine: live checks with decay buffers, lag-compensated combat, protocol invariants, Meteor and Wurst signatures, and an **InfoShield** hiding enclosed ores, far/buried storage, walls-occluded players and items. **Argus 4.0** adds causal offline movement and combat prediction engines (59 features, `lab-4.0.0` FISTA prior), quantized single-use teleport handshake verification, and runtime spear-range/threading hardening without adding tick-thread lag. |
 
 Each mod works on its own. When they run together, they talk through soft
 reflection bridges, and no mod has a hard dependency on another:
@@ -143,7 +145,7 @@ To install, put the jar into the server's `mods/` folder next to
 
 ## Tests
 
-The repository has 413 unit tests: 106 in BastionAuth, 72 in BastionClaims and 235
+The repository has 535 unit tests: 112 in BastionAuth, 72 in BastionClaims and 351
 in BastionAC. Run them with `./gradlew test` in a module folder.
 The Argus model is trained and measured on the Argus Lab bench
 (`./gradlew argusLab` in `BastionAC`).

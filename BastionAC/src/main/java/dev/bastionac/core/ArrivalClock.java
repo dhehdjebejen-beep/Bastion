@@ -22,14 +22,23 @@ public final class ArrivalClock {
     private static final int SIZE = 512;
     private final int[] keys = new int[SIZE];
     private final long[] times = new long[SIZE];
+    /** The client's tick count when each packet came in (tick ends seen before it on the wire). */
+    private final long[] ticks = new long[SIZE];
+    private long lastTicks = -1;
     private long head;   // next write
     private long tail;   // oldest unconsumed
 
     /** Netty thread: this packet arrived now. */
     public synchronized void stamp(Object packet, long nowMs) {
+        stamp(packet, nowMs, -1);
+    }
+
+    /** Netty thread: this packet arrived now, after {@code clientTicks} tick ends. */
+    public synchronized void stamp(Object packet, long nowMs, long clientTicks) {
         int i = (int) (head % SIZE);
         keys[i] = System.identityHashCode(packet);
         times[i] = nowMs;
+        ticks[i] = clientTicks;
         head++;
         if (head - tail > SIZE) tail = head - SIZE;   // overrun: forget the oldest
     }
@@ -45,10 +54,17 @@ public final class ArrivalClock {
             int i = (int) (k % SIZE);
             if (keys[i] == key) {
                 tail = k + 1;
+                lastTicks = ticks[i];
                 return times[i];
             }
         }
+        lastTicks = -1;
         return fallbackMs;
+    }
+
+    /** The client tick count stamped on the packet {@link #arrivalOf} last found, or -1. */
+    public synchronized long lastTicks() {
+        return lastTicks;
     }
 
     /** Stamps still waiting for the server thread (diagnostics). */

@@ -78,6 +78,24 @@ public final class Features {
     }
 
     static {
+        add(new Spec("move.pred_offset", Category.MOVEMENT, Agg.RATE, 1, 0, .05, .05, 300, 150, 1.2, false,
+                "невязка пошагового движения", "%", 100));
+        add(new Spec("pred.input_offset", Category.MOVEMENT, Agg.RATE, 1, 0, .05, .05, 300, 150, 1, false,
+                "невязка движения по клавишам", "%", 100));
+        add(new Spec("pred.noslow", Category.MOVEMENT, Agg.RATE, 1, 0, .04, .04, 100, 30, 1.2, false,
+                "движение вопреки замедлению предметом", "%", 100));
+        add(new Spec("pred.kb_ignore", Category.MOVEMENT, Agg.RATE, 1, 0, .08, .08, 12, 6, 1.2, false,
+                "непринятый импульс при уроне", "%", 100));
+        add(new Spec("cmb.hitbox_miss", Category.COMBAT, Agg.RATE, 1, 0, .05, .05, 50, 30, 1.2, false,
+                "промах луча мимо видимого хитбокса", "%", 100));
+        add(new Spec("cmb.backtrack", Category.COMBAT, Agg.RATE, 1, 0, .04, .04, 40, 20, 1.2, false,
+                "попадание только в устаревший хитбокс", "%", 100));
+        add(new Spec("cmb.snap_back", Category.COMBAT, Agg.RATE, 1, 0, .02, .02, 300, 100, 1, false,
+                "симметричный возврат прицела", "%", 100));
+        add(new Spec("cmb.angular_jerk", Category.COMBAT, Agg.P95, 1, 60000, 40000, 30000, 300, 100, .6, false,
+                "угловой рывок прицела", "", 1));
+        add(new Spec("cmb.step_entropy", Category.COMBAT, Agg.MEDIAN, -1, 2.5, .4, .4, 10, 5, .6, false,
+                "энтропия шагов поворота", "", 1));
         // ---------------------------------------------------------- movement (physics replay)
         add(new Spec("move.air_gain", Category.MOVEMENT, Agg.RATE, 1, 0.003, 0.006, 0.003, 400, 150, 1.2, false,
                 Lang.k("разгон в воздухе сверх ванильного"), "%", 100));
@@ -100,6 +118,19 @@ public final class Features {
         // 3.4: a single packet farther sideways than any foot covers in a tick — ClickTP.
         add(new Spec("move.teleport", Category.MOVEMENT, Agg.PER_HOUR, 1, 0.0, 0.5, 0.5, 0.3, 0.05, 1.5, true,
                 Lang.k("телепорт пешком (больше 2 бл за тик)"), Lang.k("/ч"), 1));
+        add(new Spec("move.air_jump", Category.MOVEMENT, Agg.PER_HOUR, 1, 0.0, 0.5, 0.5, 0.3, 0, 1.2, false,
+                Lang.k("повторный прыжок во время подъёма без опоры"), Lang.k("/ч"), 1));
+        add(new Spec("move.wall_climb", Category.MOVEMENT, Agg.RATE, 1, 0, .02, .02, 6, 6, 1.2, false,
+                Lang.k("устойчивый подъём вдоль стены без лестницы и опоры"), "%", 100));
+
+        // Vehicles have their own server STATE stream; these supports are seconds,
+        // not passenger movement packets. All remain soft because hull geometry is absent.
+        add(new Spec("veh.land_speed", Category.MOVEMENT, Agg.RATE, 1, 0, 0.04, 0.04, 6, 3, 1.2, false,
+                Lang.k("лодка: скорость по суше сверх трения и вёсел"), "%", 100));
+        add(new Spec("veh.rise", Category.MOVEMENT, Agg.RATE, 1, 0, 0.04, 0.04, 4, 2, 1.2, false,
+                Lang.k("лодка: устойчивый подъём вне воды"), "%", 100));
+        add(new Spec("veh.hover", Category.MOVEMENT, Agg.RATE, 1, 0, 0.04, 0.04, 5, 3, 1.0, false,
+                Lang.k("лодка: зависание после подъёма над сушей"), "%", 100));
 
         // ---------------------------------------------------------- packets & timing
         add(new Spec("pkt.tick_rate", Category.PACKETS, Agg.MEDIAN, 1, 20.0, 0.12, 0.08, 20, 6, 1.6, true,
@@ -153,7 +184,9 @@ public final class Features {
         // learned on the old linear value are not compared with it.
         add(new Spec("cmb.click_rhythm", Category.COMBAT, Agg.LOG_CV, -1, -1.2, 0.35, 0.25, 60, 25, 0.9, false,
                 Lang.k("ровность кликов (ln вариации, без пауз)"), "", 1));
-        add(new Spec("cmb.rhythm_kurt", Category.COMBAT, Agg.KURTOSIS, -1, 2.0, 1.5, 1.0, 60, 30, 0.6, false,
+        // Excess kurtosis is bounded below by -2; a 1.5 scale made the cold
+        // threshold (-2.5) unreachable even for a bounded uniform oscillator.
+        add(new Spec("cmb.rhythm_kurt", Category.COMBAT, Agg.KURTOSIS, -1, 2.0, 1.0, 1.0, 60, 30, 0.6, false,
                 Lang.k("форма распределения кликов (эксцесс)"), "", 1));
         // Weight 1.6 (was 1.2) since high-ping hits are set aside: a p95 well
         // past vanilla's 3 blocks on a low ping is now worth a look by itself.
@@ -166,13 +199,15 @@ public final class Features {
         add(new Spec("cmb.blind_hit", Category.COMBAT, Agg.RATE, 1, 0.01, 0.03, 0.02, 40, 15, 1.0, false,
                 Lang.k("удары по целям вне поля зрения"), "%", 100));
         add(new Spec("cmb.yaw_wrap", Category.COMBAT, Agg.PER_HOUR, 1, 0.0, 0.5, 0.5, 0.3, 0.05, 1.4, true,
-                Lang.k("поворот, перескочивший через 360° (подмена прицела)"), Lang.k("/ч"), 1));
+                Lang.k("вращение рывком больше 360° за пакет (spinbot)"), Lang.k("/ч"), 1));
         add(new Spec("cmb.yaw_grid", Category.COMBAT, Agg.RATE, 1, 0.001, 0.004, 0.003, 2000, 300, 0.8, false,
                 Lang.k("взгляд ровно по 45° (бот, Baritone)"), "%", 100));
 
         // ---------------------------------------------------------- mining
         add(new Spec("mine.wall_breaks", Category.MINING, Agg.RATE, 1, 0.0, 0.004, 0.003, 150, 30, 1.6, true,
                 Lang.k("ломание блоков, закрытых со всех сторон"), "%", 100));
+        add(new Spec("mine.hidden_probe", Category.MINING, Agg.RATE, 1, 0, .01, .01, 20, 15, 1.2, false,
+                Lang.k("частый скрытый перебор далёких блоков без слома"), "%", 100));
         add(new Spec("mine.reveal_z", Category.MINING, Agg.Z, 1, 0, 1, 1, 6, 1, 1.4, false,
                 Lang.k("руда, вскрытая туннелями, против случайного копания"), "σ", 1));
         add(new Spec("mine.diamond_reveal_z", Category.MINING, Agg.Z, 1, 0, 1, 1, 4, 0.5, 1.4, false,

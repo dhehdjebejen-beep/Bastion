@@ -8,6 +8,8 @@
     "ServerPlayNetworkHandlerMixin",
     "BlockItemPlacementOutcomeMixin",
     "GameModeChangeMixin",
+    "MobTeleportMixin",
+    "ShulkerTeleportMixin",
     "PlayNetworkHandlerAccessor",
     "CommonNetworkHandlerAccessor",
     "TrackedHealthAccessor",

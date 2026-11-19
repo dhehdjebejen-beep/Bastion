@@ -177,8 +177,16 @@ class AccountLinkerLiveTest {
         // only the password signal can connect them.
         List<AccountLinker.Candidate> out = linker.analyse(
                 joinerUuid, "joiner", "device-hash-new", "ip-hmac-eee", PW_FP_X, now, db, now);
-        // 40 (password) alone is below 50: reported only when it compounds.
-        assertTrue(out.isEmpty(), "password alone must stay below the report line");
+        // 08.11: a password only these two accounts use is "possible" — on the ledger, still below the
+        // LIKELY line staff are told from. Shared by a third account it is a common password: nothing.
+        assertEquals(1, out.size(), "a password nobody else uses is a possible link");
+        assertEquals(AccountLinker.Grade.POSSIBLE, linker.grade(out.get(0).score()));
+        assertTrue(out.get(0).rarePassword);
+
+        insertUser(strangerUuid, "stranger", now - 90L * 24 * 3_600_000L, "ip-hmac-fff", PW_FP_X);
+        List<AccountLinker.Candidate> common = linker.analyse(
+                joinerUuid, "joiner", "device-hash-new", "ip-hmac-eee", PW_FP_X, now, db, now);
+        assertTrue(common.isEmpty(), "a password three accounts share proves nothing alone");
     }
 
     @Test

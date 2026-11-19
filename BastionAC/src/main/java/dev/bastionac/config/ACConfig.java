@@ -126,10 +126,12 @@ public final class ACConfig {
         /**
          * Timer by balance: the most credit a pause can buy. A network stall
          * of up to this long followed by its burst is never a flag; a longer
-         * one is simply capped. Three seconds covers every stall in the logs
-         * (the longest honest one was 1,9 s).
+         * one is simply capped. Three seconds used to be enough, until a mobile
+         * connection stalled for 4,3 s on 04.11: the 1,7 s the cap took away
+         * came out as a timer, and as a ban. 08.11 two stalls of 10,5 s did the same
+         * to the 10 s bank: now as long as the game itself waits before a time-out.
          */
-        public int timerLagBankMs = 3000;
+        public int timerLagBankMs = 30_000;
         /**
          * Hard ceiling on attacks per second. Anything above it is refused
          * outright (the hit never lands) and feeds VL at a rate proportional to
@@ -305,7 +307,7 @@ public final class ACConfig {
     }
 
     /** Current schema revision — see {@link General#configVersion}. */
-    public static final int CONFIG_VERSION = 16;
+    public static final int CONFIG_VERSION = 18;
 
     /** Telemetry v2: the per-session recording the analyzer and the owner read. */
     public static final class TelemetryCfg {
@@ -415,7 +417,8 @@ public final class ACConfig {
      * staff alerts within {@code alertWindowMinutes}, they are temp-banned via
      * the vanilla ban list. The duration escalates by how many bans they
      * already have within {@code banHistoryHours}, stepping through
-     * {@code banStepsHours} (by default 2 h → 12 h → 48 h → 2 weeks → 30 days).
+     * {@code banStepsMinutes} (15 min → 1 h → 6 h → 1 day); with heavy evidence
+     * through {@code heavyBanStepsMinutes}.
      */
     /**
      * Only checks with a live track record drive the automatic tempban. Every
@@ -470,11 +473,18 @@ public final class ACConfig {
         /** How far back prior bans count for escalation. Two weeks: the old
          *  72h window let a banned player's ladder fully reset inside a week. */
         public int banHistoryHours = 336;
-        /** Escalation ladder, tightened and extended: 2h → 12h → 48h → 2wk → 30d. */
-        public java.util.List<Integer> banStepsHours = new java.util.ArrayList<>(java.util.List.of(2, 12, 48, 336, 720));
+        /**
+         * The ladder, in minutes (04.11, the owner's word): almost every alert is read by a person
+         * anyway, and a first automatic ban may be a bad connection.
+         */
+        public java.util.List<Integer> banStepsMinutes = new java.util.ArrayList<>(java.util.List.of(15, 60, 360, 1440));
+        /** Evidence no connection can explain (a burned chain, an impossible fact): it goes further. */
+        public java.util.List<Integer> heavyBanStepsMinutes = new java.util.ArrayList<>(java.util.List.of(60, 360, 1440, 10080, 43200));
         /** Checks whose alerts never count toward the auto-tempban (FP-prone / mod-sensitive). */
         public java.util.List<String> banExcludedChecks = new java.util.ArrayList<>(BAN_EXCLUDED_DEFAULT);
         public boolean broadcastBan = true;
+        /** A case the owner marks "cheater" bans for this long (08.11: three weeks). */
+        public int confirmedCheatBanDays = 21;
         public String banReason = Lang.k("&cАвтоблокировка BastionAC за читы. Если это ошибка — напишите администрации.");
 
         /**
@@ -704,7 +714,11 @@ public final class ACConfig {
         if (cfg == null) cfg = new ACConfig();
         cfg.fillDefaults();
         cfg.clamp();
-        if (existed && previousVersion < CONFIG_VERSION) {
+        if (existed && previousVersion == 15) {
+            // Only the v16 step: say what it did, not the generic text about new checks.
+            warn.accept("config.json migrated to schema v16: instantMovementSetback was turned off,"
+                    + " so a setback now waits for each check's mitigateVl. Thresholds were left alone.");
+        } else if (existed && previousVersion < CONFIG_VERSION) {
             String detail = previousVersion < RETUNE_VERSION
                     ? "thresholds of the retuned checks " + V2_RETUNED + " were reset to defaults, and every"
                     : "new checks were added and";
@@ -735,8 +749,11 @@ public final class ACConfig {
         if (proactive.alwaysMitigate == null) proactive.alwaysMitigate = new java.util.ArrayList<>(ALWAYS_MITIGATE_DEFAULT);
         if (messages == null) messages = new Messages();
         if (punishment == null) punishment = new Punishment();
-        if (punishment.banStepsHours == null || punishment.banStepsHours.isEmpty()) {
-            punishment.banStepsHours = new java.util.ArrayList<>(java.util.List.of(2, 12, 48, 336, 720));
+        if (punishment.banStepsMinutes == null || punishment.banStepsMinutes.isEmpty()) {
+            punishment.banStepsMinutes = new java.util.ArrayList<>(java.util.List.of(15, 60, 360, 1440));
+        }
+        if (punishment.heavyBanStepsMinutes == null || punishment.heavyBanStepsMinutes.isEmpty()) {
+            punishment.heavyBanStepsMinutes = new java.util.ArrayList<>(java.util.List.of(60, 360, 1440, 10080, 43200));
         }
         if (punishment.banExcludedChecks == null) {
             punishment.banExcludedChecks = new java.util.ArrayList<>(BAN_EXCLUDED_DEFAULT);
@@ -777,6 +794,14 @@ public final class ACConfig {
                 if (!punishment.banExcludedChecks.contains(key)) {
                     punishment.banExcludedChecks.add(key);
                 }
+            }
+            if (general.configVersion < 18) {
+                // v18 (08.11.2026): a stall longer than 10 s still read as a timer.
+                if (general.timerLagBankMs == 10_000 || general.timerLagBankMs == 3000) general.timerLagBankMs = 30_000;
+            }
+            if (general.configVersion < 17) {
+                // v17 (04.11.2026): a stall longer than the old 3 s bank read as a timer.
+                if (general.timerLagBankMs == 3000) general.timerLagBankMs = 10_000;
             }
             if (general.configVersion < 16) {
                 // v16 (02.11.2026): instant setbacks off again, on the owner's word. With them on,
@@ -904,7 +929,7 @@ public final class ACConfig {
         if (general.timerMaxAheadMs <= 0) general.timerMaxAheadMs = 400;
         general.timerMaxAheadMs = clampInt(general.timerMaxAheadMs, 100, 5000);
         if (general.timerLagBankMs <= 0) general.timerLagBankMs = 3000;
-        general.timerLagBankMs = clampInt(general.timerLagBankMs, 500, 20_000);
+        general.timerLagBankMs = clampInt(general.timerLagBankMs, 500, 60_000);
         telemetry.retentionDays = clampInt(telemetry.retentionDays <= 0 ? 30 : telemetry.retentionDays, 1, 365);
         telemetry.maxTotalMb = clampInt(telemetry.maxTotalMb <= 0 ? 3072 : telemetry.maxTotalMb, 64, 1_000_000);
         telemetry.maxSessionMb = clampInt(telemetry.maxSessionMb <= 0 ? 200 : telemetry.maxSessionMb, 10, 4096);
@@ -965,7 +990,8 @@ public final class ACConfig {
         if (punishment.chainBanDistinctChecks <= 0) punishment.chainBanDistinctChecks = 3;
         punishment.chainBanDistinctChecks = clampInt(punishment.chainBanDistinctChecks,
                 punishment.chainWatchDistinctChecks, 10);
-        punishment.banStepsHours.replaceAll(h -> clampInt(h == null ? 1 : h, 1, 8760));
+        punishment.banStepsMinutes.replaceAll(m -> clampInt(m == null ? 15 : m, 1, 525_600));
+        punishment.heavyBanStepsMinutes.replaceAll(m -> clampInt(m == null ? 60 : m, 1, 525_600));
         for (CheckCfg c : checks.values()) {
             c.weight = clampD(c.weight, 0.1, 50);
             c.alertVl = clampD(c.alertVl, 0.5, 1000);

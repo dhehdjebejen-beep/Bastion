@@ -155,6 +155,181 @@ public final class Database implements AutoCloseable {
                       strict_login INTEGER NOT NULL DEFAULT 0,
                       set_at INTEGER NOT NULL DEFAULT 0
                     )""");
+            // 1.15 (owner 12.11): the full address of every login, for the staff dossier and for
+            // address bans. Until now only an HMAC and a mask were kept: two players of one carrier
+            // look alike in the first two numbers, and the last two are what tells them apart.
+            st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS ip_history (
+                      uuid TEXT NOT NULL,
+                      ip_hmac TEXT NOT NULL,
+                      ip TEXT,
+                      ip_masked TEXT,
+                      first_seen INTEGER NOT NULL,
+                      last_seen INTEGER NOT NULL,
+                      logins INTEGER NOT NULL DEFAULT 1,
+                      PRIMARY KEY (uuid, ip_hmac)
+                    )""");
+            // Bans of addresses. Keyed by the HMAC so an address only ever stored as an HMAC
+            // (every login before 1.15) can be banned too.
+            // 12.11: pairs the current model no longer links leave the ledger for here — kept,
+            // never deleted, but no longer shown or counted.
+            st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS account_links_archive (
+                      pair_key TEXT NOT NULL,
+                      uuid_a TEXT NOT NULL,
+                      uuid_b TEXT NOT NULL,
+                      name_a TEXT,
+                      name_b TEXT,
+                      best_score INTEGER NOT NULL,
+                      best_grade TEXT NOT NULL,
+                      best_signals TEXT,
+                      last_score INTEGER NOT NULL,
+                      last_signals TEXT,
+                      first_seen INTEGER NOT NULL,
+                      last_seen INTEGER NOT NULL,
+                      times INTEGER NOT NULL,
+                      verdict TEXT,
+                      verdict_by TEXT,
+                      verdict_at INTEGER NOT NULL DEFAULT 0,
+                      verdict_note TEXT,
+                      archived_at INTEGER NOT NULL,
+                      archived_reason TEXT
+                    )""");
+            st.executeUpdate("""
+                    CREATE TABLE IF NOT EXISTS ip_bans (
+                      id INTEGER PRIMARY KEY AUTOINCREMENT,
+                      ip_hmac TEXT NOT NULL,
+                      ip TEXT,
+                      uuid TEXT,
+                      name TEXT,
+                      reason TEXT,
+                      banned_by TEXT,
+                      created_at INTEGER NOT NULL,
+                      expires_at INTEGER NOT NULL DEFAULT 0,
+                      lifted_at INTEGER NOT NULL DEFAULT 0
+                    )""");
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 1.15: full addresses and address bans
+    // ------------------------------------------------------------------
+
+    public record IpRow(String ipHmac, String ip, String ipMasked, long firstSeen, long lastSeen, int logins) {}
+
+    /** One login from an address: inserted, or its last-seen and counter moved on. */
+    public synchronized void recordIp(String uuid, String ipHmac, String ip, String ipMasked, long now) {
+        try (PreparedStatement ps = conn.prepareStatement("""
+                INSERT INTO ip_history (uuid, ip_hmac, ip, ip_masked, first_seen, last_seen, logins)
+                VALUES (?, ?, ?, ?, ?, ?, 1)
+                ON CONFLICT(uuid, ip_hmac) DO UPDATE SET
+                  ip = COALESCE(excluded.ip, ip_history.ip),
+                  ip_masked = COALESCE(excluded.ip_masked, ip_history.ip_masked),
+                  last_seen = excluded.last_seen,
+                  logins = ip_history.logins + 1""")) {
+            ps.setString(1, uuid);
+            ps.setString(2, ipHmac);
+            ps.setString(3, ip);
+            ps.setString(4, ipMasked);
+            ps.setLong(5, now);
+            ps.setLong(6, now);
+            ps.executeUpdate();
+        } catch (SQLException ignored) {
+        }
+    }
+
+    /**
+     * Every address known for an account, newest first. Addresses older than 1.15 come from the
+     * registration, the last login and the saved session: HMAC and mask only, no full address.
+     */
+    public synchronized java.util.List<IpRow> ipHistoryOf(String uuid) {
+        java.util.Map<String, IpRow> out = new java.util.LinkedHashMap<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT ip_hmac, ip, ip_masked, first_seen, last_seen, logins FROM ip_history WHERE uuid = ? ORDER BY last_seen DESC")) {
+            ps.setString(1, uuid);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.put(rs.getString(1), new IpRow(rs.getString(1), rs.getString(2), rs.getString(3),
+                            rs.getLong(4), rs.getLong(5), rs.getInt(6)));
+                }
+            }
+        } catch (SQLException ignored) {
+        }
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT reg_ip_hmac, created_at, last_ip_hmac, last_login_at, last_ip_masked FROM users WHERE uuid = ?")) {
+            ps.setString(1, uuid);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (rs.next()) {
+                    String reg = rs.getString(1);
+                    if (reg != null && !out.containsKey(reg)) {
+                        out.put(reg, new IpRow(reg, null, null, rs.getLong(2), rs.getLong(2), 0));
+                    }
+                    String last = rs.getString(3);
+                    if (last != null && !out.containsKey(last)) {
+                        out.put(last, new IpRow(last, null, rs.getString(5), rs.getLong(4), rs.getLong(4), 0));
+                    }
+                }
+            }
+        } catch (SQLException ignored) {
+        }
+        try (PreparedStatement ps = conn.prepareStatement("SELECT ip_hmac, expires_at FROM sessions WHERE uuid = ?")) {
+            ps.setString(1, uuid);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    String h = rs.getString(1);
+                    if (h != null && !out.containsKey(h)) out.put(h, new IpRow(h, null, null, 0, 0, 0));
+                }
+            }
+        } catch (SQLException ignored) {
+        }
+        return new java.util.ArrayList<>(out.values());
+    }
+
+    public record IpBanRow(long id, String ipHmac, String ip, String uuid, String name, String reason,
+                           String bannedBy, long createdAt, long expiresAt) {}
+
+    public synchronized void addIpBan(String ipHmac, String ip, String uuid, String name, String reason,
+                                      String by, long createdAt, long expiresAt) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("""
+                INSERT INTO ip_bans (ip_hmac, ip, uuid, name, reason, banned_by, created_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""")) {
+            ps.setString(1, ipHmac);
+            ps.setString(2, ip);
+            ps.setString(3, uuid);
+            ps.setString(4, name);
+            ps.setString(5, reason);
+            ps.setString(6, by);
+            ps.setLong(7, createdAt);
+            ps.setLong(8, expiresAt);
+            ps.executeUpdate();
+        }
+    }
+
+    /** Bans in force: not lifted, and forever or not yet expired. */
+    public synchronized java.util.List<IpBanRow> activeIpBans(long now) {
+        java.util.List<IpBanRow> out = new java.util.ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("""
+                SELECT id, ip_hmac, ip, uuid, name, reason, banned_by, created_at, expires_at FROM ip_bans
+                WHERE lifted_at = 0 AND (expires_at = 0 OR expires_at > ?)""")) {
+            ps.setLong(1, now);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    out.add(new IpBanRow(rs.getLong(1), rs.getString(2), rs.getString(3), rs.getString(4),
+                            rs.getString(5), rs.getString(6), rs.getString(7), rs.getLong(8), rs.getLong(9)));
+                }
+            }
+        } catch (SQLException ignored) {
+        }
+        return out;
+    }
+
+    /** Lifts every address ban taken out against an account. Returns how many were lifted. */
+    public synchronized int liftIpBansOf(String uuid, long now) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "UPDATE ip_bans SET lifted_at = ? WHERE uuid = ? AND lifted_at = 0")) {
+            ps.setLong(1, now);
+            ps.setString(2, uuid);
+            return ps.executeUpdate();
         }
     }
 
@@ -562,6 +737,162 @@ public final class Database implements AutoCloseable {
         } catch (SQLException ignored) {
         }
         return out;
+    }
+
+    /** Every account (the daily re-check of the links, 08.11). */
+    public synchronized java.util.List<LinkRow> allLinkRows() {
+        java.util.List<LinkRow> out = new java.util.ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT uuid, username, created_at, reg_ip_hmac, last_ip_hmac, pw_fp FROM users");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) out.add(new LinkRow(rs.getString(1), rs.getString(2),
+                    rs.getLong(3), rs.getString(4), rs.getString(5), rs.getString(6)));
+        } catch (SQLException ignored) {
+        }
+        return out;
+    }
+
+    /** Accounts registered from, or last seen at, the given address (keyed hash). */
+    public synchronized java.util.List<LinkRow> rowsWithIpHmac(String ipHmac, String excludeUuid) {
+        java.util.List<LinkRow> out = new java.util.ArrayList<>();
+        if (ipHmac == null) return out;
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT uuid, username, created_at, reg_ip_hmac, last_ip_hmac, pw_fp "
+                        + "FROM users WHERE (reg_ip_hmac = ? OR last_ip_hmac = ?) AND uuid <> ?")) {
+            ps.setString(1, ipHmac);
+            ps.setString(2, ipHmac);
+            ps.setString(3, excludeUuid == null ? "" : excludeUuid);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) out.add(new LinkRow(rs.getString(1), rs.getString(2),
+                        rs.getLong(3), rs.getString(4), rs.getString(5), rs.getString(6)));
+            }
+        } catch (SQLException ignored) {
+        }
+        return out;
+    }
+
+    /** The last thing the audit log saw of an account at or before {@code at}, or 0. */
+    public synchronized long lastActivityBefore(String uuid, long at) {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT MAX(at) FROM audit_log WHERE uuid = ? AND at <= ?")) {
+            ps.setString(1, uuid);
+            ps.setLong(2, at);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getLong(1) : 0;
+            }
+        } catch (SQLException ignored) {
+        }
+        return 0;
+    }
+
+    /** Every pair in the ledger. */
+    public synchronized java.util.List<LinkLedgerRow> allLinks() {
+        java.util.List<LinkLedgerRow> out = new java.util.ArrayList<>();
+        try (PreparedStatement ps = conn.prepareStatement("SELECT " + LINK_COLUMNS + " FROM account_links");
+             ResultSet rs = ps.executeQuery()) {
+            while (rs.next()) out.add(readLink(rs));
+        } catch (SQLException ignored) {
+        }
+        return out;
+    }
+
+    /**
+     * A pair nobody has decided on, scored again by a corrected model: its best is what the model
+     * says now. A pair staff decided on keeps its numbers — the decision is what counts there.
+     */
+    public synchronized void rescoreUndecidedLink(String uuidA, String uuidB, int score, String grade, String signals, long now) {
+        try (PreparedStatement ps = conn.prepareStatement("""
+                UPDATE account_links SET best_score = ?, best_grade = ?, best_signals = ?,
+                       last_score = ?, last_signals = ?, last_seen = ?
+                WHERE pair_key = ? AND (verdict IS NULL OR verdict = 'NEW')""")) {
+            ps.setInt(1, score);
+            ps.setString(2, grade);
+            ps.setString(3, signals);
+            ps.setInt(4, score);
+            ps.setString(5, signals);
+            ps.setLong(6, now);
+            ps.setString(7, pairKey(uuidA, uuidB));
+            ps.executeUpdate();
+        } catch (SQLException ignored) {
+        }
+    }
+
+    /**
+     * The full recount (12.11): a pair nobody decided for good (NEW, or WATCH — "looked at, keep
+     * restricted") takes what the model says now, up or down. The reviewer's mark stays.
+     */
+    public synchronized void rescoreOpenLink(String uuidA, String uuidB, int score, String grade, String signals, long now) {
+        try (PreparedStatement ps = conn.prepareStatement("""
+                UPDATE account_links SET best_score = ?, best_grade = ?, best_signals = ?,
+                       last_score = ?, last_signals = ?, last_seen = ?
+                WHERE pair_key = ? AND (verdict IS NULL OR verdict IN ('NEW', 'WATCH'))""")) {
+            ps.setInt(1, score);
+            ps.setString(2, grade);
+            ps.setString(3, signals);
+            ps.setInt(4, score);
+            ps.setString(5, signals);
+            ps.setLong(6, now);
+            ps.setString(7, pairKey(uuidA, uuidB));
+            ps.executeUpdate();
+        } catch (SQLException ignored) {
+        }
+    }
+
+    /**
+     * Moves a pair the model no longer links out of the ledger into {@code account_links_archive}
+     * (12.11), in one transaction. Only an open pair (NEW / WATCH): TRUSTED and ALT are a human's
+     * decision and stay. Returns whether a row moved.
+     */
+    public synchronized boolean archiveOpenLink(String uuidA, String uuidB, String reason, long now) {
+        String key = pairKey(uuidA, uuidB);
+        boolean auto = true;
+        try {
+            auto = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            int moved;
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "INSERT INTO account_links_archive(pair_key, " + LINK_COLUMNS + ", archived_at, archived_reason) "
+                            + "SELECT pair_key, " + LINK_COLUMNS + ", ?, ? FROM account_links "
+                            + "WHERE pair_key = ? AND (verdict IS NULL OR verdict IN ('NEW', 'WATCH'))")) {
+                ps.setLong(1, now);
+                ps.setString(2, reason);
+                ps.setString(3, key);
+                moved = ps.executeUpdate();
+            }
+            if (moved == 1) {
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM account_links WHERE pair_key = ? AND (verdict IS NULL OR verdict IN ('NEW', 'WATCH'))")) {
+                    ps.setString(1, key);
+                    if (ps.executeUpdate() != 1) {
+                        conn.rollback();
+                        return false;
+                    }
+                }
+            }
+            conn.commit();
+            return moved == 1;
+        } catch (SQLException e) {
+            try {
+                conn.rollback();
+            } catch (SQLException ignored) {
+            }
+            return false;
+        } finally {
+            try {
+                conn.setAutoCommit(auto);
+            } catch (SQLException ignored) {
+            }
+        }
+    }
+
+    /** How many pairs the recount has archived so far (admin view). */
+    public synchronized int archivedLinkCount() {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT COUNT(*) FROM account_links_archive");
+             ResultSet rs = ps.executeQuery()) {
+            return rs.next() ? rs.getInt(1) : 0;
+        } catch (SQLException e) {
+            return 0;
+        }
     }
 
     /** All accounts sharing the given password fingerprint (twin signal). */

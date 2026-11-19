@@ -21,16 +21,16 @@ public abstract class ChunkDataSenderShieldMixin {
 
     @Inject(method = "sendChunkData", at = @At("HEAD"))
     private static void bastionac$begin(ServerPlayNetworkHandler handler, ServerWorld world, WorldChunk chunk, CallbackInfo ci) {
-        OreShield.beginChunkSend(handler.player);
+        dev.bastionac.core.Guard.run("ore shield", () -> OreShield.beginChunkSend(handler.player));
     }
 
     @Inject(method = "sendChunkData", at = @At("RETURN"))
     private static void bastionac$end(ServerPlayNetworkHandler handler, ServerWorld world, WorldChunk chunk, CallbackInfo ci) {
-        OreShield.endChunkSend();
+        dev.bastionac.core.Guard.run("ore shield", OreShield::endChunkSend);
     }
 
     @Inject(method = "unload", at = @At("HEAD"))
     private void bastionac$unload(ServerPlayerEntity player, ChunkPos pos, CallbackInfo ci) {
-        OreShield.onChunkUnload(player, pos);
+        dev.bastionac.core.Guard.run("ore shield", () -> OreShield.onChunkUnload(player, pos));
     }
 }

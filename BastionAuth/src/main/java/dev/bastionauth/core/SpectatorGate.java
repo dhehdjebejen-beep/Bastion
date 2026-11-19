@@ -2,6 +2,8 @@ package dev.bastionauth.core;
 
 import dev.bastionauth.BastionAuth;
 import dev.bastionauth.mixin.InteractionManagerInvoker;
+import net.minecraft.command.permission.PermissionLevel;
+import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.world.GameMode;
 
@@ -23,9 +25,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * <h2>The real mode is never lost</h2>
  * It is switched before the join packet without a packet, kept here, written
  * back for every save of the player (the autosave and the one on disconnect),
- * and restored on login. A saved mode that is spectator or unknown comes back
- * as survival: the server is a survival server, and the gate must never become
- * a way to keep spectator.
+ * and restored on login. A saved mode that is unknown comes back as survival;
+ * saved spectator comes back as spectator only for operators with permission
+ * level 2+ ({@link PermissionLevel#GAMEMASTERS}), otherwise survival so the
+ * gate never lets a non-staff player keep spectator across logins.
  *
  * <h2>Not while the agreement is owed</h2>
  * A spectator cannot hold or use items, and the agreement volumes are read by
@@ -56,9 +59,29 @@ public final class SpectatorGate {
         return m != null && m.hasAcceptedAgreement(p);
     }
 
-    /** What the player goes back to: their own mode, or survival. */
-    private static GameMode restored(Modes real) {
-        return real.mode() == null || real.mode() == GameMode.SPECTATOR ? GameMode.SURVIVAL : real.mode();
+    /** What the player goes back to: their own mode (spectator only if OP level >= 2), or survival. */
+    static GameMode restoreTarget(GameMode saved, boolean keepSpectator) {
+        if (saved == null) return GameMode.SURVIVAL;
+        if (saved == GameMode.SPECTATOR && !keepSpectator) return GameMode.SURVIVAL;
+        return saved;
+    }
+
+    /** Reads the server's configured op level directly so PermissionFreezeMixin does not mask it. */
+    private static boolean keepsSpectator(ServerPlayerEntity p) {
+        if (p == null) return false;
+        try {
+            MinecraftServer server = p.getEntityWorld().getServer();
+            if (server == null) return false;
+            return server.getPermissionLevel(p.getPlayerConfigEntry())
+                    .getLevel()
+                    .isAtLeast(PermissionLevel.GAMEMASTERS);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static GameMode restored(ServerPlayerEntity p, Modes real) {
+        return restoreTarget(real.mode(), keepsSpectator(p));
     }
 
     private static void silently(ServerPlayerEntity p, GameMode mode, GameMode previous) {
@@ -99,7 +122,7 @@ public final class SpectatorGate {
         if (p == null) return;
         Modes real = REAL.remove(p.getUuid());
         if (real == null) return;
-        GameMode target = restored(real);
+        GameMode target = restored(p, real);
         try {
             p.changeGameMode(target);
             // The previous mode is the server's business (F3+F4); put back silently.
@@ -112,19 +135,19 @@ public final class SpectatorGate {
     /** Before a save: the real mode, silently. */
     public static void beforeSave(ServerPlayerEntity p) {
         Modes real = p == null ? null : REAL.get(p.getUuid());
-        if (real != null) silently(p, restored(real), real.previous());
+        if (real != null) silently(p, restored(p, real), real.previous());
     }
 
     /** After a save: spectator again, silently. */
     public static void afterSave(ServerPlayerEntity p) {
         Modes real = p == null ? null : REAL.get(p.getUuid());
-        if (real != null) silently(p, GameMode.SPECTATOR, restored(real));
+        if (real != null) silently(p, GameMode.SPECTATOR, restored(p, real));
     }
 
     /** Leaving without the password: the real mode goes back for good, before the final save. */
     public static void onRemove(ServerPlayerEntity p) {
         if (p == null) return;
         Modes real = REAL.remove(p.getUuid());
-        if (real != null) silently(p, restored(real), real.previous());
+        if (real != null) silently(p, restored(p, real), real.previous());
     }
 }

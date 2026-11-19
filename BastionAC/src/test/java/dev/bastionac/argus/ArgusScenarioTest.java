@@ -93,7 +93,7 @@ class ArgusScenarioTest {
                     // Straight onto the target, in exact floats; a fixed step while tracking.
                     dy = (float) err;
                     dp = (float) ((5 + 2 * Math.sin(i / 9.0)) - pitch);
-                    if (Math.abs(dy) < 3) { dy = lastDy; }
+                    if (Math.abs(dy) < 3) { dy = lastDy; dp = lastDp; }
                 } else {
                     // A hand: a fraction of the way, noisy, quantised to mouse counts.
                     double hand = err * (0.35 + 0.3 * rnd.nextDouble()) + rnd.nextGaussian() * 1.5;

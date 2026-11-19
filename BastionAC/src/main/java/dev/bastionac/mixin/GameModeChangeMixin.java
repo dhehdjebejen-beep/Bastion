@@ -18,7 +18,9 @@ public abstract class GameModeChangeMixin {
 
     @Inject(method = "changeGameMode", at = @At("HEAD"))
     private void bastionac$noteGameModeChange(GameMode mode, CallbackInfoReturnable<Boolean> cir) {
-        PlayerData d = BastionAC.data((ServerPlayerEntity) (Object) this);
-        if (d != null) d.gameModeChangedTick = BastionAC.serverTick();
+        dev.bastionac.core.Guard.run("game mode", () -> {
+            PlayerData d = BastionAC.data((ServerPlayerEntity) (Object) this);
+            if (d != null) d.gameModeChangedTick = BastionAC.serverTick();
+        });
     }
 }

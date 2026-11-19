@@ -42,6 +42,7 @@ public final class HistoryManager {
         public String check;        // may be null
         public double vl;           // alerts only
         public int durationHours;   // bans only
+        public int durationMinutes; // bans from 04.11 on; the ladder starts at 15 minutes
         public String details;      // free text: reason / admin / notes
         /** Optional server-side context captured at alert time for staff review. */
         public Map<String, String> evidence;
@@ -84,14 +85,24 @@ public final class HistoryManager {
     }
 
     public static void recordPunishment(Kind kind, UUID uuid, String name, String check, int hours, String details) {
+        record(kind, uuid, name, check, hours, 0, hours > 0 ? hours + Lang.t(" ч; ") : "", details);
+    }
+
+    /** A ban from the ladder, whose steps are in minutes. */
+    public static void recordBan(Kind kind, UUID uuid, String name, String check, int minutes, String details) {
+        record(kind, uuid, name, check, (minutes + 59) / 60, minutes, BanManager.formatMinutes(minutes) + "; ", details);
+    }
+
+    private static void record(Kind kind, UUID uuid, String name, String check, int hours, int minutes, String term, String details) {
         Event e = base(kind, uuid, name);
         e.check = check;
         e.durationHours = hours;
+        e.durationMinutes = minutes;
         e.details = details;
         add(PUNISH, e, MAX_PUNISH);
         save(); // punishments are rare and important — persist immediately
         AcJournal.write(kind.name().toLowerCase(java.util.Locale.ROOT), name, e.uuid, check, 0,
-                (hours > 0 ? hours + Lang.t(" ч; ") : "") + (details == null ? "" : details), null);
+                term + (details == null ? "" : details), null);
     }
 
     private static Event base(Kind kind, UUID uuid, String name) {

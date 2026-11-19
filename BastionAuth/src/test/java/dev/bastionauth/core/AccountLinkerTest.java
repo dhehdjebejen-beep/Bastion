@@ -118,4 +118,13 @@ class AccountLinkerTest {
         assertEquals(1, AccountLinker.levenshtein("kitten", "sitten"));
         assertEquals(2, AccountLinker.levenshtein("builder", "buildebb"));
     }
+
+    /** Launcher ids made of a single repeated character carry no identity signal. */
+    @Test
+    void theNilLauncherUuidIsNotAnIdentity() {
+        assertTrue(AccountLinker.placeholderClientUuid("00000000-0000-0000-0000-000000000000"));
+        assertTrue(AccountLinker.placeholderClientUuid("ffffffff-ffff-ffff-ffff-ffffffffffff"));
+        assertTrue(AccountLinker.placeholderClientUuid(""));
+        assertFalse(AccountLinker.placeholderClientUuid("e63e8c93-52c1-4d2b-9a77-0c1d2e3f4a5b"));
+    }
 }

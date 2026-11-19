@@ -31,7 +31,7 @@ public abstract class ServerCommonNetworkHandlerMixin {
             at = @At("HEAD"), argsOnly = true)
     private Packet<?> bastionac$shield(Packet<?> packet) {
         if (!((Object) this instanceof ServerPlayNetworkHandler handler) || handler.player == null) return packet;
-        return dev.bastionac.core.InfoShield.rewrite(handler.player, packet);
+        return dev.bastionac.core.Guard.call("info shield", () -> dev.bastionac.core.InfoShield.rewrite(handler.player, packet), packet);
     }
 
     @Inject(method = "sendPacket", at = @At("HEAD"))
@@ -39,17 +39,36 @@ public abstract class ServerCommonNetworkHandlerMixin {
         if (!((Object) this instanceof ServerPlayNetworkHandler handler)) return;
         ServerPlayerEntity target = handler.player;
         if (target == null || !BastionAC.enabled()) return;
+        dev.bastionac.core.Guard.run("outgoing packet", () -> bastionac$sent(target, packet));
+    }
+
+    /**
+     * Both sendPacket and direct send calls reach this overload exactly once. Record the
+     * existing velocity event here, including bundled motion; the checks retain their own
+     * original hooks above/below. This cannot reconstruct motion missing from older files.
+     */
+    @Inject(method = "send(Lnet/minecraft/network/packet/Packet;Lio/netty/channel/ChannelFutureListener;)V",
+            at = @At("HEAD"))
+    private void bastionac$recordSentVelocity(Packet<?> packet, io.netty.channel.ChannelFutureListener listener,
+                                             CallbackInfo ci) {
+        if (!((Object) this instanceof ServerPlayNetworkHandler handler)) return;
+        ServerPlayerEntity target = handler.player;
+        if (target == null || !BastionAC.enabled()) return;
+        dev.bastionac.core.Guard.run("velocity telemetry", () ->
+                dev.bastionac.telemetry.VelocityPackets.visit(packet, target.getId(),
+                        (vec, explosion) -> dev.bastionac.telemetry.Telemetry.velocity(target, vec, explosion)));
+    }
+
+    private static void bastionac$sent(ServerPlayerEntity target, Packet<?> packet) {
         dev.bastionac.core.EntityKnowledge.onSent(target.getUuid(), packet);
 
         if (packet instanceof EntityVelocityUpdateS2CPacket velocity) {
             if (velocity.getEntityId() == target.getId()) {
                 BastionAC.grantVelocity(target, velocity.getVelocity());
-                dev.bastionac.telemetry.Telemetry.velocity(target, velocity.getVelocity(), false);
             }
         } else if (packet instanceof ExplosionS2CPacket explosion) {
             explosion.playerKnockback().ifPresent(vec -> {
                 BastionAC.grantVelocity(target, vec);
-                dev.bastionac.telemetry.Telemetry.velocity(target, vec, true);
             });
             BastionAC.noteExplosion(target);
         }
@@ -62,7 +81,7 @@ public abstract class ServerCommonNetworkHandlerMixin {
         if (!((Object) this instanceof ServerPlayNetworkHandler handler)) return;
         if (handler.player == null || !BastionAC.enabled()) return;
         if (packet instanceof EntityVelocityUpdateS2CPacket || packet instanceof ExplosionS2CPacket) {
-            BastionAC.afterPacketSent(handler.player);
+            dev.bastionac.core.Guard.run("outgoing packet", () -> BastionAC.afterPacketSent(handler.player));
         }
     }
 

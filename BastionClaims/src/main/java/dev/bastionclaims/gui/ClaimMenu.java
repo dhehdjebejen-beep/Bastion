@@ -274,12 +274,15 @@ public final class ClaimMenu {
                     pl.closeHandledScreen();
                     ServerWorld w = resolve(pl, c.dim);
                     if (w == null) return;
-                    if (Teleports.toClaimSafely(pl, w, c)) {
-                        pl.sendMessage(Fmt.text(Lang.t("&aТелепорт к привату &f") + c.name + " 🛡"), false);
-                    } else {
-                        pl.sendMessage(Fmt.text(Lang.t("&cВнутри привата негде встать — всё заполнено. "
-                                + "&7Освободи место и повтори.")), false);
-                    }
+                    // 08.11: the same warmup as /home on MaxCore — it used to be an instant way out of anything.
+                    dev.bastionclaims.core.MaxCoreBridge.afterWarmup(pl, who -> {
+                        if (Teleports.toClaimSafely(who, w, c)) {
+                            who.sendMessage(Fmt.text(Lang.t("&aТелепорт к привату &f") + c.name + " 🛡"), false);
+                        } else {
+                            who.sendMessage(Fmt.text(Lang.t("&cВнутри привата негде встать — всё заполнено. "
+                                    + "&7Освободи место и повтори.")), false);
+                        }
+                    });
                 });
 
         // Row 2 — behaviour flags (ВКЛ = разрешено). Default is "protected" (ВЫКЛ).

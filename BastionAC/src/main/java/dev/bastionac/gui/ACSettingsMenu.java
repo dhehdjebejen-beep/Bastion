@@ -124,13 +124,13 @@ final class ACSettingsMenu {
                 v -> p.banHistoryHours = v, () -> openPunishment(admin));
 
         // Escalation ladder (edit existing steps in place).
-        if (p.banStepsHours != null) {
+        if (p.banStepsMinutes != null) {
             int slot = 28;
-            for (int i = 0; i < p.banStepsHours.size() && slot <= 34; i++, slot++) {
+            for (int i = 0; i < p.banStepsMinutes.size() && slot <= 34; i++, slot++) {
                 final int idx = i;
-                int val = p.banStepsHours.get(i) == null ? 1 : p.banStepsHours.get(i);
-                numInt(gui, slot, admin, Items.IRON_BARS, Lang.t("Ступень ") + (i + 1) + Lang.t(" (часы)"), val, 1, 1, 8760,
-                        v -> p.banStepsHours.set(idx, v), () -> openPunishment(admin));
+                int val = p.banStepsMinutes.get(i) == null ? 15 : p.banStepsMinutes.get(i);
+                numInt(gui, slot, admin, Items.IRON_BARS, Lang.t("Ступень ") + (i + 1) + Lang.t(" (минуты)"), val, 15, 1, 525_600,
+                        v -> p.banStepsMinutes.set(idx, v), () -> openPunishment(admin));
             }
         }
         gui.button(16, GuiItems.item(Items.BOOK, Lang.t("&7Исключённые из бана проверки"),

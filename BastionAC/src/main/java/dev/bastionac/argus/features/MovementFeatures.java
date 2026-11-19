@@ -32,6 +32,9 @@ public final class MovementFeatures {
     /** Friction of the block a player stands on, by block-state raw id. */
     public interface BlockInfo {
         float slipperiness(int stateRawId);
+        /** NaN means the recorded item cannot establish a use contract. */
+        default float useMultiplier(int itemRawId) { return Float.NaN; }
+        default boolean spear(int itemRawId) { return false; }
     }
 
     /** Environment bits that make a tick unjudgeable. */
@@ -64,7 +67,7 @@ public final class MovementFeatures {
     }
 
     /** One reconstructed client tick. */
-    private static final class Ticks {
+    static final class Ticks {
         int n;
         double[] x, y, z;
         boolean[] ground, hcoll, valid;
@@ -95,6 +98,11 @@ public final class MovementFeatures {
         boolean tickMode = s.tickEndT.n > 20 && (s.protocol < 0 || s.protocol >= 768);
         Ticks tk = tickMode ? byClientTick(s, bad) : byPacket(s, bad);
         judge(s, tk, out, blocks);
+        MovementPredictionEngine.analyze(s, tk, out, blocks);
+        // Water in a 1 Hz STATE must not mask the dry part of a wall ascent.
+        // This separate stream still requires every packet to be outside liquids.
+        boolean[] wallBad = excluded(s, false);
+        wallClimbs(s, tickMode ? byClientTick(s, wallBad) : byPacket(s, wallBad), out);
         teleports(s, out);
     }
 
@@ -110,18 +118,20 @@ public final class MovementFeatures {
      * aside the moves just before a setback too, and that hid exactly the
      * jump that earned the setback.
      */
+    /** Creative, spectator, flight or a vehicle: movement that walking rules do not describe. */
+    static boolean exemptMode(SessionData.State st) {
+        return st.gameMode == 1 || st.gameMode == 3 || st.has(ST_FLYING) || st.has(ST_VEHICLE) || st.has(ST_GLIDING);
+    }
+
     static void teleports(SessionData s, FeatureSet out) {
         int n = s.moveT.n;
         long[] t = s.moveT.a;
-        boolean[] skip = new boolean[n];
-        markAround(skip, t, n, s.velT, 100, 1500);
-        for (int i = 0; i < s.velT.n; i++) {
-            if (s.velExplosion.a[i] != 0) markRange(skip, t, n, s.velT.a[i] - 100, s.velT.a[i] + 3500);
-        }
+        boolean[] skip = ServerImpulse.excluded(s);
         markAround(skip, t, n, s.tpSentT, 0, 1500);
         markAround(skip, t, n, s.tpConfT, 0, 500);
         markAround(skip, t, n, s.lifeT, 200, 5000);
         markAround(skip, t, n, s.vehicleT, 200, 1500);
+        acknowledgedTeleportArrivals(s, skip);
         int si = 0;
         for (int i = 0; i < n; i++) {
             if (!s.states.isEmpty()) {
@@ -134,6 +144,7 @@ public final class MovementFeatures {
                 // Lying down moves the player onto the bed in one packet, between two 1 Hz states:
                 // the state after the move already says asleep (4,4 blocks in one move, 02.11).
                 if (si + 1 < s.states.size() && s.states.get(si + 1).has(ST_SLEEPING)) skip[i] = true;
+                if (si + 1 < s.states.size() && exemptMode(s.states.get(si + 1))) skip[i] = true;
             }
             int env = s.moveEnv.a[i];
             if ((env & (ENV_FLYING | ENV_VEHICLE)) != 0) skip[i] = true;
@@ -160,23 +171,65 @@ public final class MovementFeatures {
         out.perHour("move.teleport", count, Math.max(1e-6, s.durationMs() / 3_600_000.0));
     }
 
+    /** A delayed handshake excuses its exact destination once, regardless of a server pause. */
+    private static void acknowledgedTeleportArrivals(SessionData s, boolean[] skip) {
+        int sentCount = Math.min(s.tpSentT.n, Math.min(s.tpSentId.n,
+                Math.min(s.tpX.n, Math.min(s.tpY.n, s.tpZ.n))));
+        int confirmedCount = Math.min(s.tpConfT.n, Math.min(s.tpConfId.n, s.tpConfValid.n));
+        int sent = 0, confirmation = 0, pending = -1;
+        boolean confirmed = false;
+        for (int i = 0; i < s.moveT.n; i++) {
+            if ((s.moveFlags.a[i] & MV_POS) == 0) continue;
+            long time = s.moveT.a[i];
+            // A replacement destination invalidates every earlier handshake.
+            while (sent < sentCount && s.tpSentT.a[sent] <= time) {
+                pending = sent++;
+                confirmed = false;
+            }
+            while (confirmation < confirmedCount && s.tpConfT.a[confirmation] <= time) {
+                if (pending >= 0 && s.tpConfT.a[confirmation] >= s.tpSentT.a[pending]
+                        && s.tpConfId.a[confirmation] == s.tpSentId.a[pending]) {
+                    confirmed = s.tpConfValid.a[confirmation] != 0;
+                }
+                confirmation++;
+            }
+            if (pending >= 0) {
+                // The writer records vanilla's resolved absolute target. Compare the
+                // same 1/4096 grid as the position stream, including the vertical axis.
+                if (confirmed && sameQuantizedPosition(s.moveX.a[i], s.tpX.a[pending])
+                        && sameQuantizedPosition(s.moveY.a[i], s.tpY.a[pending])
+                        && sameQuantizedPosition(s.moveZ.a[i], s.tpZ.a[pending])) skip[i] = true;
+                // The first position consumes the handshake even before confirmation
+                // or on a mismatch; a later jump cannot reuse an old destination.
+                pending = -1;
+                confirmed = false;
+            }
+        }
+    }
+
+    private static boolean sameQuantizedPosition(double observed, double target) {
+        return Double.isFinite(observed) && Double.isFinite(target)
+                && Math.round(observed * Q) == Math.round(target * Q);
+    }
+
     // ---------------------------------------------------------------- exclusions
 
     /** Moves too close to anything that legitimately moves a player. */
     static boolean[] excluded(SessionData s) {
+        return excluded(s, true);
+    }
+
+    private static boolean[] excluded(SessionData s, boolean excludeWetState) {
         int n = s.moveT.n;
-        boolean[] bad = new boolean[n];
+        boolean[] bad = ServerImpulse.excluded(s);
         long[] t = s.moveT.a;
-        markAround(bad, t, n, s.velT, 100, 1500);
-        markAround(bad, t, n, s.tpSentT, 100, 700);
-        markAround(bad, t, n, s.tpConfT, 100, 500);
-        markAround(bad, t, n, s.corrT, 100, 700);
+        // A setback must not erase the wall ascent which caused it. Keep the
+        // existing post-setback grace; only ordinary replay excludes earlier ticks.
+        markAround(bad, t, n, s.tpSentT, excludeWetState ? 100 : 0, 700);
+        markAround(bad, t, n, s.tpConfT, excludeWetState ? 100 : 0, 500);
+        markAround(bad, t, n, s.corrT, excludeWetState ? 100 : 0, 700);
         markAround(bad, t, n, s.lifeT, 200, 5000);
         markAround(bad, t, n, s.vehicleT, 200, 1500);
-        // An explosion (wind charge, TNT) carries a player far longer than a hit.
-        for (int i = 0; i < s.velT.n; i++) {
-            if (s.velExplosion.a[i] != 0) markRange(bad, t, n, s.velT.a[i] - 100, s.velT.a[i] + 3500);
-        }
         // Slime / bed bounces: the flight right after the contact.
         for (int i = 0; i < n; i++) {
             if ((s.moveEnv.a[i] & (ENV_SLIME | ENV_BED)) != 0) markRange(bad, t, n, t[i], t[i] + 1200);
@@ -189,9 +242,13 @@ public final class MovementFeatures {
             SessionData.State st = s.states.get(si);
             if (st.gameMode == 1 || st.gameMode == 3 || st.has(ST_FLYING) || st.has(ST_SLEEPING)
                     || st.has(ST_VEHICLE) || st.has(ST_GLIDING) || st.has(ST_AUTH_FROZEN)
-                    || st.has(ST_STAFF_FROZEN) || st.has(ST_LAVA) || st.has(ST_WATER)) {
+                    || st.has(ST_STAFF_FROZEN) || st.has(ST_LAVA) || (excludeWetState && st.has(ST_WATER))) {
                 bad[i] = true;
             }
+            // The state is sampled once a second: the moves of the second in which the game mode
+            // switched to creative or spectator belong to the new mode (3.7.0 b21, 09.11: an
+            // operator's spectator flight read as "rise against gravity 4.5%").
+            if (si + 1 < s.states.size() && exemptMode(s.states.get(si + 1))) bad[i] = true;
         }
         return bad;
     }
@@ -319,6 +376,54 @@ public final class MovementFeatures {
 
     // ---------------------------------------------------------------- the judgement
 
+    private static void wallClimbs(SessionData s, Ticks tk, FeatureSet out) {
+        long judged=0,hits=0;
+        int run=0,start=0,si=0;
+        double height=0;
+        int mask=EXCLUDE_VERTICAL | ENV_GROUND_BELOW | ENV_FLOOR_FACE;
+        for(int c=1;c<=tk.n;c++) {
+            boolean eligible=false;
+            double dy=0;
+            if(c<tk.n) {
+                while(si+1<s.states.size()&&s.states.get(si+1).t<=tk.t[c])si++;
+                boolean normalAttributes=s.states.isEmpty() ||
+                        (s.states.get(si).jumpStrength<=0.421f && Math.abs(s.states.get(si).gravity-.08f)<.001f);
+                eligible=tk.valid[c-1]&&tk.valid[c]&&!tk.ground[c-1]&&!tk.ground[c]
+                        &&tk.hcoll[c-1]&&tk.hcoll[c]&&((tk.env[c-1]|tk.env[c])&mask)==0&&normalAttributes;
+                dy=tk.y[c]-tk.y[c-1];
+                if(eligible)judged++;
+            }
+            if(eligible&&dy>.16&&dy<.43) {
+                if(run==0)start=c;
+                run++;height+=dy;
+            } else {
+                // A vanilla jump or a one-block shore/step cannot sustain this
+                // ascent for six ticks and gain more than 1.5 blocks without support.
+                if(run>=6&&height>1.5) {
+                    hits+=run;
+                    for(int k=start;k<start+run;k++)out.moment("move.wall_climb",tk.t[k]);
+                }
+                run=0;height=0;
+            }
+        }
+        out.rate("move.wall_climb",hits,judged);
+    }
+
+    /** How far ahead the first sprinting step may be from the server's word that it sprints. */
+    private static final int SPRINT_LAG_TICKS = 6;
+
+    /**
+     * A run starts on the client before the server has read it. The first step is 0.027 faster
+     * than a walk, on a good connection and a bad one alike: 04.11 this alone read as "разгон по
+     * земле" ten times the norm. A step taken just before the sprint shows up is that sprint.
+     */
+    private static boolean sprintFollows(Ticks tk, int c) {
+        for (int i = c + 1; i <= c + SPRINT_LAG_TICKS && i < tk.n; i++) {
+            if ((tk.env[i] & ENV_SPRINTING) != 0 || tk.speed[i] > tk.speed[c] * 1.2f) return true;
+        }
+        return false;
+    }
+
     static void judge(SessionData s, Ticks tk, FeatureSet out, BlockInfo blocks) {
         // Keys only from a client that sends them itself (1.21.2+). For an older one ViaVersion
         // may make up an empty PlayerInput — every one of its jumps would look keyless.
@@ -327,8 +432,15 @@ public final class MovementFeatures {
         long vertJudged = 0, rise = 0, fallJudged = 0, fallFast = 0;
         long jumps = 0, jumpNoKey = 0, noKeyJudged = 0, noKeyGain = 0, sprintJudged = 0, sprintNoFwd = 0;
         long dirJudged = 0, dirOff = 0;
+        java.util.List<Long> airJumps = new java.util.ArrayList<>();
+        int stateIndex=0;
 
         for (int c = 2; c < tk.n; c++) {
+            while(stateIndex+1<s.states.size()&&s.states.get(stateIndex+1).t<=tk.t[c])stateIndex++;
+            // World index 3 groups mod-defined dimensions. The record cannot identify
+            // their ability/input contract. Abstain from vanilla key assertions there;
+            // packet timing, physical movement and the separate wall ascent stay active.
+            boolean vanillaKeys=keys&&(s.states.isEmpty()||s.states.get(stateIndex).world!=3);
             int b = c - 1, a = c - 2;
             if (!tk.valid[a] || !tk.valid[b] || !tk.valid[c]) continue;
             if (((tk.env[a] | tk.env[b] | tk.env[c]) & EXCLUDE) != 0) continue;
@@ -337,6 +449,17 @@ public final class MovementFeatures {
             double d1x = tk.x[b] - tk.x[a], d1y = tk.y[b] - tk.y[a], d1z = tk.z[b] - tk.z[a];
             double d2x = tk.x[c] - tk.x[b], d2y = tk.y[c] - tk.y[b], d2z = tk.z[c] - tk.z[b];
             boolean ga = tk.ground[a], gb = tk.ground[b], gc = tk.ground[c];
+
+            // A renewed jump impulse while already rising cannot be a landing-and-jump.
+            // Requiring three airborne samples, no support under the footprint, and a genuine
+            // positive previous dy also leaves steps, edges and falling onto a block alone.
+            // Two such events are required before the short-window feature contributes.
+            if (!ga && !gb && !gc && d1y > 0.002 && isJumpVelocity(d2y)
+                    && d2y > d1y + 0.01
+                    && ((tk.env[a] | tk.env[b] | tk.env[c])
+                    & (EXCLUDE_VERTICAL | ENV_SUPPORT | ENV_GROUND_BELOW | ENV_FLOOR_FACE)) == 0) {
+                airJumps.add(tk.t[c]);
+            }
 
             // Friction that turned the move of tick b into the velocity tick c starts with.
             double slipA = ga ? slip(blocks, tk.groundBlock[a]) : 1.0;
@@ -358,7 +481,7 @@ public final class MovementFeatures {
             // reordered packet, a test harness), the attribute lags by exactly the sprint bonus:
             // trust the key and allow it (×1.3) rather than read the client's sprint as a hack.
             double speed = Math.max(0.1, tk.speed[c]);
-            if ((tk.env[c] & ENV_SPRINTING) == 0 && (tk.input[c] & IN_SPRINT) != 0) speed *= 1.3;
+            if ((tk.env[c] & ENV_SPRINTING) == 0 && ((tk.input[c] & IN_SPRINT) != 0 || sprintFollows(tk, c))) speed *= 1.3;
             double accel = gb ? speed * 0.21600002 / (slipB * slipB * slipB) : AIR_ACCEL;
             if (jumpTick) accel += SPRINT_JUMP;
 
@@ -394,7 +517,12 @@ public final class MovementFeatures {
             }
 
             // ---- vertical: free fall between two airborne ticks
-            if (!gb && !gc && ((tk.env[a] | tk.env[b] | tk.env[c]) & EXCLUDE_VERTICAL) == 0) {
+            // A collision with a floor/step can reset dy even when the client's ground
+            // flag stays false. Those samples are not free fall (including stationary
+            // packets carried across silent ticks). The horizontal replay stays active.
+            int support = ENV_SUPPORT | ENV_GROUND_BELOW | ENV_FLOOR_FACE;
+            if (!gb && !gc && ((tk.env[a] | tk.env[b] | tk.env[c]) & EXCLUDE_VERTICAL) == 0
+                    && ((tk.env[b] | tk.env[c]) & support) == 0) {
                 boolean unloadedChunkFall = Math.abs(d2y + 0.098) < 0.0015 && Math.abs(d1y + 0.098) < 0.0015;
                 if (!unloadedChunkFall) {
                     double pred = zero((d1y - GRAVITY) * 0.98);
@@ -416,8 +544,8 @@ public final class MovementFeatures {
             }
 
             // ---- the keys (1.21.2+ clients)
-            if (keys) {
-                int in = tk.input[c];
+            if (vanillaKeys) {
+                int in = tk.input[c] | tk.input[b];
                 if (jumpTick) {
                     jumps++;
                     if ((in & IN_JUMP) == 0) {
@@ -461,6 +589,9 @@ public final class MovementFeatures {
         out.rate("move.ground_gain", groundGain, groundJudged);
         out.rate("move.rise", rise, vertJudged);
         out.rate("move.fall_fast", fallFast, fallJudged);
+        if (airJumps.size() >= 2) for (long t : airJumps) out.moment("move.air_jump", t);
+        out.perHour("move.air_jump", airJumps.size() >= 2 ? airJumps.size() : 0,
+                Math.max(1e-6, s.durationMs() / 3_600_000.0));
         if (keys) {
             out.rate("move.jump_nokey", jumpNoKey, jumps);
             out.rate("move.move_nokey", noKeyGain, noKeyJudged);

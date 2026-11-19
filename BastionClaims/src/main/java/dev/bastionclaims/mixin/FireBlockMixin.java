@@ -33,7 +33,16 @@ public abstract class FireBlockMixin {
     private void bastionclaims$stopFireInsideClaims(BlockState state, ServerWorld world, BlockPos pos,
                                                      Random random, CallbackInfo ci) {
         String dim = world.getRegistryKey().getValue().toString();
-        if (ProtectionService.fireSpreadBlocked(dim, pos.getX(), pos.getY(), pos.getZ())) ci.cancel();
+        if (!ProtectionService.fireSpreadBlocked(dim, pos.getX(), pos.getY(), pos.getZ())) return;
+        ci.cancel();
+        // Cancelling the tick alone left the fire standing forever: the tick is
+        // also what ages a fire and puts it out, and it is never rescheduled.
+        // Lava and lightning kept adding such fires on spawn until the grass
+        // there was covered with eternal flames. A fireplace on netherrack
+        // (the dimension's infiniburn blocks) stays lit, as in vanilla.
+        if (!world.getBlockState(pos.down()).isIn(world.getDimension().infiniburn())) {
+            world.removeBlock(pos, false);
+        }
     }
 
     /**

@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiPredicate;
 
 /**
@@ -51,9 +52,9 @@ import java.util.function.BiPredicate;
 public final class EspShield {
 
     /** viewer → (target entity id → last tick the target was in sight). */
-    private static final Map<UUID, Map<Integer, Long>> SEEN = new HashMap<>();
+    private static final Map<UUID, Map<Integer, Long>> SEEN = new ConcurrentHashMap<>();
     /** viewer → (target entity id → whether the shield currently lets it through). */
-    private static final Map<UUID, Map<Integer, Boolean>> SHOWN = new HashMap<>();
+    private static final Map<UUID, Map<Integer, Boolean>> SHOWN = new ConcurrentHashMap<>();
 
     private EspShield() {}
 
@@ -144,8 +145,8 @@ public final class EspShield {
         for (ServerWorld world : server.getWorlds()) {
             List<ServerPlayerEntity> all = world.getPlayers();
             for (ServerPlayerEntity viewer : all) {
-                Map<Integer, Long> seen = SEEN.computeIfAbsent(viewer.getUuid(), k -> new HashMap<>());
-                Map<Integer, Boolean> shown = SHOWN.computeIfAbsent(viewer.getUuid(), k -> new HashMap<>());
+                Map<Integer, Long> seen = SEEN.computeIfAbsent(viewer.getUuid(), k -> new ConcurrentHashMap<>());
+                Map<Integer, Boolean> shown = SHOWN.computeIfAbsent(viewer.getUuid(), k -> new ConcurrentHashMap<>());
                 boolean free = exempt(viewer);
                 if (players) {
                     for (ServerPlayerEntity target : all) {

@@ -7,6 +7,44 @@
 В версии 2.24 полностью разобран **Wurst 7** — по исходникам и настройкам этого
 клиента.
 
+## Новое в 4.0
+
+- **Причинные движки предсказаний Аргуса (в фоне по телеметрии):**
+  - `MovementPredictionEngine` добавляет признаки `move.pred_offset`,
+    `pred.input_offset`, `pred.noslow` и `pred.kb_ignore`;
+  - `CombatPredictionEngine` добавляет `cmb.hitbox_miss`, `cmb.backtrack`,
+    `cmb.snap_back`, `cmb.angular_jerk` и `cmb.step_entropy`;
+  - число признаков в `Features.ALL` выросло с 40 до **59** (47 обученных весов
+    в `bastionac/argus-prior.json`, `lab-4.0.0`).
+- **Точное квитирование телепортов и реакция прицела:**
+  - `MovementFeatures` проверяет подтверждённый серверный телепорт (`tpSentId` и
+    квантованные 1/4096 координаты) как одноразовое исключение вместо
+    таймерного окна, обнулил ложные `move.teleport` на реальных честных сессиях
+    и обучил `move.teleport = 2.5` (`CLICK_TP`: 34/36 подозрений, 33/36
+    «виновен»);
+  - `CombatFeatures` сохраняет запас `3.5σ` для 17-лагового `cmb.track_lag` и
+    отделяет 3-лаговую мгновенную проверку (`r ∈ {-1, 0, +1}`) с порогом
+    `2.8σ` (`3·P(Z > 2.8) = 0,0077 < 0,01`), так что уверенный
+    `cmb.track_instant >= 0,15` больше не скрывается при неопределённости
+    остальных лагов (отрицательные контроли сохранены).
+- **Сходящееся обучение и модель `lab-4.0.0`:**
+  - лабораторный FISTA-решатель `EvidenceOptimiser` (проекционная невязка
+    `<= 1e-8`) обучает 3 мешка по синтетике и разделённым по игрокам реальным
+    сессиям в жёстком честном бюджете (`<= 1,2` логита на признак);
+  - отложенная проверка: **825/900 (91,7 %)** по всем 25 читам с нормами
+    (**800/900 = 88,9 %** без норм), **435/504 (86,3 %)** по 14 базовым
+    (**410/504 = 81,3 %** без норм), **0/500** честных и **0/500** стрессовых
+    ложных срабатываний, **196/196** реальных отложенных честных (макс. `0,0920`),
+    **90/90** свежих реальных честных (макс. `0,0920` в живых нормах).
+- **Укрепление рантайма:** потокобезопасные карты (`ConcurrentHashMap`) в
+  `EspShield` и `OreShield`, поддержка дальности копейного удара
+  (`player.getAttackRange()`) и очистка застрявшего пустого `use` на
+  рассинхронизирующихся предметах.
+- **Замер нагрузки (4.0.0):** на 50 ботах в ротации на 2 ядрах добавка +5,8 %
+  одного ядра (MSPT 40,1 мс против 41,6 мс на чистом, `0` алертов), при плотной
+  посадке (32 блока) — 17,6 мс против 21,6 мс / 24,5 мс у Grim
+  ([отчёт](BENCHMARK.ru.md)).
+
 ## Новое в 3.7
 
 Версии 3.6 в репозитории не было: всё, что сделано после 3.5.0-beta, вошло в 3.7.0.
@@ -470,17 +508,21 @@ flowchart LR
 | `caseRetentionDays` | 60 | сколько хранятся закрытые дела |
 | `worldSampleBlocksPerTick` | 6000 | с какой скоростью тест X-ray читает мир |
 
-Признаки (40, `Features.ALL`) по группам:
-- **Движение** — `move.air_gain`, `air_turn`, `ground_gain`, `rise`, `fall_fast`,
-  `jump_nokey`, `move_nokey`, `input_dir`, `sprint_noforward`, `teleport`.
-- **Пакеты** — `pkt.tick_rate`, `extra_moves`, `timer_episodes`, `blind_stall`,
+Признаки (59, `Features.ALL`; 47 весов в `bastionac/argus-prior.json`) по группам:
+- **Движение** (19) — `move.pred_offset`, `pred.input_offset`, `pred.noslow`,
+  `pred.kb_ignore`, `move.air_gain`, `air_turn`, `ground_gain`, `rise`,
+  `fall_fast`, `jump_nokey`, `move_nokey`, `sprint_noforward`, `input_dir`,
+  `teleport`, `air_jump`, `wall_climb`, `veh.land_speed`, `veh.rise`, `veh.hover`.
+- **Пакеты** (6) — `pkt.tick_rate`, `extra_moves`, `timer_episodes`, `blind_stall`,
   `phase_loops`, `ping_gap`.
-- **Бой** — `cmb.reach`, `reach_lc`, `reach_over`, `aim_error`, `aim_lc_error`,
+- **Бой** (26) — `cmb.hitbox_miss`, `backtrack`, `snap_back`, `angular_jerk`,
+  `step_entropy`, `reach`, `reach_lc`, `reach_over`, `aim_error`, `aim_lc_error`,
   `aim_center`, `aim_lc_center`, `track_lag`, `track_instant`, `snap`, `rot_const`,
-  `gcd_off`, `yaw_grid`, `yaw_wrap`, `click_rhythm`, `rhythm_kurt`, `blind_hit`.
-- **Клиент** — `cli.brand_spoof`, `cheat_channel`.
-- **Добыча** — `mine.reveal_z`, `diamond_reveal_z`, `discovery_rate`,
-  `diamond_discovery`, `wall_breaks`.
+  `gcd_off`, `yaw_grid`, `yaw_wrap`, `click_rhythm`, `rhythm_kurt`, `blind_hit`,
+  `enc.aim_lc_center`, `enc.aim_lc_error`, `enc.aim_center`, `enc.reach_over`.
+- **Клиент** (2) — `cli.brand_spoof`, `cheat_channel`.
+- **Добыча** (6) — `mine.reveal_z`, `diamond_reveal_z`, `discovery_rate`,
+  `diamond_discovery`, `hidden_probe`, `wall_breaks`.
 
 Шесть из них *жёсткие* — обычный клиент их не даёт вообще, поэтому они могут
 решать сами: `move.jump_nokey`, `move.teleport`, `pkt.tick_rate`, `cmb.yaw_wrap`,
@@ -488,7 +530,7 @@ flowchart LR
 
 Каждый признак сравнивается с медианой и MAD честных игроков этого сервера и с
 историей игрока, затем всё сводит логистическая модель. Её начальные веса лежат
-в `bastionac/argus-prior.json`, метки персонала их дообучают.
+в `bastionac/argus-prior.json` (`lab-4.0.0`), метки персонала их дообучают.
 
 ### Телеметрия
 
@@ -502,7 +544,7 @@ flowchart LR
 
 | Путь | Что |
 |---|---|
-| `config/bastionac/config.json` | настройки; схема версии 15, при старте мигрирует, не затирая правки админа |
+| `config/bastionac/config.json` | настройки; схема версии 18, при старте мигрирует, не затирая правки админа |
 | `config/bastionac/bans.json` · `history.json` · `networks.json` · `frozen.json` | баны и их история, история алертов и наказаний, карта связей, замороженные |
 | `config/bastionac/argus/cases.json` · `baselines.json` · `model.json` | дела Аргуса, нормы сервера, обученные веса |
 | `logs/bastionac/sessions/` | телеметрия сессий |
@@ -522,7 +564,7 @@ BastionAuth в фазе конфигурации, идёт в BrandSpoof; свя
 
 ```bash
 ./gradlew build      # JDK 21 → build/libs/bastionac-<версия>+build.<N>.jar
-./gradlew test       # 221 юнит-тест
+./gradlew test       # 351 юнит-тест (runtests.ps1 на не-ASCII путях Windows)
 ./gradlew argusLab   # стенд Argus Lab; --args="500 12 --write" переобучает модель
 ```
 

@@ -643,9 +643,29 @@ public final class Argus {
         return c.id;
     }
 
+    public static boolean isReady() {
+        return ready;
+    }
+
+    /**
+     * The owner's review of a case (08.11): it is read again over its whole span with the features
+     * as they are now — a label on numbers from a feature since fixed would teach the model the bug —
+     * and then labelled. A confirmed cheater is banned for {@code confirmedCheatBanDays}.
+     */
+    public static boolean review(String id, CaseFile.Label label, String by, String note) {
+        CaseFile c = store == null ? null : store.byId(id);
+        if (c == null || c.inFlight) return false;
+        long end = c.closedAt > 0 ? c.closedAt : System.currentTimeMillis();
+        c.windowFrom = c.openedAt - 10 * 60_000L;
+        c.windowTo = Math.max(end, c.lastSignalAt) + 60_000L;
+        c.analyses = 0;
+        return label(id, label, by, note);
+    }
+
     public static boolean label(String id, CaseFile.Label label, String by, String note) {
         CaseFile c = store == null ? null : store.byId(id);
         if (c == null) return false;
+        boolean newCheater = label == CaseFile.Label.CHEATER && c.label != CaseFile.Label.CHEATER;
         c.label = label;
         c.labelBy = by;
         c.labelAt = System.currentTimeMillis();
@@ -669,6 +689,8 @@ public final class Argus {
             if (c.analyses == 0 && !c.inFlight && srv != null) queue(srv, c, BastionAC.config().argus);
         }
         AcJournal.write("argus-label", c.name, c.uuid, "argus", 0, Lang.t("дело #") + c.id + ": " + label.label() + " (" + by + ")", null);
+        if (newCheater) BanManager.confirmedCheatBan(UUID.fromString(c.uuid), c.name, Lang.t("дело #") + c.id
+                + (c.findings.isEmpty() ? "" : " — " + c.findings.get(0)));
         store.save();
         refit();
         return true;
@@ -693,11 +715,21 @@ public final class Argus {
     }
 
     /** The staff button (ASSIST) or the AUTO verdict: "бан Аргуса". */
+    /** A fact no connection can produce carried this case: the longer ladder. */
+    private static boolean heavyEvidence(CaseFile c) {
+        if (c.features == null) return false;
+        for (CaseFile.FeatureRow row : c.features) {
+            var spec = dev.bastionac.argus.features.Features.ALL.get(row.key);
+            if (spec != null && spec.hard() && row.evidence >= 2.5) return true;
+        }
+        return false;
+    }
+
     public static boolean ban(String id, String by) {
         CaseFile c = store == null ? null : store.byId(id);
         if (c == null) return false;
         String reason = c.findings.isEmpty() ? c.verdict.label() : c.findings.get(0);
-        BanManager.argusBan(UUID.fromString(c.uuid), c.name, c.id, reason, by);
+        BanManager.argusBan(UUID.fromString(c.uuid), c.name, c.id, reason, by, heavyEvidence(c));
         c.action = CaseFile.Action.BANNED;
         c.actionBy = by;
         c.actionAt = System.currentTimeMillis();

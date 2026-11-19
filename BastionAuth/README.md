@@ -15,8 +15,9 @@ prove who is who, and until it has, the connection must not be able to do anythi
   `auth.db` is useless without that file.
 - Hashes are compared in constant time and stored in PHC format. They are re-hashed
   automatically when the parameters are raised.
-- IP addresses are never stored in plain text: only an HMAC and a mask such as
-  `1.2.*.*`.
+- **IP addresses:** HMAC-SHA256 + mask (`1.2.*.*`) are used for linking and
+  rate limits; since 1.15 full login IP history is also stored locally in `auth.db`
+  (`ip_history` / `ip_bans`) for staff dossiers and offline/online address bans.
 
 **Frozen until login**
 - **Packet firewall.** Before login, a whitelist on `ClientConnection.handlePacket`
@@ -114,6 +115,7 @@ sequenceDiagram
 | `/связи` (`/links`) — the queue of undecided links; `/связи <name>` | Account links and their verdicts |
 | `/связи доверять\|наблюдать\|мульти\|сброс <a> <b> [note]`, `/связи доверять-все <name>` | Record a verdict on a pair, or trust all of an account's links |
 | `/auth reload` | Reload the config |
+| `/банip <name> [term] [reason]`, `/разбанip <name>` (`/ipban`, `/unbanip`) | Ban/unban every known IP address of an account (online or offline) |
 | `/auth lang [ru\|en]` | Language of everything the mod says; overrides in `config/bastionauth/lang/<code>.json` |
 
 ## Technical reference
@@ -159,7 +161,8 @@ replaced with the secure defaults; the server keeps running with authentication.
   are stored as keyed hashes, each good once; a code is never accepted for a step
   at or before the last accepted one (no replay).
 - **Code word** is hashed like a password (Argon2id with the pepper).
-- **IP addresses** are stored only as an HMAC and a mask (`1.2.*.*`).
+- **IP addresses:** keyed HMACs + `1.2.*.*` masks for linking and rate limits;
+  since 1.15 full login IP history and active address bans are stored locally in `auth.db`.
 
 ### Before the password
 
@@ -185,7 +188,13 @@ replaced with the secure defaults; the server keeps running with authentication.
 | same non-default mod channel list | 20 |
 | registered within 72 h of the other account's last sighting | 20 |
 | similar name (Levenshtein ≤ 2) | 15 |
-| same typed server address | 5 |
+| same typed server address | 0 (legacy; previously 5) |
+
+In addition to composite points, since 1.15: nil/single-char launcher UUIDs and common
+profiles are ignored; same-IP accounts with similar names or registration right after
+the other account's last sighting on that IP reach `LIKELY`; a password shared only by
+two accounts reaches `POSSIBLE`; open links no longer meeting the threshold are archived
+by the daily recount (`account_links_archive`).
 
 Grades: 0–49 none, 50–79 possible, 80–99 likely, 100+ confirmed. Every pair at
 50+ goes to the permanent `account_links` ledger. Punishment stays a human
@@ -195,8 +204,23 @@ decision.
 
 SQLite (`auth.db`) in WAL mode with `synchronous=FULL`, every query parameterised.
 Tables: `users`, `sessions`, `audit_log` (kept 90 days), `device_fingerprints`,
-`device_links`, `account_links`, `agreement_acceptance`, `totp`, `op_prefs`. If
-authentication cannot start, the server does not start either.
+`device_links`, `account_links`, `account_links_archive`, `ip_history`, `ip_bans`,
+`agreement_acceptance`, `totp`, `op_prefs`. If authentication cannot start, the
+server does not start either.
+
+### What's new in 1.15.0
+
+- **Staff dossier and address bans:** full per-login address history (`ip_history`)
+  for the `/bac` panel dossier, plus offline/online address bans stored in `ip_bans`
+  (`/банip <name> [term] [reason]`, `/разбанip <name>` / `/ipban` / `/unbanip`).
+- **Link ledger accuracy & daily recount:** daily `LinkRescan` (5 min after startup,
+  then every 24h) re-scores open pairs (`NEW`/`WATCH`) and moves obsolete links into
+  `account_links_archive` while preserving `TRUSTED`/`ALT` staff verdicts; filters nil
+  and mass-shared launcher UUIDs, filters shared default profiles, drops the noisy
+  typed-address signal, and adds `ip-name`, `ip-timing`, and `rare-password` detection.
+- **Spectator restore for staff:** `SpectatorGate` restores saved spectator mode on login
+  for operators with permission level 2+ (`GAMEMASTERS`), while keeping non-staff forced
+  back to survival.
 
 ### Behind a proxy
 
@@ -221,7 +245,7 @@ warns it before moving a player out of limbo.
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionauth-<version>+build.<N>.jar
-./gradlew test    # 100 unit tests
+./gradlew test    # 112 unit tests
 ```
 
 The jar bundles BouncyCastle 1.79, sqlite-jdbc 3.47.1.0 and ZXing 3.5.3. Fabric

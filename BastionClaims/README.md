@@ -153,9 +153,9 @@ All off by default (off = protected).
 | `DispenserBlockMixin` | `DispenserBlock.dispense` | a dispenser outside acting on the cell inside |
 | `ExplosionImplMixin` | `getBlocksToDestroy`, `damageEntities` | blocks, explosion fire, damage and knockback |
 | `EntityDamageMixin` | `damage` of frames, paintings, vehicles, armour stands | entities hit by any source |
-| `FireBlockMixin` | `scheduledTick`, `trySpreadingFire` | fire inside and fire reaching in |
+| `FireBlockMixin`, `LavaFireMixin` | `scheduledTick`, `trySpreadingFire`, `LavaFluid.onRandomTick` | extinguishes blocked fire inside claims (keeps infiniburn fireplaces) and blocks lava ignition and fire reaching in |
 | `ProjectileBlockHitMixin`, `SmallFireballMixin` | `onBlockHit` | arrows, tridents and fire charges acting on blocks |
-| `LightningMixin` | `spawnFire`, `tick` | Channeling fire and struck mobs |
+| `LightningMixin` | `spawnFire`, `tick` | claim fire and Channeling lightning strikes |
 | `FallingBlockMixin` | `FallingBlockEntity.tick` | blocks that started falling outside |
 | `MobGriefMixins` | endermen, wither, ravager, dragon, `BreakDoorGoal`, `StepAndDestroyBlockGoal` | mob griefing |
 | `FarmlandMixin`, `FrostWalkerMixin` | `onLandedUpon`, the Frost Walker effect | trampling and freezing |
@@ -202,7 +202,7 @@ For operators, `/claim bypass` works the same as `/claims bypass`.
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionclaims-<version>+build.<N>.jar
-./gradlew test    # 62 unit tests
+./gradlew test    # 72 unit tests
 ```
 
 The config lives in `config/bastionclaims/config.json` (hot-reload) and the claims

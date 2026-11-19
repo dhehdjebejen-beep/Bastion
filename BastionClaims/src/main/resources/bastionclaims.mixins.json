@@ -19,6 +19,7 @@
     "FlowableFluidMixin",
     "FrostWalkerMixin",
     "HopperBlockEntityMixin",
+    "LavaFireMixin",
     "LightningMixin",
     "MobGriefMixins$BreakDoor",
     "MobGriefMixins$Dragon",

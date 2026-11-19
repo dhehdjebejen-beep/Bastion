@@ -81,6 +81,49 @@ public final class AuthLinks {
         }
     }
 
+    // 3.7.0 b21: the dossier and address bans of BastionAuth 1.15. Resolved apart from the link
+    // register: an older BastionAuth has the register but not these, and the panel keeps working.
+    private static volatile boolean dossierResolved;
+    private static volatile java.lang.reflect.Method dossier;
+    private static volatile java.lang.reflect.Method banAddresses;
+
+    private static synchronized void resolveDossier() {
+        if (dossierResolved) return;
+        dossierResolved = true;
+        try {
+            Class<?> cls = Class.forName("dev.bastionauth.BastionAuth");
+            dossier = cls.getMethod("dossier", String.class);
+            banAddresses = cls.getMethod("banAddresses", String.class, long.class, String.class, String.class);
+        } catch (Throwable t) {
+            dossier = null;
+            banAddresses = null;
+        }
+    }
+
+    /** The authentication's dossier lines for an account (legacy colour codes), or empty. */
+    @SuppressWarnings("unchecked")
+    public static java.util.List<String> dossier(String uuidOrName) {
+        resolveDossier();
+        if (dossier == null) return java.util.List.of();
+        try {
+            Object r = dossier.invoke(null, uuidOrName);
+            return r instanceof java.util.List<?> l ? (java.util.List<String>) l : java.util.List.of();
+        } catch (Throwable t) {
+            return java.util.List.of();
+        }
+    }
+
+    /** Bans every address of an account, offline too; minutes &lt; 0 = forever. Returns the report line. */
+    public static String banAddresses(String uuidOrName, long minutes, String reason, String by) {
+        resolveDossier();
+        if (banAddresses == null) return "§cАвторизация без бана по IP (нужна BastionAuth 1.15).";
+        try {
+            return String.valueOf(banAddresses.invoke(null, uuidOrName, minutes, reason, by));
+        } catch (Throwable t) {
+            return "§cОшибка: " + t;
+        }
+    }
+
     /** The registered uuid behind a name, or null when there is no such account. */
     public static String uuidOfName(String name) {
         resolve();

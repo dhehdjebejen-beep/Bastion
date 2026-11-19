@@ -51,7 +51,12 @@ public final class TelemetryReader {
 
     /** Raw (already un-gzipped) bytes — tests. */
     public static SessionData readRaw(byte[] bytes) throws IOException {
-        return new TelemetryReader(new ByteArrayInputStream(bytes), Long.MIN_VALUE, Long.MAX_VALUE).run();
+        return readRaw(bytes, Long.MIN_VALUE, Long.MAX_VALUE);
+    }
+
+    /** Raw bytes with the same window semantics as file replay (also used by synthetic tests). */
+    public static SessionData readRaw(byte[] bytes, long fromMs, long toMs) throws IOException {
+        return new TelemetryReader(new ByteArrayInputStream(bytes), fromMs, toMs).run();
     }
 
     private SessionData run() throws IOException {
@@ -71,6 +76,10 @@ public final class TelemetryReader {
                     break;
                 }
                 ts += zigzag();
+                // Decode the prefix for its clock context, but never let a
+                // record after the requested window lend time or ticks to it.
+                if (out.clockHistoryAvailable && ts >= out.startMs && ts <= toMs)
+                    out.clockToMs = Math.max(out.clockToMs, ts);
                 record(type);
                 out.records++;
             }
@@ -91,6 +100,15 @@ public final class TelemetryReader {
             out.uuid = o.has("uuid") ? o.get("uuid").getAsString() : "";
             out.name = o.has("name") ? o.get("name").getAsString() : "";
             out.startMs = o.has("start") ? o.get("start").getAsLong() : 0L;
+            if (o.has("start") && o.get("start").isJsonPrimitive()
+                    && o.getAsJsonPrimitive("start").isNumber()) {
+                // A missing, fractional or malformed origin is not a known
+                // pre-packet waiting period. Keep ordinary decoding tolerant.
+                try {
+                    Long.parseLong(o.get("start").getAsString());
+                    out.clockHistoryAvailable = true;
+                } catch (NumberFormatException ignored) { }
+            }
         } catch (RuntimeException ignored) {
             // A damaged header still leaves the records readable.
         }
@@ -147,6 +165,7 @@ public final class TelemetryReader {
             }
             case R_TICK_END -> {
                 tickIndex++;
+                if (out.clockHistoryAvailable && ts >= out.startMs && ts <= toMs) out.clockTicks++;
                 if (inWindow()) out.tickEndT.add(ts);
             }
             case R_SERVER_TICK -> {
@@ -309,11 +328,13 @@ public final class TelemetryReader {
                 }
             }
             case R_USE_ITEM -> {
-                in.readUnsignedByte();
-                varint();
-                in.readFloat();
-                in.readFloat();
-                if (inWindow()) out.useT.add(ts);
+                int hand = in.readUnsignedByte(), item = varint();
+                float yaw = in.readFloat(), pitch = in.readFloat();
+                if (ts < fromMs) { out.priorUseItem = item; out.priorUseT = ts; }
+                if (inWindow()) {
+                    out.useT.add(ts); out.useHand.add(hand); out.useItem.add(item);
+                    out.useYaw.add(yaw); out.usePitch.add(pitch);
+                }
             }
             case R_ATTACK -> {
                 SessionData.Attack a = new SessionData.Attack();

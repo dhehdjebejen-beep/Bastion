@@ -150,9 +150,9 @@ Undo возвращает **содержимое блоков**: вещи в с�
 | `DispenserBlockMixin` | `DispenserBlock.dispense` | раздатчик снаружи, действующий на клетку внутри |
 | `ExplosionImplMixin` | `getBlocksToDestroy`, `damageEntities` | блоки, огонь от взрыва, урон и отбрасывание |
 | `EntityDamageMixin` | `damage` у рамок, картин, транспорта, стоек | урон сущностям из любого источника |
-| `FireBlockMixin` | `scheduledTick`, `trySpreadingFire` | огонь внутри и огонь, дотягивающийся снаружи |
+| `FireBlockMixin`, `LavaFireMixin` | `scheduledTick`, `trySpreadingFire`, `LavaFluid.onRandomTick` | гасит запрещённый огонь внутри привата (сохраняя камины на infiniburn) и блокирует поджоги от лавы и огня снаружи |
 | `ProjectileBlockHitMixin`, `SmallFireballMixin` | `onBlockHit` | стрелы, трезубцы и огненные заряды по блокам |
-| `LightningMixin` | `spawnFire`, `tick` | огонь и удар молнии «Громовержца» |
+| `LightningMixin` | `spawnFire`, `tick` | огонь молнии и удар молнии «Громовержца» |
 | `FallingBlockMixin` | `FallingBlockEntity.tick` | блоки, начавшие падение снаружи |
 | `MobGriefMixins` | эндермены, иссушитель, разоритель, дракон, `BreakDoorGoal`, `StepAndDestroyBlockGoal` | грифинг мобами |
 | `FarmlandMixin`, `FrostWalkerMixin` | `onLandedUpon`, эффект «Ледохода» | вытаптывание и заморозка |
@@ -201,7 +201,7 @@ reason)`, `isArrested(id)`.
 
 ```bash
 ./gradlew build   # JDK 21 → build/libs/bastionclaims-<версия>+build.<N>.jar
-./gradlew test    # 62 юнит-теста
+./gradlew test    # 72 юнит-теста
 ```
 
 Конфиг — `config/bastionclaims/config.json` (перечитывается на лету), приваты —

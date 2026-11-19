@@ -256,11 +256,15 @@ public final class ClaimManager {
         try {
             // Queue the final snapshot behind earlier saves. Writing it directly
             // could race an older queued write and restore stale claim data.
-            IO.submit(() -> writeAtomically(json, target)).get(5, TimeUnit.SECONDS);
+            IO.submit(() -> writeAtomically(json, target)).get(30, TimeUnit.SECONDS);
         } catch (Exception e) {
-            // A stuck disk must never hold shutdown hostage, but the operator
-            // needs a visible indication that the final state may be unsaved.
-            BastionClaims.LOGGER.error("Timed out or failed while flushing claims.json at shutdown", e);
+            // The writer thread is a daemon: if the JVM exits before it reaches the final
+            // snapshot, the newest claims are lost. Write that snapshot here as well (13.11,
+            // a slow disk under load took longer than the old 5 s). The queued copy is the
+            // same data and is last in the queue, so nothing older can land after it.
+            BastionClaims.LOGGER.error("Timed out or failed while flushing claims.json at shutdown; "
+                    + "writing it on the shutdown thread", e);
+            writeAtomically(json, target);
         }
     }
 

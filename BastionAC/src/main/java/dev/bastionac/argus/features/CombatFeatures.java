@@ -13,9 +13,8 @@ import static dev.bastionac.telemetry.TelemetryFormat.MV_POS;
  * misses the centre of a hitbox by a few degrees and its clicks have a
  * heavy tail. An aim module is smooth, exact, centred and evenly random.
  *
- * <p>Rotations are the raw floats the client sent. A vanilla client never
- * wraps its yaw (it accumulates past ±180), so a single step of more than
- * 300° is a rotation the client did not make with the mouse.
+ * <p>Rotations are raw floats. Accumulated headings can be normalized by
+ * the client or protocol; only outward discontinuities retain wrap evidence.
  */
 public final class CombatFeatures {
 
@@ -43,7 +42,9 @@ public final class CombatFeatures {
             // hit by a ping allowance (the realtime check does the lag
             // compensation with the hitbox history).
             if (a.has(dev.bastionac.telemetry.SessionWriter.Attack.F_PLAYER) && a.ping <= REACH_MAX_PING) {
-                out.sample("cmb.reach", a.distance);
+                double opened = opened(s, a);
+                double range=CombatPredictionEngine.range(s,a.t);
+                out.sample("cmb.reach", (Double.isNaN(opened) ? a.distance : a.distance - Math.max(0, opened))-(range-3));
             }
             if (flickBefore(s, a.t) > 25.0) snaps++;
         }
@@ -55,15 +56,31 @@ public final class CombatFeatures {
         // streak) and inside the rhythm itself. A pause of 0.8 s between two
         // flurries used to land in the sample too, and one such pause in thirty
         // clicks drowned the evenness of an autoclicker completely (3.3).
+        Prim.Longs attackTimes = new Prim.Longs();
+        for (var a : s.attacks) attackTimes.add(a.t);
+        Prim.Longs clicks = new Prim.Longs();
+        for (int i = 0; i < s.swingT.n; i++) if (PacketFeatures.anyIn(attackTimes,s.swingT.a[i]-1000,s.swingT.a[i]+1000))
+            clicks.add(s.swingT.a[i]);
+        // Existing swing packets preserve attempted clicks when the crosshair
+        // misses a target. Sparse old recordings fall back to landed attacks.
+        if (clicks.n < 30) clicks = attackTimes;
         Prim.Doubles gaps = new Prim.Doubles();
-        for (int i = 1; i < s.attacks.size(); i++) {
-            long dt = s.attacks.get(i).t - s.attacks.get(i - 1).t;
+        for (int i = 1; i < clicks.n; i++) {
+            long dt = clicks.a[i] - clicks.a[i - 1];
             if (dt > 0 && dt < 1000) gaps.add(dt);
         }
         if (gaps.n >= 4) {
             double cut = RHYTHM_CUT * Stats.median(gaps.toArray());
+            long quantized=0,covered=0;
+            for (int i=0;i<gaps.n;i++) if(gaps.a[i]<=cut) {
+                covered++;
+                if(Math.abs(gaps.a[i]/50-Math.rint(gaps.a[i]/50))<.04)quantized++;
+            }
+            // A rhythm resolved only to movement ticks cannot establish mouse
+            // regularity: fast honest clicks can be drained by the same tick.
+            boolean tickQuantized=covered>0&&quantized>=covered*.98;
             for (int i = 0; i < gaps.n; i++) {
-                if (gaps.a[i] > cut) continue;
+                if (gaps.a[i] > cut || tickQuantized) continue;
                 out.sample("cmb.click_rhythm", gaps.a[i]);
                 out.sample("cmb.rhythm_kurt", gaps.a[i]);
             }
@@ -72,6 +89,7 @@ public final class CombatFeatures {
         lagCompensatedAim(s, out);
         trackLag(s, out);
         encounters(s, out);
+        CombatPredictionEngine.analyze(s, out);
     }
 
     /** Hits on one target with no pause longer than this are one encounter. */
@@ -119,7 +137,7 @@ public final class CombatFeatures {
                 double opened = opened(s, a);
                 if (!Double.isNaN(opened)) {
                     reachJudged++;
-                    if (a.distance > REACH_LINE + Math.max(0, opened) + Math.max(0, a.ping) * 0.0005) over++;
+                    if (a.distance > REACH_LINE + (CombatPredictionEngine.range(s,a.t)-3) + Math.max(0, opened) + Math.max(0, a.ping) * 0.0005) over++;
                 }
             }
         }
@@ -166,6 +184,10 @@ public final class CombatFeatures {
 
     /** The smallest aim error against where the player could have seen the target, or NaN without a track. */
     static double lagCompensatedError(SessionData s, SessionData.Attack a) {
+        // Holding a mouse on an immobile target is ordinary play. A track must
+        // contain actual target motion before centering is evidence of tracking.
+        // Reconstruct world X/Z: target deltas themselves include the player's movement.
+        if (!movingTarget(s,a)) return Double.NaN;
         int now = lastPos(s, a.t);
         if (now < 0) return Double.NaN;
         // The eyes' offset from the reported position (standing or sneaking).
@@ -200,6 +222,20 @@ public final class CombatFeatures {
             }
         }
         return best;
+    }
+
+    static boolean movingTarget(SessionData s, SessionData.Attack a) {
+        double firstX=Double.NaN,firstZ=0;
+        for(int i=MovementFeatures.lowerBound(s.targetT.a,s.targetT.n,a.t-500);
+            i<s.targetT.n&&s.targetT.a[i]<=a.t;i++) {
+            if(s.targetId.a[i]!=a.targetId)continue;
+            int then=lastPos(s,s.targetT.a[i]);
+            if(then<0)continue;
+            double x=s.moveX.a[then]+s.targetDX.a[i],z=s.moveZ.a[then]+s.targetDZ.a[i];
+            if(Double.isNaN(firstX)) {firstX=x;firstZ=z;}
+            else if(Math.hypot(x-firstX,z-firstZ)>.15)return true;
+        }
+        return false;
     }
 
     /** Give or take this much around "a round trip plus the interpolation ago". */
@@ -274,11 +310,15 @@ public final class CombatFeatures {
     static final int POOL = 6;
     /** Lags looked at, counted from the first moment the player could have seen the target's move. */
     static final int REL_MIN = -2, REL_MAX = 14;
+    static final double LAG_CORRELATION_SIGMA = 3.5;
+    static final double INSTANT_CORRELATION_SIGMA = 2.8;
+    static final double MIN_TRACK_CORRELATION = 0.15;
 
     /** Correlation sums of the target's and the player's turning changes, per lag, over several windows. */
     static final class Profile {
         final double[] sxy = new double[REL_MAX - REL_MIN + 1];
         final double[] sxx = new double[sxy.length], syy = new double[sxy.length];
+        final double[] information = new double[sxy.length];
         int windows;
         double offset;
 
@@ -296,12 +336,27 @@ public final class CombatFeatures {
                 ma /= n;
                 mb /= n;
                 int j = r - REL_MIN;
+                double xx=0, yy=0;
                 for (int k = 0; k < n; k++) {
                     double x = at[k] - ma, y = aw[k + lag] - mb;
                     sxy[j] += x * y;
                     sxx[j] += x * x;
                     syy[j] += y * y;
+                    xx+=x*x;yy+=y*y;
                 }
+                // Differencing reuses source ticks. Bartlett's variance estimate
+                // discounts the two overlapping differences before pooling
+                // independent encounter windows as Fisher information.
+                double variance=1;
+                if(xx>1e-12&&yy>1e-12)for(int distance=1;distance<=2;distance++) {
+                    double ax=0,ay=0;
+                    for(int k=0;k<n-distance;k++) {
+                        ax+=(at[k]-ma)*(at[k+distance]-ma);
+                        ay+=(aw[k+lag]-mb)*(aw[k+lag+distance]-mb);
+                    }
+                    variance+=2*(ax/xx)*(ay/yy);
+                }
+                information[j]+=Math.max(0,n/Math.max(1,variance)-3);
             }
             offset += l0 - expect;
             windows++;
@@ -310,6 +365,7 @@ public final class CombatFeatures {
         void emit(FeatureSet out) {
             int best = -1;
             double bestCorr = -1, instant = 0;
+            boolean instantAvailable = false;
             for (int j = 0; j < sxy.length; j++) {
                 if (sxx[j] <= 1e-12 || syy[j] <= 1e-12) continue;
                 double c = sxy[j] / Math.sqrt(sxx[j] * syy[j]);
@@ -318,18 +374,44 @@ public final class CombatFeatures {
                     best = j;
                 }
                 int r = j + REL_MIN;
-                if (r >= -1 && r <= 1) instant = Math.max(instant, c);
+                if (r >= -1 && r <= 1 && information[j] > 0) {
+                    instantAvailable = true;
+                    instant = Math.max(instant, correlationLower(c, information[j], INSTANT_CORRELATION_SIGMA));
+                }
             }
-            if (best >= 0 && bestCorr >= 0.15) {
+            // Searching seventeen delays selects noise peaks too. A 3.5-sigma
+            // Fisher margin controls that search at approximately 99% family
+            // confidence; a weak peak cannot establish a reaction-time sample.
+            boolean lagSupported = best >= 0
+                    && correlationLower(bestCorr, information[best], LAG_CORRELATION_SIGMA) >= MIN_TRACK_CORRELATION;
+            if (lagSupported) {
                 out.sample("cmb.track_lag", best + REL_MIN + offset / windows);
-                out.sample("cmb.track_instant", instant);
             }
+            // The instantaneous answer searches only three delays. Its one-sided
+            // 2.8-sigma Fisher margin has a Bonferroni family error below 1%:
+            // 3 * P(Z > 2.8) = 0.007665. Its positive measurement needs only its
+            // own supported lower bound, regardless of the reaction-time search.
+            // Keep measured lower bounds at or below 0.15 as population controls
+            // when the stricter lag search establishes actual tracking. These
+            // controls cannot yield positive evidence: their references are
+            // nonnegative and the instantaneous scale is at least 0.05. Including
+            // unrelated uncertain windows would instead change the profile median.
+            if (instantAvailable && (instant >= MIN_TRACK_CORRELATION || lagSupported))
+                out.sample("cmb.track_instant", instant);
             java.util.Arrays.fill(sxy, 0);
             java.util.Arrays.fill(sxx, 0);
             java.util.Arrays.fill(syy, 0);
+            java.util.Arrays.fill(information, 0);
             windows = 0;
             offset = 0;
         }
+    }
+
+    static double correlationLower(double correlation, double information, double sigma) {
+        if(information<=0||correlation<=0)return 0;
+        double bounded=Math.min(1-1e-12,correlation);
+        double fisher=.5*Math.log((1+bounded)/(1-bounded));
+        return Math.max(0,Math.tanh(fisher-sigma/Math.sqrt(information)));
     }
 
     /** The last move with a position at or before {@code t}, or −1. */
@@ -398,10 +480,12 @@ public final class CombatFeatures {
             // fight that lasts, every later hit has its track.
             if (Double.isNaN(opened)) continue;
             judged++;
-            if (a.distance > REACH_LINE + Math.max(0, opened) + Math.max(0, a.ping) * 0.0005) over++;
+            if (a.distance > REACH_LINE + (CombatPredictionEngine.range(s,a.t)-3) + Math.max(0, opened) + Math.max(0, a.ping) * 0.0005) over++;
             // The distance the swing was made at, as well as the server can
             // tell: now, less what the target backed off since it was seen.
-            out.sample("cmb.reach_lc", a.distance - Math.max(0, opened));
+            var ray=CombatPredictionEngine.predict(s,a);
+            double reconstructed=ray.history()&&Double.isFinite(ray.distance())?ray.distance():a.distance-Math.max(0,opened);
+            out.sample("cmb.reach_lc", reconstructed-(ray.range()-3));
         }
         out.rate("cmb.reach_over", over, judged);
     }
@@ -427,11 +511,23 @@ public final class CombatFeatures {
         }
         if (last < 0) return Double.NaN;
         long seen = a.t - Math.max(0, a.ping) - (long) INTERP_MS;
+        // Where the target was then, from where the attacker is now. Each track sample is relative to
+        // where the attacker stood at its own time; read against the attacker's later position, a
+        // player sprinting at its target was credited none of the ground it covered (05.11: from both
+        // players' own positions the "past reach" hits of a fight were 2,0-3,5 blocks).
+        int now = MovementFeatures.lowerBound(s.moveT.a, s.moveT.n, a.t + 1) - 1;
         double nearest = Double.NaN;
         for (int i = MovementFeatures.lowerBound(s.targetT.a, s.targetT.n, seen - LC_SLACK_MS);
              i < s.targetT.n && s.targetT.a[i] <= seen + LC_SLACK_MS; i++) {
             if (s.targetId.a[i] != a.targetId) continue;
             double r = len(s, i);
+            int then = MovementFeatures.lowerBound(s.moveT.a, s.moveT.n, s.targetT.a[i] + 1) - 1;
+            if (now >= 0 && then >= 0) {
+                double x = s.targetDX.a[i] + s.moveX.a[then] - s.moveX.a[now];
+                double y = s.targetDY.a[i] + s.moveY.a[then] - s.moveY.a[now];
+                double z = s.targetDZ.a[i] + s.moveZ.a[then] - s.moveZ.a[now];
+                r = Math.sqrt(x * x + y * y + z * z);
+            }
             nearest = Double.isNaN(nearest) ? r : Math.min(nearest, r);
         }
         return Double.isNaN(nearest) ? Double.NaN : len(s, last) - nearest;
@@ -479,14 +575,18 @@ public final class CombatFeatures {
         long pairs = 0, equal = 0, wraps = 0, looks = 0, grid = 0;
         Prim.Doubles combatSteps = new Prim.Doubles();
         Prim.Doubles combatNoise = new Prim.Doubles();
+        int mount = 0;
+        long mountTime = Long.MIN_VALUE;
         for (int i = 0; i < s.moveT.n; i++) {
             if ((s.moveFlags.a[i] & MV_LOOK) == 0) continue;
             float y = s.moveYaw.a[i], p = s.movePitch.a[i];
             long t = s.moveT.a[i];
+            while (mount < s.vehicleT.n && s.vehicleT.a[mount] <= t) mountTime = s.vehicleT.a[mount++];
             boolean nearTp = PacketFeatures.anyIn(tpTimes, t - 1500, t + 200);
-            if (!Float.isNaN(prevYaw) && !nearTp) {
+            boolean mountTransition = mountTime != Long.MIN_VALUE && t - mountTime <= 200;
+            if (!Float.isNaN(prevYaw) && !nearTp && !mountTransition) {
                 double dy = y - prevYaw, dp = p - prevPitch;
-                if (Math.abs(dy) > 300) wraps++;
+                if (isYawWrap(prevYaw, y, prevDy, dy)) wraps++;
                 if (Math.abs(dy) > 1e-4 || Math.abs(dp) > 1e-4) {
                     looks++;
                     double q = y / 45.0;
@@ -549,6 +649,19 @@ public final class CombatFeatures {
         for (int i = 0; i < s.corrT.n; i++) q.add(s.corrT.a[i]);
         java.util.Arrays.sort(q.a, 0, q.n);
         return q;
+    }
+
+    static boolean isYawWrap(float prevYaw, float y, double prevDy, double dy) {
+        if (Math.abs(dy) <= 300) return false;
+        // A return into the canonical representation preserves the physical
+        // heading modulo 360, including crossing its inclusive endpoints.
+        if (Math.abs(y) <= 180) return false;
+        // An outward accumulated turn at high sensitivity need not wrap yaw.
+        if (Math.abs(dy)<=720 && !Double.isNaN(prevDy) && dy * prevDy > 0
+                && Math.abs(prevDy) > 90 && Math.abs(prevDy)<=720 && Math.abs(y) > Math.abs(prevYaw)) {
+            return false;
+        }
+        return true;
     }
 
     static double wrap(double deg) {

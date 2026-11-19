@@ -116,7 +116,7 @@ final class ACLinkMenu {
         };
     }
 
-    private static String grade(String g) {
+    static String grade(String g) {
         return switch (g == null ? "" : g) {
             case "CONFIRMED" -> Lang.t("&aподтверждено");
             case "LIKELY" -> Lang.t("&eвероятно");
@@ -125,7 +125,7 @@ final class ACLinkMenu {
         };
     }
 
-    private static String signalsLine(String signals) {
+    static String signalsLine(String signals) {
         if (signals == null || signals.isBlank()) return Lang.t("&7Сигналы: &8не записаны");
         StringBuilder line = new StringBuilder(Lang.t("&7Сигналы: &f"));
         String[] parts = signals.split("\\+");
@@ -146,10 +146,10 @@ final class ACLinkMenu {
 
         gui.button(11, GuiItems.head(l.nameA(), "&f" + l.nameA(),
                 "&8" + l.uuidA(),
-                Lang.t("&8➜ клик — карточка игрока (если онлайн)")), () -> ACPlayerMenu.openByName(admin, l.nameA()));
+                Lang.t("&8➜ клик — досье игрока")), () -> ACDossierMenu.openByName(admin, l.nameA()));
         gui.button(15, GuiItems.head(l.nameB(), "&f" + l.nameB(),
                 "&8" + l.uuidB(),
-                Lang.t("&8➜ клик — карточка игрока (если онлайн)")), () -> ACPlayerMenu.openByName(admin, l.nameB()));
+                Lang.t("&8➜ клик — досье игрока")), () -> ACDossierMenu.openByName(admin, l.nameB()));
 
         List<String> evidence = new ArrayList<>();
         if (l.manual()) {
